@@ -1,0 +1,24 @@
+{
+	"name": "calculator",
+	"description": "Evaluate mathematical expressions",
+	"level": "tool",
+	"provider": "extism",
+	"wasm_path": "calculator.wasm",
+	"dangerous": false,
+	"capabilities": {
+		// No capabilities needed — pure computation
+	},
+	"tools": [
+		{
+			"name": "calculator",
+			"description": "Evaluate a mathematical expression. Supports +, -, *, /, parentheses, and basic math. Input the expression as a string.",
+			"parameters": {
+				"expression": {
+					"type": "string",
+					"description": "The mathematical expression to evaluate (e.g. '2 + 2', '(3 * 4) / 2')",
+					"required": true
+				}
+			}
+		}
+	]
+}

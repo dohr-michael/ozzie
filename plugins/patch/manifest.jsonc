@@ -1,0 +1,34 @@
+{
+	"name": "patch",
+	"description": "Apply unified diff patches to files",
+	"level": "tool",
+	"provider": "extism",
+	"wasm_path": "patch.wasm",
+	"dangerous": true,
+	"capabilities": {
+		"filesystem": {
+			"allowed_paths": {
+				".": "/"
+			},
+			"read_only": false
+		},
+		"log": true
+	},
+	"tools": [
+		{
+			"name": "patch",
+			"description": "Apply a unified diff patch to files. The patch should be in unified diff format (like output of 'diff -u' or 'git diff').",
+			"parameters": {
+				"patch": {
+					"type": "string",
+					"description": "The unified diff patch content",
+					"required": true
+				},
+				"base_dir": {
+					"type": "string",
+					"description": "Base directory for applying the patch (default: current directory)"
+				}
+			}
+		}
+	]
+}

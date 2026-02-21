@@ -1,0 +1,111 @@
+package gateway
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/gateway/ws"
+)
+
+// Server is the Ozzie gateway HTTP server.
+type Server struct {
+	httpServer *http.Server
+	hub        *ws.Hub
+	bus        *events.Bus
+	host       string
+	port       int
+}
+
+// NewServer creates a new gateway server.
+func NewServer(bus *events.Bus, host string, port int) *Server {
+	hub := ws.NewHub(bus)
+
+	r := chi.NewRouter()
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.RealIP)
+
+	s := &Server{
+		hub:  hub,
+		bus:  bus,
+		host: host,
+		port: port,
+	}
+
+	// Routes
+	r.Get("/api/health", s.handleHealth)
+	r.Get("/api/ws", hub.ServeWS)
+	r.Get("/api/events", s.handleEvents)
+
+	s.httpServer = &http.Server{
+		Addr:    fmt.Sprintf("%s:%d", host, port),
+		Handler: r,
+	}
+
+	return s
+}
+
+// Start begins listening. It blocks until the server is stopped.
+func (s *Server) Start() error {
+	ln, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	slog.Info("Ozzie gateway listening", "addr", ln.Addr().String())
+	return s.httpServer.Serve(ln)
+}
+
+// Shutdown gracefully stops the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.hub.Close()
+	return s.httpServer.Shutdown(ctx)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	limitStr := r.URL.Query().Get("limit")
+	limit := 50
+	if limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &limit)
+	}
+
+	history := s.bus.History(limit)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Format timestamps nicely
+	type eventJSON struct {
+		ID        string         `json:"id"`
+		SessionID string         `json:"session_id,omitempty"`
+		Type      string         `json:"type"`
+		Timestamp string         `json:"timestamp"`
+		Source    string         `json:"source"`
+		Payload   map[string]any `json:"payload"`
+	}
+
+	result := make([]eventJSON, len(history))
+	for i, e := range history {
+		result[i] = eventJSON{
+			ID:        e.ID,
+			SessionID: e.SessionID,
+			Type:      string(e.Type),
+			Timestamp: e.Timestamp.Format(time.RFC3339Nano),
+			Source:    e.Source,
+			Payload:   e.Payload,
+		}
+	}
+
+	json.NewEncoder(w).Encode(result)
+}

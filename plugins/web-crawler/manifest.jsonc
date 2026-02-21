@@ -1,0 +1,26 @@
+{
+	"name": "web_crawler",
+	"description": "Fetch and extract text content from web pages",
+	"level": "tool",
+	"provider": "extism",
+	"wasm_path": "web-crawler.wasm",
+	"dangerous": false,
+	"capabilities": {
+		"http": {
+			"allowed_hosts": ["*"]
+		}
+	},
+	"tools": [
+		{
+			"name": "web_crawler",
+			"description": "Fetch a web page and extract its text content. Returns the page text stripped of HTML tags.",
+			"parameters": {
+				"url": {
+					"type": "string",
+					"description": "The URL of the web page to fetch",
+					"required": true
+				}
+			}
+		}
+	]
+}

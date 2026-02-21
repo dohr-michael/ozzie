@@ -1,0 +1,24 @@
+{
+	// Dev config — points to local plugins directory for MCP testing
+	"gateway": {
+		"host": "127.0.0.1",
+		"port": 18420
+	},
+	"models": {
+		"default": "claude",
+		"providers": {
+			"claude": {
+				"driver": "anthropic",
+				"model": "claude-sonnet-4-20250514",
+				"auth": { "env_var": "ANTHROPIC_API_KEY" },
+				"max_tokens": 4096
+			}
+		}
+	},
+	"events": { "buffer_size": 1024 },
+	"agent": { "system_prompt": "" },
+	"plugins": {
+		"dir": "./build/plugins",
+		"enabled": []
+	}
+}

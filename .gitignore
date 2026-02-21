@@ -1,0 +1,24 @@
+# Build
+build/
+bin/
+dev_home/
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+vendor/
+
+# Debug
+__debug_bin*
