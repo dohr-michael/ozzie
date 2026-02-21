@@ -213,4 +213,5 @@ This sets up the MCP server, scaffolds the plugin structure, and iterates on the
 
 ## License
 
-TBD
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
