@@ -3,10 +3,15 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+
+	"github.com/dohr-michael/ozzie/internal/config"
 )
 
 // DefaultSystemPrompt is the Ozzie persona — inspired by Ozzie Isaacs from
@@ -32,17 +37,33 @@ Style:
 - You occasionally drop cultural references (sci-fi, music, tech history) when they fit naturally
 - When the user is stuck, you don't just give answers — you help them see the path`
 
+// LoadPersona reads SOUL.md from OZZIE_PATH if it exists,
+// otherwise returns DefaultSystemPrompt.
+func LoadPersona() string {
+	path := filepath.Join(config.OzziePath(), "SOUL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return DefaultSystemPrompt
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return DefaultSystemPrompt
+	}
+	return content
+}
+
 // NewAgent creates a ChatModelAgent with optional tools.
-// When tools are provided, the ADK uses a ReAct loop for tool calling.
-func NewAgent(ctx context.Context, chatModel model.ToolCallingChatModel, systemPrompt string, tools []tool.InvokableTool) (*adk.Runner, error) {
-	if systemPrompt == "" {
-		systemPrompt = DefaultSystemPrompt
+// The persona parameter sets the ADK Instruction (layer 1).
+// If persona is empty, DefaultSystemPrompt is used as fallback.
+func NewAgent(ctx context.Context, chatModel model.ToolCallingChatModel, persona string, tools []tool.InvokableTool) (*adk.Runner, error) {
+	if persona == "" {
+		persona = DefaultSystemPrompt
 	}
 
 	cfg := &adk.ChatModelAgentConfig{
 		Name:        "ozzie",
 		Description: "Ozzie — personal AI assistant with the soul of an inventor and explorer",
-		Instruction: systemPrompt,
+		Instruction: persona,
 		Model:       chatModel,
 	}
 

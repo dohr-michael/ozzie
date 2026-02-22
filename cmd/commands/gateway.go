@@ -93,8 +93,9 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	allTools := toolRegistry.Tools()
 	slog.Info("tools loaded", "count", len(allTools))
 
-	// Agent — empty system_prompt falls back to DefaultSystemPrompt (Ozzie persona)
-	runner, err := agent.NewAgent(ctx, chatModel, cfg.Agent.SystemPrompt, allTools)
+	// Agent — persona from SOUL.md or DefaultSystemPrompt fallback (layer 1)
+	persona := agent.LoadPersona()
+	runner, err := agent.NewAgent(ctx, chatModel, persona, allTools)
 	if err != nil {
 		return fmt.Errorf("init agent: %w", err)
 	}
@@ -103,11 +104,22 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
 	sessionStore := sessions.NewFileStore(sessionsDir)
 
+	// Build tool descriptions for prompt composer (layer 3)
+	toolDescs := make(map[string]string, len(toolRegistry.ToolNames()))
+	for _, name := range toolRegistry.ToolNames() {
+		if spec := toolRegistry.ToolSpec(name); spec != nil {
+			toolDescs[name] = spec.Description
+		}
+	}
+
 	// Event runner
 	eventRunner := agent.NewEventRunner(agent.EventRunnerConfig{
-		Runner:   runner,
-		EventBus: bus,
-		Store:    sessionStore,
+		Runner:             runner,
+		EventBus:           bus,
+		Store:              sessionStore,
+		CustomInstructions: cfg.Agent.SystemPrompt,
+		ToolNames:          toolRegistry.ToolNames(),
+		ToolDescriptions:   toolDescs,
 	})
 	defer eventRunner.Close()
 

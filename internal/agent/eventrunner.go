@@ -21,6 +21,11 @@ type EventRunner struct {
 	bus    *events.Bus
 	store  sessions.Store
 
+	composer           *PromptComposer
+	customInstructions string
+	toolNames          []string
+	toolDescriptions   map[string]string
+
 	mu           sync.Mutex
 	running      map[string]bool // per-session lock
 	streamSeqIdx int32
@@ -32,9 +37,12 @@ type EventRunner struct {
 
 // EventRunnerConfig contains configuration for the EventRunner.
 type EventRunnerConfig struct {
-	Runner   *adk.Runner
-	EventBus *events.Bus
-	Store    sessions.Store
+	Runner             *adk.Runner
+	EventBus           *events.Bus
+	Store              sessions.Store
+	CustomInstructions string            // Layer 2: from config.Agent.SystemPrompt
+	ToolNames          []string          // Layer 3: active tool names
+	ToolDescriptions   map[string]string // Layer 3: tool name → description
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -42,12 +50,16 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	er := &EventRunner{
-		runner:  cfg.Runner,
-		bus:     cfg.EventBus,
-		store:   cfg.Store,
-		running: make(map[string]bool),
-		ctx:     ctx,
-		cancel:  cancel,
+		runner:             cfg.Runner,
+		bus:                cfg.EventBus,
+		store:              cfg.Store,
+		composer:           NewPromptComposer(),
+		customInstructions: cfg.CustomInstructions,
+		toolNames:          cfg.ToolNames,
+		toolDescriptions:   cfg.ToolDescriptions,
+		running:            make(map[string]bool),
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
@@ -101,8 +113,32 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		messages[i] = m.ToSchemaMessage()
 	}
 
+	messages = er.prependDynamicContext(sessionID, messages, len(history))
+
 	er.emitStreamStart(sessionID)
 	er.runAgent(sessionID, messages)
+}
+
+func (er *EventRunner) prependDynamicContext(sessionID string, messages []*schema.Message, msgCount int) []*schema.Message {
+	pctx := PromptContext{
+		CustomInstructions: er.customInstructions,
+		ToolNames:          er.toolNames,
+		ToolDescriptions:   er.toolDescriptions,
+		MessageCount:       msgCount,
+	}
+
+	// Load session metadata (ignore errors — session may not exist yet)
+	if sess, err := er.store.Get(sessionID); err == nil {
+		pctx.Session = sess
+	}
+
+	dynamic := er.composer.Compose(pctx)
+	if dynamic == "" {
+		return messages
+	}
+
+	systemMsg := &schema.Message{Role: schema.System, Content: dynamic}
+	return append([]*schema.Message{systemMsg}, messages...)
 }
 
 func (er *EventRunner) runAgent(sessionID string, messages []*schema.Message) {

@@ -116,9 +116,9 @@ func (m *AnthropicChatModel) buildParams(messages []*schema.Message, opts []mode
 	for _, msg := range messages {
 		switch msg.Role {
 		case schema.System:
-			params.System = []anthropic.TextBlockParam{
-				{Text: msg.Content},
-			}
+			params.System = append(params.System, anthropic.TextBlockParam{
+				Text: msg.Content,
+			})
 		default:
 			anthropicMsgs = append(anthropicMsgs, m.convertMessage(msg))
 		}
