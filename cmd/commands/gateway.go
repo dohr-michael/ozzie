@@ -18,6 +18,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/storage"
 )
 
 // NewGatewayCommand returns the gateway subcommand.
@@ -70,6 +71,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Event bus
 	bus := events.NewBus(cfg.Events.BufferSize)
 	defer bus.Close()
+
+	// Event persistence
+	logsDir := filepath.Join(config.OzziePath(), "logs")
+	eventLogger := storage.NewEventLogger(logsDir, bus)
+	defer eventLogger.Close()
 
 	// Model registry
 	registry := models.NewRegistry(cfg.Models)
