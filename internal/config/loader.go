@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	"github.com/marcozac/go-jsonc"
@@ -52,6 +53,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Events.BufferSize == 0 {
 		cfg.Events.BufferSize = 1024
+	}
+	if len(cfg.Skills.Dirs) == 0 {
+		cfg.Skills.Dirs = []string{filepath.Join(OzziePath(), "skills")}
 	}
 	// Auth resolution is deferred to models.ResolveAuth() at model init time.
 }

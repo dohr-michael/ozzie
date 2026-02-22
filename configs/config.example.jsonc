@@ -50,5 +50,13 @@
 		"dir": "",
 		// List of enabled plugin names. Empty = all plugins in dir are loaded.
 		"enabled": []
+	},
+
+	"skills": {
+		// Directories containing skill JSONC definitions.
+		// Default: [~/.ozzie/skills]
+		"dirs": [],
+		// List of enabled skill names. Empty = all skills are loaded.
+		"enabled": []
 	}
 }

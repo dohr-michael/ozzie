@@ -95,12 +95,39 @@ func TestCompose_SessionContextNewSession(t *testing.T) {
 	}
 }
 
+func TestCompose_SkillDescriptions(t *testing.T) {
+	pc := NewPromptComposer()
+	result := pc.Compose(PromptContext{
+		SkillDescriptions: map[string]string{
+			"researcher":  "Deep web research and synthesis",
+			"code-review": "Automated code review",
+		},
+	})
+
+	if !strings.Contains(result, "## Available Skills") {
+		t.Errorf("expected skills section header, got %q", result)
+	}
+	if !strings.Contains(result, "**code-review**: Automated code review") {
+		t.Errorf("expected code-review skill, got %q", result)
+	}
+	if !strings.Contains(result, "**researcher**: Deep web research") {
+		t.Errorf("expected researcher skill, got %q", result)
+	}
+	// Verify sorted order: code-review before researcher
+	crIdx := strings.Index(result, "**code-review**")
+	rIdx := strings.Index(result, "**researcher**")
+	if crIdx > rIdx {
+		t.Errorf("expected skills sorted alphabetically, code-review at %d, researcher at %d", crIdx, rIdx)
+	}
+}
+
 func TestCompose_AllLayers(t *testing.T) {
 	pc := NewPromptComposer()
 	result := pc.Compose(PromptContext{
 		CustomInstructions: "Be concise.",
 		ToolNames:          []string{"cmd"},
 		ToolDescriptions:   map[string]string{"cmd": "Run a command"},
+		SkillDescriptions:  map[string]string{"summarizer": "Summarize text"},
 		Session:            &sessions.Session{Title: "My session"},
 		MessageCount:       10,
 		TaskInstructions:   "Step 3: validate output",
@@ -110,6 +137,7 @@ func TestCompose_AllLayers(t *testing.T) {
 	for _, section := range []string{
 		"## Additional Instructions",
 		"## Available Tools",
+		"## Available Skills",
 		"## Session Context",
 		"## Current Task",
 	} {
@@ -121,11 +149,12 @@ func TestCompose_AllLayers(t *testing.T) {
 	// Correct order
 	instrIdx := strings.Index(result, "## Additional Instructions")
 	toolsIdx := strings.Index(result, "## Available Tools")
+	skillsIdx := strings.Index(result, "## Available Skills")
 	sessIdx := strings.Index(result, "## Session Context")
 	taskIdx := strings.Index(result, "## Current Task")
 
-	if instrIdx > toolsIdx || toolsIdx > sessIdx || sessIdx > taskIdx {
-		t.Errorf("sections not in expected order: instructions=%d, tools=%d, session=%d, task=%d",
-			instrIdx, toolsIdx, sessIdx, taskIdx)
+	if instrIdx > toolsIdx || toolsIdx > skillsIdx || skillsIdx > sessIdx || sessIdx > taskIdx {
+		t.Errorf("sections not in expected order: instructions=%d, tools=%d, skills=%d, session=%d, task=%d",
+			instrIdx, toolsIdx, skillsIdx, sessIdx, taskIdx)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/skills"
 	"github.com/dohr-michael/ozzie/internal/storage"
 )
 
@@ -96,6 +97,30 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Wrap dangerous tools with confirmation for interactive gateway
 	plugins.WrapRegistryDangerous(toolRegistry, bus)
 
+	// Skill registry — load declarative skills and register as tools
+	skillRegistry := skills.NewRegistry()
+	for _, dir := range cfg.Skills.Dirs {
+		if err := skillRegistry.LoadDir(dir); err != nil {
+			slog.Warn("failed to load skills", "dir", dir, "error", err)
+		}
+	}
+
+	skillRunCfg := skills.RunnerConfig{
+		ModelRegistry: registry,
+		ToolRegistry:  toolRegistry,
+		EventBus:      bus,
+	}
+	skillDescs := make(map[string]string)
+	for _, sk := range skillRegistry.All() {
+		skillTool := skills.NewSkillTool(sk, skillRunCfg)
+		manifest := skills.SkillToManifest(sk)
+		if err := toolRegistry.RegisterNative(sk.Name, skillTool, manifest); err != nil {
+			slog.Warn("register skill", "name", sk.Name, "error", err)
+		}
+		skillDescs[sk.Name] = sk.Description
+	}
+	slog.Info("skills loaded", "count", len(skillRegistry.All()))
+
 	allTools := toolRegistry.Tools()
 	slog.Info("tools loaded", "count", len(allTools))
 
@@ -130,6 +155,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		CustomInstructions: cfg.Agent.SystemPrompt,
 		ToolNames:          toolRegistry.ToolNames(),
 		ToolDescriptions:   toolDescs,
+		SkillDescriptions:  skillDescs,
 	})
 	defer eventRunner.Close()
 

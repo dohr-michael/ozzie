@@ -13,6 +13,7 @@ type PromptContext struct {
 	CustomInstructions string            // Layer 2: from config
 	ToolNames          []string          // Layer 3: active tool names
 	ToolDescriptions   map[string]string // Layer 3: tool name → description
+	SkillDescriptions  map[string]string // Layer 3b: skill name → description
 	Session            *sessions.Session // Layer 4: session metadata
 	MessageCount       int               // Layer 4: nb messages in history
 	TaskInstructions   string            // Layer 5: stub for future
@@ -51,6 +52,23 @@ func (pc *PromptComposer) Compose(pctx PromptContext) string {
 			} else {
 				sb.WriteString(fmt.Sprintf("- **%s**\n", name))
 			}
+		}
+		sections = append(sections, sb.String())
+	}
+
+	// Layer 3b: Available skills
+	if len(pctx.SkillDescriptions) > 0 {
+		names := make([]string, 0, len(pctx.SkillDescriptions))
+		for name := range pctx.SkillDescriptions {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		var sb strings.Builder
+		sb.WriteString("## Available Skills\n\n")
+		sb.WriteString("You can delegate complex tasks to these specialized skills:\n")
+		for _, name := range names {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, pctx.SkillDescriptions[name]))
 		}
 		sections = append(sections, sb.String())
 	}

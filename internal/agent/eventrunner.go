@@ -21,10 +21,11 @@ type EventRunner struct {
 	bus    *events.Bus
 	store  sessions.Store
 
-	composer           *PromptComposer
-	customInstructions string
-	toolNames          []string
-	toolDescriptions   map[string]string
+	composer            *PromptComposer
+	customInstructions  string
+	toolNames           []string
+	toolDescriptions    map[string]string
+	skillDescriptions   map[string]string
 
 	mu           sync.Mutex
 	running      map[string]bool // per-session lock
@@ -43,6 +44,7 @@ type EventRunnerConfig struct {
 	CustomInstructions string            // Layer 2: from config.Agent.SystemPrompt
 	ToolNames          []string          // Layer 3: active tool names
 	ToolDescriptions   map[string]string // Layer 3: tool name → description
+	SkillDescriptions  map[string]string // Layer 3b: skill name → description
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -50,16 +52,17 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	er := &EventRunner{
-		runner:             cfg.Runner,
-		bus:                cfg.EventBus,
-		store:              cfg.Store,
-		composer:           NewPromptComposer(),
-		customInstructions: cfg.CustomInstructions,
-		toolNames:          cfg.ToolNames,
-		toolDescriptions:   cfg.ToolDescriptions,
-		running:            make(map[string]bool),
-		ctx:                ctx,
-		cancel:             cancel,
+		runner:              cfg.Runner,
+		bus:                 cfg.EventBus,
+		store:               cfg.Store,
+		composer:            NewPromptComposer(),
+		customInstructions:  cfg.CustomInstructions,
+		toolNames:           cfg.ToolNames,
+		toolDescriptions:    cfg.ToolDescriptions,
+		skillDescriptions:   cfg.SkillDescriptions,
+		running:             make(map[string]bool),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
@@ -124,6 +127,7 @@ func (er *EventRunner) prependDynamicContext(sessionID string, messages []*schem
 		CustomInstructions: er.customInstructions,
 		ToolNames:          er.toolNames,
 		ToolDescriptions:   er.toolDescriptions,
+		SkillDescriptions:  er.skillDescriptions,
 		MessageCount:       msgCount,
 	}
 

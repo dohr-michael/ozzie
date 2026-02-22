@@ -46,6 +46,12 @@ const (
 
 	// Scheduler
 	EventScheduleTrigger EventType = "schedule.trigger"
+
+	// Skills
+	EventSkillStarted       EventType = "skill.started"
+	EventSkillCompleted     EventType = "skill.completed"
+	EventSkillStepStarted   EventType = "skill.step.started"
+	EventSkillStepCompleted EventType = "skill.step.completed"
 )
 
 // EventSource identifies the component that emitted an event.
@@ -56,6 +62,7 @@ const (
 	SourceHub    EventSource = "hub"
 	SourceWS     EventSource = "ws"
 	SourcePlugin EventSource = "plugin"
+	SourceSkill  EventSource = "skill"
 )
 
 // Event represents an event in the system.

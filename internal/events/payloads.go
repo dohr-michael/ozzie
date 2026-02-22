@@ -193,3 +193,60 @@ func GetPromptResponsePayload(e Event) (PromptResponsePayload, bool) {
 func GetLLMCallPayload(e Event) (LLMCallPayload, bool) {
 	return ExtractPayload[LLMCallPayload](e)
 }
+
+// =============================================================================
+// SKILL EVENTS
+// =============================================================================
+
+type SkillStartedPayload struct {
+	SkillName string            `json:"skill_name"`
+	Type      string            `json:"type"`
+	Vars      map[string]string `json:"vars,omitempty"`
+}
+
+func (SkillStartedPayload) EventType() EventType { return EventSkillStarted }
+
+type SkillCompletedPayload struct {
+	SkillName string        `json:"skill_name"`
+	Output    string        `json:"output,omitempty"`
+	Error     string        `json:"error,omitempty"`
+	Duration  time.Duration `json:"duration,omitempty"`
+}
+
+func (SkillCompletedPayload) EventType() EventType { return EventSkillCompleted }
+
+type SkillStepStartedPayload struct {
+	SkillName string `json:"skill_name"`
+	StepID    string `json:"step_id"`
+	StepTitle string `json:"step_title"`
+	Model     string `json:"model"`
+}
+
+func (SkillStepStartedPayload) EventType() EventType { return EventSkillStepStarted }
+
+type SkillStepCompletedPayload struct {
+	SkillName string        `json:"skill_name"`
+	StepID    string        `json:"step_id"`
+	StepTitle string        `json:"step_title"`
+	Output    string        `json:"output,omitempty"`
+	Error     string        `json:"error,omitempty"`
+	Duration  time.Duration `json:"duration,omitempty"`
+}
+
+func (SkillStepCompletedPayload) EventType() EventType { return EventSkillStepCompleted }
+
+func GetSkillStartedPayload(e Event) (SkillStartedPayload, bool) {
+	return ExtractPayload[SkillStartedPayload](e)
+}
+
+func GetSkillCompletedPayload(e Event) (SkillCompletedPayload, bool) {
+	return ExtractPayload[SkillCompletedPayload](e)
+}
+
+func GetSkillStepStartedPayload(e Event) (SkillStepStartedPayload, bool) {
+	return ExtractPayload[SkillStepStartedPayload](e)
+}
+
+func GetSkillStepCompletedPayload(e Event) (SkillStepCompletedPayload, bool) {
+	return ExtractPayload[SkillStepCompletedPayload](e)
+}

@@ -9,6 +9,13 @@ type Config struct {
 	Events  EventsConfig  `json:"events"`
 	Agent   AgentConfig   `json:"agent"`
 	Plugins PluginsConfig `json:"plugins"`
+	Skills  SkillsConfig  `json:"skills"`
+}
+
+// SkillsConfig configures the skill system.
+type SkillsConfig struct {
+	Dirs    []string `json:"dirs"`    // skill directories (default: [$OZZIE_PATH/skills])
+	Enabled []string `json:"enabled"` // enabled skill names (empty = all)
 }
 
 // PluginsConfig configures the plugin system.
