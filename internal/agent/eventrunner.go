@@ -142,8 +142,9 @@ func (er *EventRunner) prependDynamicContext(sessionID string, messages []*schem
 }
 
 func (er *EventRunner) runAgent(sessionID string, messages []*schema.Message) {
+	ctx := events.ContextWithSessionID(er.ctx, sessionID)
 	checkpointID := uuid.New().String()
-	iter := er.runner.Run(er.ctx, messages, adk.WithCheckPointID(checkpointID))
+	iter := er.runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 	er.consumeIterator(sessionID, iter)
 }
 

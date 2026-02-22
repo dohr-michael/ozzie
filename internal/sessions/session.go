@@ -15,6 +15,12 @@ const (
 	SessionClosed SessionStatus = "closed"
 )
 
+// TokenUsage tracks cumulative token consumption for a session.
+type TokenUsage struct {
+	Input  int `json:"input"`
+	Output int `json:"output"`
+}
+
 // Session holds metadata about a conversation session.
 type Session struct {
 	ID           string        `json:"id"`
@@ -24,6 +30,7 @@ type Session struct {
 	Status       SessionStatus `json:"status"`
 	Model        string        `json:"model,omitempty"`
 	MessageCount int           `json:"message_count"`
+	TokenUsage   TokenUsage    `json:"token_usage"`
 }
 
 // Message is a single turn in a conversation, serializable to JSONL.

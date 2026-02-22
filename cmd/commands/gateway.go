@@ -110,6 +110,10 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
 	sessionStore := sessions.NewFileStore(sessionsDir)
 
+	// Cost tracker — accumulates token usage per session
+	costTracker := storage.NewCostTracker(bus, sessionStore)
+	defer costTracker.Close()
+
 	// Build tool descriptions for prompt composer (layer 3)
 	toolDescs := make(map[string]string, len(toolRegistry.ToolNames()))
 	for _, name := range toolRegistry.ToolNames() {

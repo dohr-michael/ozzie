@@ -19,7 +19,11 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 	}
 
 	publishTyped := func(ctx context.Context, payload events.EventPayload) {
-		bus.Publish(events.NewTypedEvent(source, payload))
+		if sid := events.SessionIDFromContext(ctx); sid != "" {
+			bus.Publish(events.NewTypedEventWithSession(source, payload, sid))
+		} else {
+			bus.Publish(events.NewTypedEvent(source, payload))
+		}
 	}
 
 	modelHandler := &ub.ModelCallbackHandler{
