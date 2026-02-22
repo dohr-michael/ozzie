@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -491,4 +492,392 @@ func searchString(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- ReadFileTool tests ---
+
+func TestReadFileTool_Info(t *testing.T) {
+	tool := NewReadFileTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "read_file" {
+		t.Errorf("Name = %q, want %q", info.Name, "read_file")
+	}
+	if info.ParamsOneOf == nil {
+		t.Error("ParamsOneOf is nil")
+	}
+}
+
+func TestReadFileTool_InvokableRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewReadFileTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "line1") {
+		t.Errorf("result %q does not contain 'line1'", result)
+	}
+	if !contains(result, `"lines":4`) {
+		t.Errorf("result %q does not contain lines count", result)
+	}
+}
+
+func TestReadFileTool_InvokableRun_OffsetLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewReadFileTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "offset": 1, "limit": 2}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, `"truncated":true`) {
+		t.Errorf("expected truncated=true in result %q", result)
+	}
+	if !contains(result, "b") {
+		t.Errorf("result %q does not contain 'b'", result)
+	}
+}
+
+func TestReadFileTool_InvokableRun_FileNotFound(t *testing.T) {
+	tool := NewReadFileTool()
+	_, err := tool.InvokableRun(context.Background(), `{"path": "/nonexistent/file.txt"}`)
+	if err == nil {
+		t.Error("expected error for file not found")
+	}
+}
+
+func TestReadFileTool_InvokableRun_EmptyPath(t *testing.T) {
+	tool := NewReadFileTool()
+	_, err := tool.InvokableRun(context.Background(), `{"path": ""}`)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+// --- WriteFileTool tests ---
+
+func TestWriteFileTool_Info(t *testing.T) {
+	tool := NewWriteFileTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "write_file" {
+		t.Errorf("Name = %q, want %q", info.Name, "write_file")
+	}
+}
+
+func TestWriteFileTool_InvokableRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "output.txt")
+
+	tool := NewWriteFileTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "content": "hello world"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, `"bytes_written":11`) {
+		t.Errorf("result %q does not contain bytes_written", result)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "hello world" {
+		t.Errorf("file content = %q, want %q", string(data), "hello world")
+	}
+}
+
+func TestWriteFileTool_InvokableRun_CreateDirs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a", "b", "c", "file.txt")
+
+	tool := NewWriteFileTool()
+	_, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "content": "nested"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "nested" {
+		t.Errorf("file content = %q, want %q", string(data), "nested")
+	}
+}
+
+func TestWriteFileTool_InvokableRun_EmptyPath(t *testing.T) {
+	tool := NewWriteFileTool()
+	_, err := tool.InvokableRun(context.Background(), `{"path": "", "content": "x"}`)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+// --- RunCmdTool tests ---
+
+func TestRunCmdTool_Info(t *testing.T) {
+	tool := NewRunCmdTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "run_command" {
+		t.Errorf("Name = %q, want %q", info.Name, "run_command")
+	}
+}
+
+func TestRunCmdTool_InvokableRun(t *testing.T) {
+	tool := NewRunCmdTool()
+	result, err := tool.InvokableRun(context.Background(), `{"command": "echo hello"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "hello") {
+		t.Errorf("result %q does not contain 'hello'", result)
+	}
+}
+
+func TestRunCmdTool_InvokableRun_Timeout(t *testing.T) {
+	tool := NewRunCmdTool()
+	_, err := tool.InvokableRun(context.Background(), `{"command": "sleep 10", "timeout": 1}`)
+	if err == nil {
+		t.Error("expected error for timeout")
+	}
+}
+
+func TestRunCmdTool_InvokableRun_EmptyCommand(t *testing.T) {
+	tool := NewRunCmdTool()
+	_, err := tool.InvokableRun(context.Background(), `{"command": ""}`)
+	if err == nil {
+		t.Error("expected error for empty command")
+	}
+}
+
+// --- SearchTool tests ---
+
+func TestSearchTool_Info(t *testing.T) {
+	tool := NewSearchTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "search" {
+		t.Errorf("Name = %q, want %q", info.Name, "search")
+	}
+}
+
+func TestSearchTool_InvokableRun(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\nfoo bar\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\nfunc hello() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewSearchTool()
+	result, err := tool.InvokableRun(context.Background(), `{"pattern": "hello", "path": "`+dir+`"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "hello") {
+		t.Errorf("result %q does not contain 'hello'", result)
+	}
+	if !contains(result, `"total":2`) {
+		t.Errorf("result %q does not contain total:2", result)
+	}
+}
+
+func TestSearchTool_InvokableRun_InvalidRegex(t *testing.T) {
+	tool := NewSearchTool()
+	_, err := tool.InvokableRun(context.Background(), `{"pattern": "[invalid"}`)
+	if err == nil {
+		t.Error("expected error for invalid regex")
+	}
+}
+
+func TestSearchTool_InvokableRun_GlobFilter(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("match here\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("match here too\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewSearchTool()
+	result, err := tool.InvokableRun(context.Background(), `{"pattern": "match", "path": "`+dir+`", "glob": "*.txt"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, `"total":1`) {
+		t.Errorf("expected total:1, got %q", result)
+	}
+}
+
+func TestSearchTool_InvokableRun_EmptyPattern(t *testing.T) {
+	tool := NewSearchTool()
+	_, err := tool.InvokableRun(context.Background(), `{"pattern": ""}`)
+	if err == nil {
+		t.Error("expected error for empty pattern")
+	}
+}
+
+// --- ListDirTool tests ---
+
+func TestListDirTool_Info(t *testing.T) {
+	tool := NewListDirTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "list_dir" {
+		t.Errorf("Name = %q, want %q", info.Name, "list_dir")
+	}
+}
+
+func TestListDirTool_InvokableRun(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewListDirTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "a.txt") {
+		t.Errorf("result %q does not contain 'a.txt'", result)
+	}
+	if !contains(result, "subdir") {
+		t.Errorf("result %q does not contain 'subdir'", result)
+	}
+	if !contains(result, `"total":2`) {
+		t.Errorf("result %q does not contain total:2", result)
+	}
+}
+
+func TestListDirTool_InvokableRun_Recursive(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "deep.txt"), []byte("deep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewListDirTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`", "recursive": true}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "deep.txt") {
+		t.Errorf("result %q does not contain 'deep.txt'", result)
+	}
+}
+
+func TestListDirTool_InvokableRun_Pattern(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewListDirTool()
+	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`", "pattern": "*.go"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "b.go") {
+		t.Errorf("result %q does not contain 'b.go'", result)
+	}
+	if !contains(result, `"total":1`) {
+		t.Errorf("expected total:1, got %q", result)
+	}
+}
+
+func TestListDirTool_InvokableRun_EmptyPath(t *testing.T) {
+	tool := NewListDirTool()
+	_, err := tool.InvokableRun(context.Background(), `{"path": ""}`)
+	if err == nil {
+		t.Error("expected error for empty path")
+	}
+}
+
+// --- GitTool tests ---
+
+func TestGitTool_Info(t *testing.T) {
+	tool := NewGitTool()
+	info, err := tool.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "git" {
+		t.Errorf("Name = %q, want %q", info.Name, "git")
+	}
+}
+
+func TestGitTool_InvokableRun_Status(t *testing.T) {
+	dir := t.TempDir()
+	// Init a git repo
+	initCmd := filepath.Join(dir, "init")
+	_ = initCmd
+	cmd := exec.Command("git", "init", dir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+
+	// Change to the repo dir for the git status
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origDir)
+
+	tool := NewGitTool()
+	result, err := tool.InvokableRun(context.Background(), `{"action": "status"}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, `"exit_code":0`) {
+		t.Errorf("expected exit_code:0 in result %q", result)
+	}
+}
+
+func TestGitTool_InvokableRun_InvalidAction(t *testing.T) {
+	tool := NewGitTool()
+	_, err := tool.InvokableRun(context.Background(), `{"action": "invalid_action"}`)
+	if err == nil {
+		t.Error("expected error for invalid action")
+	}
+}
+
+func TestGitTool_InvokableRun_EmptyAction(t *testing.T) {
+	tool := NewGitTool()
+	_, err := tool.InvokableRun(context.Background(), `{"action": ""}`)
+	if err == nil {
+		t.Error("expected error for empty action")
+	}
 }

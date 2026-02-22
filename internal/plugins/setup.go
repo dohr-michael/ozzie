@@ -30,6 +30,24 @@ func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus *events.Bus)
 	if err := registry.RegisterNative("root_cmd", NewRootCmdTool(0), RootCmdManifest()); err != nil {
 		slog.Warn("failed to register root_cmd tool", "error", err)
 	}
+	if err := registry.RegisterNative("read_file", NewReadFileTool(), ReadFileManifest()); err != nil {
+		slog.Warn("failed to register read_file tool", "error", err)
+	}
+	if err := registry.RegisterNative("write_file", NewWriteFileTool(), WriteFileManifest()); err != nil {
+		slog.Warn("failed to register write_file tool", "error", err)
+	}
+	if err := registry.RegisterNative("run_command", NewRunCmdTool(), RunCmdManifest()); err != nil {
+		slog.Warn("failed to register run_command tool", "error", err)
+	}
+	if err := registry.RegisterNative("search", NewSearchTool(), SearchManifest()); err != nil {
+		slog.Warn("failed to register search tool", "error", err)
+	}
+	if err := registry.RegisterNative("list_dir", NewListDirTool(), ListDirManifest()); err != nil {
+		slog.Warn("failed to register list_dir tool", "error", err)
+	}
+	if err := registry.RegisterNative("git", NewGitTool(), GitManifest()); err != nil {
+		slog.Warn("failed to register git tool", "error", err)
+	}
 
 	return registry, nil
 }
