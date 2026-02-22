@@ -48,13 +48,23 @@ const (
 	EventScheduleTrigger EventType = "schedule.trigger"
 )
 
+// EventSource identifies the component that emitted an event.
+type EventSource string
+
+const (
+	SourceAgent  EventSource = "agent"
+	SourceHub    EventSource = "hub"
+	SourceWS     EventSource = "ws"
+	SourcePlugin EventSource = "plugin"
+)
+
 // Event represents an event in the system.
 type Event struct {
 	ID        string         `json:"id"`
 	SessionID string         `json:"session_id,omitempty"`
 	Type      EventType      `json:"type"`
 	Timestamp time.Time      `json:"timestamp"`
-	Source    string         `json:"source"`
+	Source    EventSource    `json:"source"`
 	Payload   map[string]any `json:"payload"`
 }
 
@@ -62,7 +72,7 @@ type Event struct {
 var eventIDCounter uint64
 
 // NewEvent creates a new event with the current timestamp.
-func NewEvent(eventType EventType, source string, payload map[string]any) Event {
+func NewEvent(eventType EventType, source EventSource, payload map[string]any) Event {
 	return Event{
 		ID:        generateEventID(),
 		Type:      eventType,
@@ -73,7 +83,7 @@ func NewEvent(eventType EventType, source string, payload map[string]any) Event 
 }
 
 // NewEventWithSession creates a new event with session context.
-func NewEventWithSession(eventType EventType, source string, payload map[string]any, sessionID string) Event {
+func NewEventWithSession(eventType EventType, source EventSource, payload map[string]any, sessionID string) Event {
 	return Event{
 		ID:        generateEventID(),
 		SessionID: sessionID,

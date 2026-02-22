@@ -14,10 +14,11 @@ import (
 
 // Client is a WebSocket client for the Ozzie gateway.
 type Client struct {
-	conn   *websocket.Conn
-	reqSeq uint64
-	ctx    context.Context
-	cancel context.CancelFunc
+	conn      *websocket.Conn
+	reqSeq    uint64
+	ctx       context.Context
+	cancel    context.CancelFunc
+	SessionID string
 }
 
 // Dial connects to the gateway WebSocket endpoint.
@@ -36,6 +37,53 @@ func Dial(ctx context.Context, url string) (*Client, error) {
 	}, nil
 }
 
+// OpenSession sends an open_session request and returns the session ID.
+// If sessionID is empty, the server creates a new session.
+// If sessionID is non-empty, the server resumes that session.
+func (c *Client) OpenSession(sessionID string) (string, error) {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	params, _ := json.Marshal(map[string]string{"session_id": sessionID})
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: string(wsprotocol.MethodOpenSession),
+		Params: params,
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return "", fmt.Errorf("marshal open_session: %w", err)
+	}
+
+	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
+		return "", fmt.Errorf("send open_session: %w", err)
+	}
+
+	// Read the response
+	resp, err := c.ReadFrame()
+	if err != nil {
+		return "", fmt.Errorf("read open_session response: %w", err)
+	}
+
+	if resp.OK != nil && !*resp.OK {
+		return "", fmt.Errorf("open_session failed: %s", resp.Error)
+	}
+
+	var result struct {
+		SessionID string `json:"session_id"`
+	}
+	if resp.Payload != nil {
+		if err := json.Unmarshal(resp.Payload, &result); err != nil {
+			return "", fmt.Errorf("unmarshal session response: %w", err)
+		}
+	}
+
+	c.SessionID = result.SessionID
+	return result.SessionID, nil
+}
+
 // SendMessage sends a user message to the gateway.
 func (c *Client) SendMessage(content string) error {
 	seq := atomic.AddUint64(&c.reqSeq, 1)
@@ -45,7 +93,7 @@ func (c *Client) SendMessage(content string) error {
 	frame := wsprotocol.Frame{
 		Type:   wsprotocol.FrameTypeRequest,
 		ID:     fmt.Sprintf("req-%d", seq),
-		Method: "send_message",
+		Method: string(wsprotocol.MethodSendMessage),
 		Params: params,
 	}
 

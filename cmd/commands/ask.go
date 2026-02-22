@@ -25,6 +25,11 @@ func NewAskCommand() *cli.Command {
 				Usage: "Gateway WebSocket URL",
 				Value: "ws://127.0.0.1:18420/api/ws",
 			},
+			&cli.StringFlag{
+				Name:    "session",
+				Aliases: []string{"s"},
+				Usage:   "Session ID to resume (empty = new session)",
+			},
 		},
 		Action: runAsk,
 	}
@@ -37,6 +42,7 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	}
 
 	gatewayURL := cmd.String("gateway")
+	sessionFlag := cmd.String("session")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -46,6 +52,15 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("connect to gateway: %w", err)
 	}
 	defer client.Close()
+
+	// Open or resume session
+	sid, err := client.OpenSession(sessionFlag)
+	if err != nil {
+		return fmt.Errorf("open session: %w", err)
+	}
+	if sessionFlag == "" {
+		fmt.Fprintf(os.Stderr, "session: %s\n", sid)
+	}
 
 	if err := client.SendMessage(message); err != nil {
 		return fmt.Errorf("send message: %w", err)

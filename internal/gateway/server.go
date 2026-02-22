@@ -14,6 +14,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
+	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
 // Server is the Ozzie gateway HTTP server.
@@ -21,29 +22,32 @@ type Server struct {
 	httpServer *http.Server
 	hub        *ws.Hub
 	bus        *events.Bus
+	store      sessions.Store
 	host       string
 	port       int
 }
 
 // NewServer creates a new gateway server.
-func NewServer(bus *events.Bus, host string, port int) *Server {
-	hub := ws.NewHub(bus)
+func NewServer(bus *events.Bus, store sessions.Store, host string, port int) *Server {
+	hub := ws.NewHub(bus, store)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 
 	s := &Server{
-		hub:  hub,
-		bus:  bus,
-		host: host,
-		port: port,
+		hub:   hub,
+		bus:   bus,
+		store: store,
+		host:  host,
+		port:  port,
 	}
 
 	// Routes
 	r.Get("/api/health", s.handleHealth)
 	r.Get("/api/ws", hub.ServeWS)
 	r.Get("/api/events", s.handleEvents)
+	r.Get("/api/sessions", s.handleSessions)
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -91,7 +95,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		SessionID string         `json:"session_id,omitempty"`
 		Type      string         `json:"type"`
 		Timestamp string         `json:"timestamp"`
-		Source    string         `json:"source"`
+		Source    events.EventSource `json:"source"`
 		Payload   map[string]any `json:"payload"`
 	}
 
@@ -108,4 +112,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.List()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
 }

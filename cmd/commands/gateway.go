@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -16,6 +17,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/gateway"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
 // NewGatewayCommand returns the gateway subcommand.
@@ -97,15 +99,20 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("init agent: %w", err)
 	}
 
+	// Session store
+	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
+	sessionStore := sessions.NewFileStore(sessionsDir)
+
 	// Event runner
 	eventRunner := agent.NewEventRunner(agent.EventRunnerConfig{
 		Runner:   runner,
 		EventBus: bus,
+		Store:    sessionStore,
 	})
 	defer eventRunner.Close()
 
 	// Gateway server
-	server := gateway.NewServer(bus, cfg.Gateway.Host, cfg.Gateway.Port)
+	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port)
 
 	// Start server in goroutine
 	errCh := make(chan error, 1)

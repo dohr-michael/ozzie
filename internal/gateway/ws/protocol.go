@@ -11,16 +11,26 @@ const (
 	FrameTypeEvent    FrameType = "event"
 )
 
+// Method represents a WebSocket request method.
+type Method string
+
+const (
+	MethodSendMessage    Method = "send_message"
+	MethodOpenSession    Method = "open_session"
+	MethodPromptResponse Method = "prompt_response"
+)
+
 // Frame is the WebSocket protocol envelope.
 type Frame struct {
-	Type    FrameType       `json:"type"`
-	ID      string          `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	OK      *bool           `json:"ok,omitempty"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Error   string          `json:"error,omitempty"`
-	Event   string          `json:"event,omitempty"`
+	Type      FrameType       `json:"type"`
+	ID        string          `json:"id,omitempty"`
+	Method    string          `json:"method,omitempty"`
+	Params    json.RawMessage `json:"params,omitempty"`
+	OK        *bool           `json:"ok,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Event     string          `json:"event,omitempty"`
+	SessionID string          `json:"session_id,omitempty"`
 }
 
 // MarshalFrame serializes a Frame to JSON bytes.
@@ -36,15 +46,16 @@ func UnmarshalFrame(data []byte) (Frame, error) {
 }
 
 // NewEventFrame creates a Frame for broadcasting an event.
-func NewEventFrame(event string, payload any) (Frame, error) {
+func NewEventFrame(event string, sessionID string, payload any) (Frame, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return Frame{}, err
 	}
 	return Frame{
-		Type:    FrameTypeEvent,
-		Event:   event,
-		Payload: data,
+		Type:      FrameTypeEvent,
+		Event:     event,
+		SessionID: sessionID,
+		Payload:   data,
 	}, nil
 }
 

@@ -10,13 +10,15 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
 // Client represents a connected WebSocket client.
 type Client struct {
-	conn *websocket.Conn
-	send chan []byte
-	hub  *Hub
+	conn      *websocket.Conn
+	send      chan []byte
+	hub       *Hub
+	sessionID string
 }
 
 // Hub manages WebSocket clients and bridges them to the event bus.
@@ -24,19 +26,21 @@ type Hub struct {
 	mu          sync.RWMutex
 	clients     map[*Client]struct{}
 	bus         *events.Bus
+	store       sessions.Store
 	unsubscribe func()
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
-func NewHub(bus *events.Bus) *Hub {
+func NewHub(bus *events.Bus, store sessions.Store) *Hub {
 	h := &Hub{
 		clients: make(map[*Client]struct{}),
 		bus:     bus,
+		store:   store,
 	}
 
 	// Subscribe to all events and bridge to WS clients
 	h.unsubscribe = bus.Subscribe(func(e events.Event) {
-		frame, err := NewEventFrame(string(e.Type), e)
+		frame, err := NewEventFrame(string(e.Type), e.SessionID, e)
 		if err != nil {
 			slog.Error("marshal event frame", "error", err)
 			return
@@ -46,7 +50,12 @@ func NewHub(bus *events.Bus) *Hub {
 			slog.Error("marshal frame", "error", err)
 			return
 		}
-		h.broadcast(data)
+
+		if e.SessionID != "" {
+			h.sendToSession(e.SessionID, data)
+		} else {
+			h.broadcast(data)
+		}
 	})
 
 	return h
@@ -66,6 +75,21 @@ func (h *Hub) broadcast(data []byte) {
 	}
 }
 
+// sendToSession sends data only to clients in a specific session.
+func (h *Hub) sendToSession(sessionID string, data []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for c := range h.clients {
+		if c.sessionID == sessionID {
+			select {
+			case c.send <- data:
+			default:
+			}
+		}
+	}
+}
+
 // register adds a client to the hub.
 func (h *Hub) register(c *Client) {
 	h.mu.Lock()
@@ -74,15 +98,103 @@ func (h *Hub) register(c *Client) {
 	slog.Info("ws client connected", "clients", len(h.clients))
 }
 
-// unregister removes a client from the hub.
-func (h *Hub) unregister(c *Client) {
+// unregisterClient removes a client from the hub and closes its session if it was the last client.
+func (h *Hub) unregisterClient(c *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	if _, ok := h.clients[c]; ok {
-		delete(h.clients, c)
-		close(c.send)
-		slog.Info("ws client disconnected", "clients", len(h.clients))
+
+	if _, ok := h.clients[c]; !ok {
+		h.mu.Unlock()
+		return
 	}
+
+	sessionID := c.sessionID
+	delete(h.clients, c)
+	close(c.send)
+	slog.Info("ws client disconnected", "clients", len(h.clients), "session_id", sessionID)
+
+	// Check if this was the last client in the session
+	if sessionID != "" {
+		lastClient := true
+		for other := range h.clients {
+			if other.sessionID == sessionID {
+				lastClient = false
+				break
+			}
+		}
+		h.mu.Unlock()
+
+		if lastClient {
+			if err := h.store.Close(sessionID); err != nil {
+				slog.Error("close session", "error", err, "session_id", sessionID)
+			}
+			h.bus.Publish(events.NewEventWithSession(
+				events.EventSessionClosed, events.SourceHub,
+				map[string]any{"session_id": sessionID}, sessionID,
+			))
+		}
+	} else {
+		h.mu.Unlock()
+	}
+}
+
+// handleOpenSession creates or resumes a session for the client.
+func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string) {
+	ctx := context.Background()
+
+	if sessionID != "" {
+		// Resume existing session
+		s, err := h.store.Get(sessionID)
+		if err != nil {
+			c.sendError(ctx, frameID, "session not found: "+sessionID)
+			return
+		}
+		c.sessionID = s.ID
+		c.sendOK(ctx, frameID, map[string]string{
+			"session_id": s.ID,
+			"status":     "resumed",
+		})
+		return
+	}
+
+	// Create new session
+	s, err := h.store.Create()
+	if err != nil {
+		c.sendError(ctx, frameID, "create session: "+err.Error())
+		return
+	}
+
+	c.sessionID = s.ID
+
+	h.bus.Publish(events.NewEventWithSession(
+		events.EventSessionCreated, events.SourceHub,
+		map[string]any{"session_id": s.ID}, s.ID,
+	))
+
+	c.sendOK(ctx, frameID, map[string]string{
+		"session_id": s.ID,
+		"status":     "created",
+	})
+}
+
+// ensureSession auto-creates a session for a client if it doesn't have one.
+func (h *Hub) ensureSession(c *Client) {
+	if c.sessionID != "" {
+		return
+	}
+
+	s, err := h.store.Create()
+	if err != nil {
+		slog.Error("auto-create session", "error", err)
+		return
+	}
+
+	c.sessionID = s.ID
+	slog.Info("auto-created session", "session_id", s.ID)
+
+	h.bus.Publish(events.NewEventWithSession(
+		events.EventSessionCreated, events.SourceHub,
+		map[string]any{"session_id": s.ID}, s.ID,
+	))
 }
 
 // ServeWS handles a WebSocket upgrade and manages the client lifecycle.
@@ -111,7 +223,7 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
 // readPump reads frames from the WS connection and dispatches them.
 func (c *Client) readPump(ctx context.Context) {
 	defer func() {
-		c.hub.unregister(c)
+		c.hub.unregisterClient(c)
 		c.conn.Close(websocket.StatusNormalClosure, "")
 	}()
 
@@ -148,8 +260,20 @@ func (c *Client) handleFrame(ctx context.Context, frame Frame) {
 
 // handleRequest processes a request frame (method dispatch).
 func (c *Client) handleRequest(ctx context.Context, frame Frame) {
-	switch frame.Method {
-	case "send_message":
+	switch Method(frame.Method) {
+	case MethodOpenSession:
+		var params struct {
+			SessionID string `json:"session_id"`
+		}
+		if frame.Params != nil {
+			if err := json.Unmarshal(frame.Params, &params); err != nil {
+				c.sendError(ctx, frame.ID, "invalid params")
+				return
+			}
+		}
+		c.hub.handleOpenSession(c, frame.ID, params.SessionID)
+
+	case MethodSendMessage:
 		var params struct {
 			Content string `json:"content"`
 		}
@@ -158,20 +282,23 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 			return
 		}
 
-		c.hub.bus.Publish(events.NewTypedEvent("ws", events.UserMessagePayload{
+		// Auto-create session if needed
+		c.hub.ensureSession(c)
+
+		c.hub.bus.Publish(events.NewTypedEventWithSession(events.SourceWS, events.UserMessagePayload{
 			Content: params.Content,
-		}))
+		}, c.sessionID))
 
 		c.sendOK(ctx, frame.ID, map[string]string{"status": "sent"})
 
-	case "prompt_response":
+	case MethodPromptResponse:
 		var params events.PromptResponsePayload
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
 			c.sendError(ctx, frame.ID, "invalid params")
 			return
 		}
 
-		c.hub.bus.Publish(events.NewTypedEvent("ws", params))
+		c.hub.bus.Publish(events.NewTypedEventWithSession(events.SourceWS, params, c.sessionID))
 		c.sendOK(ctx, frame.ID, map[string]string{"status": "sent"})
 
 	default:

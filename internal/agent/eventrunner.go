@@ -12,16 +12,17 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
 // EventRunner wraps an ADK Runner and provides event-driven execution.
 type EventRunner struct {
-	runner   *adk.Runner
-	bus      *events.Bus
-	messages []*schema.Message
+	runner *adk.Runner
+	bus    *events.Bus
+	store  sessions.Store
 
 	mu           sync.Mutex
-	running      bool
+	running      map[string]bool // per-session lock
 	streamSeqIdx int32
 
 	ctx         context.Context
@@ -33,6 +34,7 @@ type EventRunner struct {
 type EventRunnerConfig struct {
 	Runner   *adk.Runner
 	EventBus *events.Bus
+	Store    sessions.Store
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -40,11 +42,12 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	er := &EventRunner{
-		runner:   cfg.Runner,
-		bus:      cfg.EventBus,
-		messages: make([]*schema.Message, 0),
-		ctx:      ctx,
-		cancel:   cancel,
+		runner:  cfg.Runner,
+		bus:     cfg.EventBus,
+		store:   cfg.Store,
+		running: make(map[string]bool),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
@@ -58,43 +61,57 @@ func (er *EventRunner) handleEvent(event events.Event) {
 	switch event.Type {
 	case events.EventUserMessage:
 		if payload, ok := events.GetUserMessagePayload(event); ok && payload.Content != "" {
-			go er.processMessage(payload.Content)
+			go er.processMessage(event.SessionID, payload.Content)
 		}
 	}
 }
 
-func (er *EventRunner) processMessage(content string) {
+func (er *EventRunner) processMessage(sessionID string, content string) {
 	er.mu.Lock()
-	if er.running {
+	if er.running[sessionID] {
 		er.mu.Unlock()
 		return
 	}
-	er.running = true
+	er.running[sessionID] = true
 	atomic.StoreInt32(&er.streamSeqIdx, 0)
 	er.mu.Unlock()
 
 	defer func() {
 		er.mu.Lock()
-		er.running = false
+		delete(er.running, sessionID)
 		er.mu.Unlock()
 	}()
 
-	er.messages = append(er.messages, &schema.Message{
-		Role:    schema.User,
-		Content: content,
-	})
+	// Persist user message
+	userMsg := sessions.Message{Role: string(schema.User), Content: content}
+	if err := er.store.AppendMessage(sessionID, userMsg); err != nil {
+		slog.Error("persist user message", "error", err, "session_id", sessionID)
+	}
 
-	er.emitStreamStart()
-	er.runAgent()
+	// Load full history
+	history, err := er.store.LoadMessages(sessionID)
+	if err != nil {
+		slog.Error("load messages", "error", err, "session_id", sessionID)
+		er.emitError(sessionID, "failed to load session history")
+		return
+	}
+
+	messages := make([]*schema.Message, len(history))
+	for i, m := range history {
+		messages[i] = m.ToSchemaMessage()
+	}
+
+	er.emitStreamStart(sessionID)
+	er.runAgent(sessionID, messages)
 }
 
-func (er *EventRunner) runAgent() {
+func (er *EventRunner) runAgent(sessionID string, messages []*schema.Message) {
 	checkpointID := uuid.New().String()
-	iter := er.runner.Run(er.ctx, er.messages, adk.WithCheckPointID(checkpointID))
-	er.consumeIterator(iter)
+	iter := er.runner.Run(er.ctx, messages, adk.WithCheckPointID(checkpointID))
+	er.consumeIterator(sessionID, iter)
 }
 
-func (er *EventRunner) consumeIterator(iter *adk.AsyncIterator[*adk.AgentEvent]) {
+func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) {
 	var contentBuilder string
 
 	for {
@@ -105,7 +122,7 @@ func (er *EventRunner) consumeIterator(iter *adk.AsyncIterator[*adk.AgentEvent])
 
 		if event.Err != nil {
 			slog.Error("agent error", "error", event.Err)
-			er.emitError(event.Err.Error())
+			er.emitError(sessionID, event.Err.Error())
 			return
 		}
 
@@ -126,10 +143,10 @@ func (er *EventRunner) consumeIterator(iter *adk.AsyncIterator[*adk.AgentEvent])
 
 		// Assistant message — may contain tool calls (intermediate) or final text
 		if mv.IsStreaming {
-			content := er.consumeStream(mv.MessageStream)
+			content := er.consumeStream(sessionID, mv.MessageStream)
 			if content != "" {
 				contentBuilder = content
-				er.emitStreamEnd()
+				er.emitStreamEnd(sessionID)
 			}
 		} else if mv.Message != nil {
 			// Intermediate assistant messages with tool calls — skip accumulation
@@ -138,23 +155,24 @@ func (er *EventRunner) consumeIterator(iter *adk.AsyncIterator[*adk.AgentEvent])
 			}
 			if mv.Message.Content != "" {
 				contentBuilder = mv.Message.Content
-				er.emitStreamDelta(contentBuilder)
-				er.emitStreamEnd()
+				er.emitStreamDelta(sessionID, contentBuilder)
+				er.emitStreamEnd(sessionID)
 			}
 		}
 	}
 
+	// Persist assistant response
 	if contentBuilder != "" {
-		er.messages = append(er.messages, &schema.Message{
-			Role:    schema.Assistant,
-			Content: contentBuilder,
-		})
+		assistantMsg := sessions.Message{Role: string(schema.Assistant), Content: contentBuilder}
+		if err := er.store.AppendMessage(sessionID, assistantMsg); err != nil {
+			slog.Error("persist assistant message", "error", err, "session_id", sessionID)
+		}
 	}
 
-	er.emitResponse(contentBuilder)
+	er.emitResponse(sessionID, contentBuilder)
 }
 
-func (er *EventRunner) consumeStream(stream *schema.StreamReader[*schema.Message]) string {
+func (er *EventRunner) consumeStream(sessionID string, stream *schema.StreamReader[*schema.Message]) string {
 	var fullContent string
 
 	for {
@@ -163,12 +181,12 @@ func (er *EventRunner) consumeStream(stream *schema.StreamReader[*schema.Message
 			break
 		}
 		if err != nil {
-			er.emitError(err.Error())
+			er.emitError(sessionID, err.Error())
 			break
 		}
 
 		if chunk != nil && chunk.Content != "" {
-			er.emitStreamDelta(chunk.Content)
+			er.emitStreamDelta(sessionID, chunk.Content)
 			fullContent += chunk.Content
 		}
 	}
@@ -184,35 +202,35 @@ func (er *EventRunner) Close() {
 	}
 }
 
-func (er *EventRunner) emitError(errMsg string) {
-	er.bus.Publish(events.NewTypedEvent("agent", events.AssistantMessagePayload{
+func (er *EventRunner) emitError(sessionID string, errMsg string) {
+	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantMessagePayload{
 		Error: errMsg,
-	}))
+	}, sessionID))
 }
 
-func (er *EventRunner) emitResponse(content string) {
-	er.bus.Publish(events.NewTypedEvent("agent", events.AssistantMessagePayload{
+func (er *EventRunner) emitResponse(sessionID string, content string) {
+	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantMessagePayload{
 		Content: content,
-	}))
+	}, sessionID))
 }
 
-func (er *EventRunner) emitStreamStart() {
-	er.bus.Publish(events.NewTypedEvent("agent", events.AssistantStreamPayload{
+func (er *EventRunner) emitStreamStart(sessionID string) {
+	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantStreamPayload{
 		Phase: events.StreamPhaseStart,
-	}))
+	}, sessionID))
 }
 
-func (er *EventRunner) emitStreamDelta(content string) {
+func (er *EventRunner) emitStreamDelta(sessionID string, content string) {
 	seq := atomic.AddInt32(&er.streamSeqIdx, 1)
-	er.bus.Publish(events.NewTypedEvent("agent", events.AssistantStreamPayload{
+	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantStreamPayload{
 		Phase:   events.StreamPhaseDelta,
 		Content: content,
 		Index:   int(seq),
-	}))
+	}, sessionID))
 }
 
-func (er *EventRunner) emitStreamEnd() {
-	er.bus.Publish(events.NewTypedEvent("agent", events.AssistantStreamPayload{
+func (er *EventRunner) emitStreamEnd(sessionID string) {
+	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantStreamPayload{
 		Phase: events.StreamPhaseEnd,
-	}))
+	}, sessionID))
 }

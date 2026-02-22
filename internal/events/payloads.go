@@ -117,7 +117,7 @@ func (LLMCallPayload) EventType() EventType { return EventLLMCall }
 // TYPED EVENT CONSTRUCTORS
 // =============================================================================
 
-func NewTypedEvent(source string, payload EventPayload) Event {
+func NewTypedEvent(source EventSource, payload EventPayload) Event {
 	return Event{
 		ID:        generateEventID(),
 		Type:      payload.EventType(),
@@ -127,7 +127,7 @@ func NewTypedEvent(source string, payload EventPayload) Event {
 	}
 }
 
-func NewTypedEventWithSession(source string, payload EventPayload, sessionID string) Event {
+func NewTypedEventWithSession(source EventSource, payload EventPayload, sessionID string) Event {
 	return Event{
 		ID:        generateEventID(),
 		SessionID: sessionID,

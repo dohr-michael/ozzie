@@ -44,13 +44,13 @@ func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON
 	token := uuid.New().String()
 
 	// Emit confirmation request
-	d.bus.Publish(events.NewTypedEvent("plugin", events.ToolCallPayload{
+	d.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.ToolCallPayload{
 		Status:    events.ToolStatusStarted,
 		Name:      d.name,
 		Arguments: map[string]any{"raw": argumentsInJSON},
 	}))
 
-	d.bus.Publish(events.NewTypedEvent("plugin", events.PromptRequestPayload{
+	d.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.PromptRequestPayload{
 		Type:  events.PromptTypeConfirm,
 		Label: fmt.Sprintf("Allow %q to execute? Arguments: %s", d.name, truncate(argumentsInJSON, 200)),
 		Token: token,

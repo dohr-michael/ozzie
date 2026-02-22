@@ -13,9 +13,9 @@ import (
 )
 
 // NewEventBusHandler creates a callback handler that publishes events to the bus.
-func NewEventBusHandler(bus *events.Bus, source string) callbacks.Handler {
+func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Handler {
 	if source == "" {
-		source = "agent"
+		source = events.SourceAgent
 	}
 
 	publishTyped := func(ctx context.Context, payload events.EventPayload) {

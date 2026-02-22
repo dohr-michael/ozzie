@@ -19,8 +19,8 @@ func TestBusPublishSubscribe(t *testing.T) {
 		mu.Unlock()
 	}, EventUserMessage)
 
-	bus.Publish(NewTypedEvent("test", UserMessagePayload{Content: "hello"}))
-	bus.Publish(NewTypedEvent("test", AssistantStreamPayload{Phase: StreamPhaseStart}))
+	bus.Publish(NewTypedEvent(EventSource("test"), UserMessagePayload{Content: "hello"}))
+	bus.Publish(NewTypedEvent(EventSource("test"), AssistantStreamPayload{Phase: StreamPhaseStart}))
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -48,8 +48,8 @@ func TestBusSubscribeAll(t *testing.T) {
 		mu.Unlock()
 	})
 
-	bus.Publish(NewTypedEvent("test", UserMessagePayload{Content: "hello"}))
-	bus.Publish(NewTypedEvent("test", AssistantStreamPayload{Phase: StreamPhaseStart}))
+	bus.Publish(NewTypedEvent(EventSource("test"), UserMessagePayload{Content: "hello"}))
+	bus.Publish(NewTypedEvent(EventSource("test"), AssistantStreamPayload{Phase: StreamPhaseStart}))
 
 	time.Sleep(50 * time.Millisecond)
 
@@ -65,7 +65,7 @@ func TestRingBuffer(t *testing.T) {
 	rb := NewRingBuffer(3)
 
 	for i := 0; i < 5; i++ {
-		rb.Add(NewEvent(EventUserMessage, "test", map[string]any{"i": i}))
+		rb.Add(NewEvent(EventUserMessage, EventSource("test"), map[string]any{"i": i}))
 	}
 
 	events := rb.Get(10)
@@ -81,7 +81,7 @@ func TestSubscribeChan(t *testing.T) {
 	ch, unsub := bus.SubscribeChan(8, EventUserMessage)
 	defer unsub()
 
-	bus.Publish(NewTypedEvent("test", UserMessagePayload{Content: "hello"}))
+	bus.Publish(NewTypedEvent(EventSource("test"), UserMessagePayload{Content: "hello"}))
 
 	select {
 	case e := <-ch:
