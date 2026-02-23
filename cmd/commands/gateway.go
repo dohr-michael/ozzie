@@ -127,16 +127,6 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 	slog.Info("skills loaded", "count", len(skillRegistry.All()))
 
-	allTools := toolRegistry.Tools()
-	slog.Info("tools loaded", "count", len(allTools))
-
-	// Agent — persona from SOUL.md or DefaultSystemPrompt fallback (layer 1)
-	persona := agent.LoadPersona()
-	runner, err := agent.NewAgent(ctx, chatModel, persona, allTools)
-	if err != nil {
-		return fmt.Errorf("init agent: %w", err)
-	}
-
 	// Session store
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
 	sessionStore := sessions.NewFileStore(sessionsDir)
@@ -147,27 +137,42 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register update_session tool", "error", err)
 	}
 
+	// Agent — persona from SOUL.md or DefaultSystemPrompt fallback (layer 1)
+	persona := agent.LoadPersona()
+
+	// ToolSet: all native/built-in tools are always active,
+	// only WASM plugin tools require dynamic activation.
+	coreTools := toolRegistry.NativeToolNames()
+	toolSet := agent.NewToolSet(coreTools, toolRegistry.ToolNames())
+
+	// Register activate_tools meta-tool (needs toolSet + toolRegistry)
+	activateTool := plugins.NewActivateToolsTool(toolSet, toolRegistry)
+	if err := toolRegistry.RegisterNative("activate_tools", activateTool, plugins.ActivateToolsManifest()); err != nil {
+		slog.Warn("failed to register activate_tools tool", "error", err)
+	}
+
+	slog.Info("tools loaded", "count", len(toolRegistry.ToolNames()))
+
+	// AgentFactory (replaces single runner — creates fresh runner per turn)
+	factory := agent.NewAgentFactory(chatModel, persona)
+
 	// Cost tracker — accumulates token usage per session
 	costTracker := storage.NewCostTracker(bus, sessionStore)
 	defer costTracker.Close()
 
-	// Build tool descriptions for prompt composer (layer 3)
-	toolDescs := make(map[string]string, len(toolRegistry.ToolNames()))
-	for _, name := range toolRegistry.ToolNames() {
-		if spec := toolRegistry.ToolSpec(name); spec != nil {
-			toolDescs[name] = spec.Description
-		}
-	}
+	// Build full tool descriptions for prompt composer
+	allToolDescs := toolRegistry.AllToolDescriptions()
 
-	// Event runner
+	// Event runner with dynamic tool selection
 	eventRunner := agent.NewEventRunner(agent.EventRunnerConfig{
-		Runner:             runner,
-		EventBus:           bus,
-		Store:              sessionStore,
-		CustomInstructions: cfg.Agent.SystemPrompt,
-		ToolNames:          toolRegistry.ToolNames(),
-		ToolDescriptions:   toolDescs,
-		SkillDescriptions:  skillDescs,
+		Factory:             factory,
+		ToolSet:             toolSet,
+		Registry:            toolRegistry,
+		EventBus:            bus,
+		Store:               sessionStore,
+		CustomInstructions:  cfg.Agent.SystemPrompt,
+		AllToolDescriptions: allToolDescs,
+		SkillDescriptions:   skillDescs,
 	})
 	defer eventRunner.Close()
 

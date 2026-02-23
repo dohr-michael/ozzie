@@ -116,9 +116,46 @@ func (r *ToolRegistry) ToolNames() []string {
 	return names
 }
 
+// NativeToolNames returns the names of all tools whose manifest has Provider == "native".
+func (r *ToolRegistry) NativeToolNames() []string {
+	var names []string
+	for name, m := range r.manifests {
+		if m.Provider == "native" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // Tool returns the InvokableTool for a given name, or nil if not found.
 func (r *ToolRegistry) Tool(name string) tool.InvokableTool {
 	return r.tools[name]
+}
+
+// ToolsByNames returns the InvokableTools matching the given names.
+// Unknown names are silently skipped.
+func (r *ToolRegistry) ToolsByNames(names []string) []tool.InvokableTool {
+	result := make([]tool.InvokableTool, 0, len(names))
+	for _, name := range names {
+		if t, ok := r.tools[name]; ok {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+// AllToolDescriptions returns a map of tool name → description for every
+// registered tool. Tools without a ToolSpec get an empty description.
+func (r *ToolRegistry) AllToolDescriptions() map[string]string {
+	descs := make(map[string]string, len(r.tools))
+	for name := range r.tools {
+		if spec, ok := r.specs[name]; ok {
+			descs[name] = spec.Description
+		} else {
+			descs[name] = ""
+		}
+	}
+	return descs
 }
 
 // LoadPluginsDir scans a directory for plugin manifests and loads them.
