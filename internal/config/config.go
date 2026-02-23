@@ -42,7 +42,8 @@ type ProviderConfig struct {
 	Model     string         `json:"model"`
 	BaseURL   string         `json:"base_url,omitempty"`
 	Auth      AuthConfig     `json:"auth"`
-	MaxTokens int            `json:"max_tokens,omitempty"`
+	MaxTokens     int            `json:"max_tokens,omitempty"`
+	ContextWindow int            `json:"context_window,omitempty"` // total context window in tokens (0 = driver default)
 	Tags      []string       `json:"tags,omitempty"`
 	Timeout   Duration       `json:"timeout,omitempty"`
 	Options   map[string]any `json:"options,omitempty"`

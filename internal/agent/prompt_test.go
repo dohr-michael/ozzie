@@ -28,23 +28,27 @@ func TestCompose_CustomInstructionsOnly(t *testing.T) {
 	}
 }
 
-func TestCompose_ToolsManifest(t *testing.T) {
+func TestCompose_ActiveToolsOnly(t *testing.T) {
 	pc := NewPromptComposer()
 	result := pc.Compose(PromptContext{
-		ToolNames: []string{"root_cmd", "cmd"},
-		ToolDescriptions: map[string]string{
+		ActiveToolNames: []string{"root_cmd", "cmd"},
+		AllToolDescriptions: map[string]string{
 			"cmd":      "Execute a shell command",
 			"root_cmd": "Execute a privileged command",
 		},
 	})
-	if !strings.Contains(result, "## Available Tools") {
-		t.Errorf("expected tools section header, got %q", result)
+	if !strings.Contains(result, "## Active Tools (ready to use)") {
+		t.Errorf("expected active tools section header, got %q", result)
 	}
 	if !strings.Contains(result, "**cmd**: Execute a shell command") {
 		t.Errorf("expected cmd tool entry, got %q", result)
 	}
 	if !strings.Contains(result, "**root_cmd**: Execute a privileged command") {
 		t.Errorf("expected root_cmd tool entry, got %q", result)
+	}
+	// All tools are active → no "Available Tools" section
+	if strings.Contains(result, "Available Tools") {
+		t.Errorf("expected no Available Tools section when all active, got %q", result)
 	}
 	// Verify sorted order: cmd before root_cmd
 	cmdIdx := strings.Index(result, "**cmd**")
@@ -54,11 +58,47 @@ func TestCompose_ToolsManifest(t *testing.T) {
 	}
 }
 
+func TestCompose_ActiveAndAvailableTools(t *testing.T) {
+	pc := NewPromptComposer()
+	result := pc.Compose(PromptContext{
+		ActiveToolNames: []string{"cmd", "read_file"},
+		AllToolDescriptions: map[string]string{
+			"cmd":       "Execute a shell command",
+			"read_file": "Read file contents",
+			"search":    "Search file contents",
+			"git":       "Git operations",
+		},
+	})
+	if !strings.Contains(result, "## Active Tools (ready to use)") {
+		t.Errorf("expected active tools section, got %q", result)
+	}
+	if !strings.Contains(result, "## Available Tools (call activate_tools first)") {
+		t.Errorf("expected available tools section, got %q", result)
+	}
+	// Active tools
+	if !strings.Contains(result, "**cmd**: Execute a shell command") {
+		t.Errorf("expected cmd in active, got %q", result)
+	}
+	// Available tools
+	if !strings.Contains(result, "**search**: Search file contents") {
+		t.Errorf("expected search in available, got %q", result)
+	}
+	if !strings.Contains(result, "**git**: Git operations") {
+		t.Errorf("expected git in available, got %q", result)
+	}
+	// Available section should come after active section
+	activeIdx := strings.Index(result, "## Active Tools")
+	availIdx := strings.Index(result, "## Available Tools")
+	if activeIdx > availIdx {
+		t.Errorf("Active section (%d) should come before Available (%d)", activeIdx, availIdx)
+	}
+}
+
 func TestCompose_ToolWithoutDescription(t *testing.T) {
 	pc := NewPromptComposer()
 	result := pc.Compose(PromptContext{
-		ToolNames:        []string{"mystery"},
-		ToolDescriptions: map[string]string{},
+		ActiveToolNames:     []string{"mystery"},
+		AllToolDescriptions: map[string]string{},
 	})
 	if !strings.Contains(result, "- **mystery**\n") {
 		t.Errorf("expected tool without description, got %q", result)
@@ -157,19 +197,19 @@ func TestCompose_SkillDescriptions(t *testing.T) {
 func TestCompose_AllLayers(t *testing.T) {
 	pc := NewPromptComposer()
 	result := pc.Compose(PromptContext{
-		CustomInstructions: "Be concise.",
-		ToolNames:          []string{"cmd"},
-		ToolDescriptions:   map[string]string{"cmd": "Run a command"},
-		SkillDescriptions:  map[string]string{"summarizer": "Summarize text"},
-		Session:            &sessions.Session{Title: "My session"},
-		MessageCount:       10,
-		TaskInstructions:   "Step 3: validate output",
+		CustomInstructions:  "Be concise.",
+		ActiveToolNames:     []string{"cmd"},
+		AllToolDescriptions: map[string]string{"cmd": "Run a command"},
+		SkillDescriptions:   map[string]string{"summarizer": "Summarize text"},
+		Session:             &sessions.Session{Title: "My session"},
+		MessageCount:        10,
+		TaskInstructions:    "Step 3: validate output",
 	})
 
 	// All sections present
 	for _, section := range []string{
 		"## Additional Instructions",
-		"## Available Tools",
+		"## Active Tools (ready to use)",
 		"## Available Skills",
 		"## Session Context",
 		"## Current Task",
@@ -181,7 +221,7 @@ func TestCompose_AllLayers(t *testing.T) {
 
 	// Correct order
 	instrIdx := strings.Index(result, "## Additional Instructions")
-	toolsIdx := strings.Index(result, "## Available Tools")
+	toolsIdx := strings.Index(result, "## Active Tools")
 	skillsIdx := strings.Index(result, "## Available Skills")
 	sessIdx := strings.Index(result, "## Session Context")
 	taskIdx := strings.Index(result, "## Current Task")

@@ -170,6 +170,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		Registry:            toolRegistry,
 		EventBus:            bus,
 		Store:               sessionStore,
+		ContextWindow:       registry.DefaultContextWindow(),
 		CustomInstructions:  cfg.Agent.SystemPrompt,
 		AllToolDescriptions: allToolDescs,
 		SkillDescriptions:   skillDescs,

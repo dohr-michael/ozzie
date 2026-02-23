@@ -3,12 +3,29 @@ package models
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/cloudwego/eino/components/model"
 
 	"github.com/dohr-michael/ozzie/internal/config"
 )
+
+// defaultContextWindows maps known model prefixes to their context window sizes.
+var defaultContextWindows = map[string]int{
+	"claude-opus-4":    200000,
+	"claude-sonnet-4":  200000,
+	"claude-sonnet-3":  200000,
+	"claude-haiku-3":   200000,
+	"gpt-4o":           128000,
+	"gpt-4-turbo":      128000,
+	"gpt-4":            8192,
+	"gpt-3.5-turbo":    16385,
+	"o1":               200000,
+	"o3":               200000,
+}
+
+const fallbackContextWindow = 100000
 
 // ProviderEntry holds a lazily-initialized model instance.
 type ProviderEntry struct {
@@ -67,4 +84,42 @@ func (r *Registry) Default(ctx context.Context) (model.ToolCallingChatModel, err
 // DefaultName returns the name of the default provider.
 func (r *Registry) DefaultName() string {
 	return r.defaultName
+}
+
+// DefaultContextWindow returns the context window size for the default provider.
+func (r *Registry) DefaultContextWindow() int {
+	return r.ContextWindow(r.defaultName)
+}
+
+// ContextWindow returns the context window size for the named provider.
+func (r *Registry) ContextWindow(name string) int {
+	r.mu.RLock()
+	entry, ok := r.providers[name]
+	r.mu.RUnlock()
+
+	if !ok {
+		return fallbackContextWindow
+	}
+	return resolveContextWindow(entry.Config)
+}
+
+// resolveContextWindow determines context window: explicit config > model prefix > driver default > fallback.
+func resolveContextWindow(cfg config.ProviderConfig) int {
+	if cfg.ContextWindow > 0 {
+		return cfg.ContextWindow
+	}
+
+	// Match by model prefix
+	for prefix, size := range defaultContextWindows {
+		if strings.HasPrefix(cfg.Model, prefix) {
+			return size
+		}
+	}
+
+	// Driver-specific defaults
+	if cfg.Driver == "ollama" {
+		return 8192
+	}
+
+	return fallbackContextWindow
 }

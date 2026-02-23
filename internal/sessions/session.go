@@ -33,6 +33,8 @@ type Session struct {
 	TokenUsage   TokenUsage        `json:"token_usage"`
 	RootDir      string            `json:"root_dir,omitempty"`
 	Language     string            `json:"language,omitempty"`
+	Summary      string            `json:"summary,omitempty"`        // compressed context from older messages
+	SummaryUpTo  int               `json:"summary_up_to,omitempty"`  // index (exclusive) of last summarized message
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 

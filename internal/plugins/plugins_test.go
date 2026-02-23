@@ -881,3 +881,124 @@ func TestGitTool_InvokableRun_EmptyAction(t *testing.T) {
 		t.Error("expected error for empty action")
 	}
 }
+
+// --- ActivateToolsTool tests ---
+
+// mockActivator is a test double for ToolActivator.
+type mockActivator struct {
+	known     map[string]bool
+	activated map[string][]string // sessionID → tool names
+}
+
+func newMockActivator(known []string) *mockActivator {
+	m := &mockActivator{
+		known:     make(map[string]bool, len(known)),
+		activated: make(map[string][]string),
+	}
+	for _, n := range known {
+		m.known[n] = true
+	}
+	return m
+}
+
+func (m *mockActivator) IsKnown(name string) bool { return m.known[name] }
+func (m *mockActivator) Activate(sessionID, name string) bool {
+	if !m.known[name] {
+		return false
+	}
+	m.activated[sessionID] = append(m.activated[sessionID], name)
+	return true
+}
+
+func TestActivateToolsTool_Info(t *testing.T) {
+	activator := newMockActivator(nil)
+	bus := events.NewBus(16)
+	defer bus.Close()
+	registry := NewToolRegistry(bus)
+	defer registry.Close(context.Background())
+
+	at := NewActivateToolsTool(activator, registry)
+	info, err := at.Info(context.Background())
+	if err != nil {
+		t.Fatalf("Info: %v", err)
+	}
+	if info.Name != "activate_tools" {
+		t.Errorf("Name = %q, want %q", info.Name, "activate_tools")
+	}
+}
+
+func TestActivateToolsTool_ActivateKnown(t *testing.T) {
+	activator := newMockActivator([]string{"search", "git"})
+	bus := events.NewBus(16)
+	defer bus.Close()
+	registry := NewToolRegistry(bus)
+	defer registry.Close(context.Background())
+
+	// Register tools so we can get descriptions
+	if err := registry.RegisterNative("search", NewSearchTool(), SearchManifest()); err != nil {
+		t.Fatal(err)
+	}
+
+	at := NewActivateToolsTool(activator, registry)
+	ctx := events.ContextWithSessionID(context.Background(), "sess1")
+
+	result, err := at.InvokableRun(ctx, `{"names": ["search"]}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, `"name":"search"`) {
+		t.Errorf("result %q does not contain activated search", result)
+	}
+	if len(activator.activated["sess1"]) != 1 || activator.activated["sess1"][0] != "search" {
+		t.Errorf("activator.activated = %v, want [search]", activator.activated["sess1"])
+	}
+}
+
+func TestActivateToolsTool_ActivateUnknown(t *testing.T) {
+	activator := newMockActivator([]string{"search"})
+	bus := events.NewBus(16)
+	defer bus.Close()
+	registry := NewToolRegistry(bus)
+	defer registry.Close(context.Background())
+
+	at := NewActivateToolsTool(activator, registry)
+	ctx := events.ContextWithSessionID(context.Background(), "sess1")
+
+	result, err := at.InvokableRun(ctx, `{"names": ["nonexistent"]}`)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+	if !contains(result, "unknown tool") {
+		t.Errorf("result %q does not contain error for unknown tool", result)
+	}
+}
+
+func TestActivateToolsTool_NoSessionID(t *testing.T) {
+	activator := newMockActivator([]string{"search"})
+	bus := events.NewBus(16)
+	defer bus.Close()
+	registry := NewToolRegistry(bus)
+	defer registry.Close(context.Background())
+
+	at := NewActivateToolsTool(activator, registry)
+	_, err := at.InvokableRun(context.Background(), `{"names": ["search"]}`)
+	if err == nil {
+		t.Error("expected error for missing session ID")
+	}
+}
+
+func TestActivateToolsTool_EmptyNames(t *testing.T) {
+	activator := newMockActivator([]string{"search"})
+	bus := events.NewBus(16)
+	defer bus.Close()
+	registry := NewToolRegistry(bus)
+	defer registry.Close(context.Background())
+
+	at := NewActivateToolsTool(activator, registry)
+	ctx := events.ContextWithSessionID(context.Background(), "sess1")
+
+	_, err := at.InvokableRun(ctx, `{"names": []}`)
+	if err == nil {
+		t.Error("expected error for empty names")
+	}
+}

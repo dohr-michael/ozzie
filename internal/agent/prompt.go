@@ -10,13 +10,13 @@ import (
 
 // PromptContext holds dynamic context for per-turn prompt composition.
 type PromptContext struct {
-	CustomInstructions string            // Layer 2: from config
-	ToolNames          []string          // Layer 3: active tool names
-	ToolDescriptions   map[string]string // Layer 3: tool name → description
-	SkillDescriptions  map[string]string // Layer 3b: skill name → description
-	Session            *sessions.Session // Layer 4: session metadata
-	MessageCount       int               // Layer 4: nb messages in history
-	TaskInstructions   string            // Layer 5: stub for future
+	CustomInstructions  string            // Layer 2: from config
+	ActiveToolNames     []string          // Layer 3: tools registered with Eino (active)
+	AllToolDescriptions map[string]string // Layer 3: full catalog (name → desc)
+	SkillDescriptions   map[string]string // Layer 3b: skill name → description
+	Session             *sessions.Session // Layer 4: session metadata
+	MessageCount        int               // Layer 4: nb messages in history
+	TaskInstructions    string            // Layer 5: stub for future
 }
 
 // PromptComposer builds dynamic context layers (2-5).
@@ -37,22 +37,46 @@ func (pc *PromptComposer) Compose(pctx PromptContext) string {
 		sections = append(sections, "## Additional Instructions\n\n"+pctx.CustomInstructions)
 	}
 
-	// Layer 3: Active tools manifest
-	if len(pctx.ToolNames) > 0 {
-		sorted := make([]string, len(pctx.ToolNames))
-		copy(sorted, pctx.ToolNames)
+	// Layer 3: Active tools + available (inactive) tools
+	if len(pctx.ActiveToolNames) > 0 {
+		activeSet := make(map[string]bool, len(pctx.ActiveToolNames))
+		sorted := make([]string, len(pctx.ActiveToolNames))
+		copy(sorted, pctx.ActiveToolNames)
 		sort.Strings(sorted)
+		for _, n := range sorted {
+			activeSet[n] = true
+		}
 
 		var sb strings.Builder
-		sb.WriteString("## Available Tools\n\n")
-		sb.WriteString("You have access to the following tools:\n")
+		sb.WriteString("## Active Tools (ready to use)\n\n")
 		for _, name := range sorted {
-			if desc, ok := pctx.ToolDescriptions[name]; ok && desc != "" {
+			if desc, ok := pctx.AllToolDescriptions[name]; ok && desc != "" {
 				sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, desc))
 			} else {
 				sb.WriteString(fmt.Sprintf("- **%s**\n", name))
 			}
 		}
+
+		// Collect inactive tools
+		var inactive []string
+		for name := range pctx.AllToolDescriptions {
+			if !activeSet[name] {
+				inactive = append(inactive, name)
+			}
+		}
+		sort.Strings(inactive)
+
+		if len(inactive) > 0 {
+			sb.WriteString("\n## Available Tools (call activate_tools first)\n\n")
+			for _, name := range inactive {
+				if desc := pctx.AllToolDescriptions[name]; desc != "" {
+					sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, desc))
+				} else {
+					sb.WriteString(fmt.Sprintf("- **%s**\n", name))
+				}
+			}
+		}
+
 		sections = append(sections, sb.String())
 	}
 
