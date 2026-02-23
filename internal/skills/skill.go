@@ -29,9 +29,6 @@ type Skill struct {
 	Vars        map[string]Var    `json:"vars"`
 	Steps       []Step            `json:"steps"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
-
-	// Backward compatibility: system_prompt → instruction
-	SystemPrompt string `json:"system_prompt,omitempty"`
 }
 
 // TriggerConfig controls how a skill can be invoked.
@@ -68,12 +65,6 @@ func LoadSkill(path string) (*Skill, error) {
 	if err := jsonc.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("parse skill %s: %w", path, err)
 	}
-
-	// Backward compat: system_prompt → instruction
-	if s.Instruction == "" && s.SystemPrompt != "" {
-		s.Instruction = s.SystemPrompt
-	}
-	s.SystemPrompt = ""
 
 	// Infer type from steps
 	if s.Type == "" {

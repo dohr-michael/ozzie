@@ -3,10 +3,12 @@ package callbacks
 
 import (
 	"context"
+	"io"
 
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 	ub "github.com/cloudwego/eino/utils/callbacks"
 
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -46,6 +48,53 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 				payload.TokensOutput = output.Message.ResponseMeta.Usage.CompletionTokens
 			}
 			publishTyped(ctx, payload)
+			return ctx
+		},
+
+		OnEndWithStreamOutput: func(ctx context.Context, info *callbacks.RunInfo, output *schema.StreamReader[*model.CallbackOutput]) context.Context {
+			// Stream is a copy — must be drained. Run in goroutine to avoid blocking.
+			go func() {
+				defer output.Close()
+				var tokensIn, tokensOut int
+				for {
+					chunk, err := output.Recv()
+					if err != nil {
+						if err != io.EOF {
+							publishTyped(ctx, events.LLMCallPayload{
+								Phase: "error",
+								Model: info.Name,
+								Error: err.Error(),
+							})
+						}
+						break
+					}
+					// Prefer TokenUsage on CallbackOutput (set by provider libs)
+					if chunk.TokenUsage != nil {
+						if chunk.TokenUsage.PromptTokens > 0 {
+							tokensIn = chunk.TokenUsage.PromptTokens
+						}
+						if chunk.TokenUsage.CompletionTokens > 0 {
+							tokensOut = chunk.TokenUsage.CompletionTokens
+						}
+					}
+					// Fallback: check Message.ResponseMeta.Usage
+					if chunk.Message != nil && chunk.Message.ResponseMeta != nil && chunk.Message.ResponseMeta.Usage != nil {
+						u := chunk.Message.ResponseMeta.Usage
+						if u.PromptTokens > 0 {
+							tokensIn = u.PromptTokens
+						}
+						if u.CompletionTokens > 0 {
+							tokensOut = u.CompletionTokens
+						}
+					}
+				}
+				publishTyped(ctx, events.LLMCallPayload{
+					Phase:        "response",
+					Model:        info.Name,
+					TokensInput:  tokensIn,
+					TokensOutput: tokensOut,
+				})
+			}()
 			return ctx
 		},
 

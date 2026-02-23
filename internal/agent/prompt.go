@@ -74,16 +74,26 @@ func (pc *PromptComposer) Compose(pctx PromptContext) string {
 	}
 
 	// Layer 4: Session context
-	if pctx.Session != nil && pctx.MessageCount > 0 {
+	if pctx.Session != nil {
 		var sb strings.Builder
 		sb.WriteString("## Session Context\n\n")
-		if pctx.Session.Title != "" {
-			sb.WriteString(fmt.Sprintf("Resumed session: %q.\n", pctx.Session.Title))
-		} else {
-			sb.WriteString("Resumed session.\n")
+		if pctx.Session.RootDir != "" {
+			sb.WriteString(fmt.Sprintf("Working directory: %s\n", pctx.Session.RootDir))
 		}
-		sb.WriteString(fmt.Sprintf("%d previous messages.", pctx.MessageCount))
-		sections = append(sections, sb.String())
+		if pctx.Session.Language != "" {
+			sb.WriteString(fmt.Sprintf("Preferred language: %s\n", pctx.Session.Language))
+		}
+		if pctx.Session.Title != "" && pctx.MessageCount > 0 {
+			sb.WriteString(fmt.Sprintf("Resumed session: %q.\n", pctx.Session.Title))
+		}
+		if pctx.MessageCount > 0 {
+			sb.WriteString(fmt.Sprintf("%d previous messages.", pctx.MessageCount))
+		}
+		// Only emit the section if there's actual content beyond the header
+		content := sb.String()
+		if content != "## Session Context\n\n" {
+			sections = append(sections, content)
+		}
 	}
 
 	// Layer 5: Task-specific instructions (stub for future)

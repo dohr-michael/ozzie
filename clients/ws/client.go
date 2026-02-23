@@ -37,13 +37,19 @@ func Dial(ctx context.Context, url string) (*Client, error) {
 	}, nil
 }
 
+// OpenSessionOpts holds parameters for opening or resuming a session.
+type OpenSessionOpts struct {
+	SessionID string `json:"session_id,omitempty"`
+	RootDir   string `json:"root_dir,omitempty"`
+}
+
 // OpenSession sends an open_session request and returns the session ID.
-// If sessionID is empty, the server creates a new session.
-// If sessionID is non-empty, the server resumes that session.
-func (c *Client) OpenSession(sessionID string) (string, error) {
+// If opts.SessionID is empty, the server creates a new session.
+// If opts.SessionID is non-empty, the server resumes that session.
+func (c *Client) OpenSession(opts OpenSessionOpts) (string, error) {
 	seq := atomic.AddUint64(&c.reqSeq, 1)
 
-	params, _ := json.Marshal(map[string]string{"session_id": sessionID})
+	params, _ := json.Marshal(opts)
 
 	frame := wsprotocol.Frame{
 		Type:   wsprotocol.FrameTypeRequest,

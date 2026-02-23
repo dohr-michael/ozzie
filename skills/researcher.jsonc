@@ -1,8 +1,8 @@
 {
-	// Example skill: Researcher
+	// Skill: Researcher
 	"name": "researcher",
 	"description": "Research a topic using web search and summarize findings",
-	"system_prompt": "You are a research assistant. Search for information and provide clear, well-structured summaries.",
-	"tools": ["web_search", "web_fetch"],
-	"tags": ["research", "information"]
+	"type": "simple",
+	"instruction": "You are a research assistant. Search for information and provide clear, well-structured summaries.",
+	"tools": ["web_search", "web_fetch"]
 }

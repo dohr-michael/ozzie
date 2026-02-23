@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
+	einoCallbacks "github.com/cloudwego/eino/callbacks"
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/agent"
+	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway"
@@ -72,6 +74,10 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Event bus
 	bus := events.NewBus(cfg.Events.BufferSize)
 	defer bus.Close()
+
+	// Register Eino callbacks → event bus bridge
+	cbHandler := ozzieCallbacks.NewEventBusHandler(bus, events.SourceAgent)
+	einoCallbacks.AppendGlobalHandlers(cbHandler)
 
 	// Event persistence
 	logsDir := filepath.Join(config.OzziePath(), "logs")
@@ -134,6 +140,12 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Session store
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
 	sessionStore := sessions.NewFileStore(sessionsDir)
+
+	// Register update_session tool (needs session store, so registered here)
+	updateSessionTool := plugins.NewUpdateSessionTool(sessionStore)
+	if err := toolRegistry.RegisterNative("update_session", updateSessionTool, plugins.UpdateSessionManifest()); err != nil {
+		slog.Warn("failed to register update_session tool", "error", err)
+	}
 
 	// Cost tracker — accumulates token usage per session
 	costTracker := storage.NewCostTracker(bus, sessionStore)

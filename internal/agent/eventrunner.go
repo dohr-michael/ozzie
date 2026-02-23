@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -98,7 +99,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 	}()
 
 	// Persist user message
-	userMsg := sessions.Message{Role: string(schema.User), Content: content}
+	userMsg := sessions.Message{Role: string(schema.User), Content: content, Ts: time.Now()}
 	if err := er.store.AppendMessage(sessionID, userMsg); err != nil {
 		slog.Error("persist user message", "error", err, "session_id", sessionID)
 	}
@@ -204,7 +205,7 @@ func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator
 
 	// Persist assistant response
 	if contentBuilder != "" {
-		assistantMsg := sessions.Message{Role: string(schema.Assistant), Content: contentBuilder}
+		assistantMsg := sessions.Message{Role: string(schema.Assistant), Content: contentBuilder, Ts: time.Now()}
 		if err := er.store.AppendMessage(sessionID, assistantMsg); err != nil {
 			slog.Error("persist assistant message", "error", err, "session_id", sessionID)
 		}

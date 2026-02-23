@@ -23,14 +23,17 @@ type TokenUsage struct {
 
 // Session holds metadata about a conversation session.
 type Session struct {
-	ID           string        `json:"id"`
-	Title        string        `json:"title"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
-	Status       SessionStatus `json:"status"`
-	Model        string        `json:"model,omitempty"`
-	MessageCount int           `json:"message_count"`
-	TokenUsage   TokenUsage    `json:"token_usage"`
+	ID           string            `json:"id"`
+	Title        string            `json:"title"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
+	Status       SessionStatus     `json:"status"`
+	Model        string            `json:"model,omitempty"`
+	MessageCount int               `json:"message_count"`
+	TokenUsage   TokenUsage        `json:"token_usage"`
+	RootDir      string            `json:"root_dir,omitempty"`
+	Language     string            `json:"language,omitempty"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 // Message is a single turn in a conversation, serializable to JSONL.

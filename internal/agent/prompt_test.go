@@ -87,11 +87,44 @@ func TestCompose_SessionContextResumed(t *testing.T) {
 func TestCompose_SessionContextNewSession(t *testing.T) {
 	pc := NewPromptComposer()
 	result := pc.Compose(PromptContext{
-		Session:      &sessions.Session{Title: "New chat"},
+		Session:      &sessions.Session{},
 		MessageCount: 0,
 	})
 	if strings.Contains(result, "## Session Context") {
-		t.Errorf("expected no session section for 0 messages, got %q", result)
+		t.Errorf("expected no session section for empty new session, got %q", result)
+	}
+}
+
+func TestCompose_SessionWithRootDir(t *testing.T) {
+	pc := NewPromptComposer()
+	result := pc.Compose(PromptContext{
+		Session: &sessions.Session{
+			RootDir: "/home/user/project",
+		},
+		MessageCount: 0,
+	})
+	if !strings.Contains(result, "## Session Context") {
+		t.Errorf("expected session section header, got %q", result)
+	}
+	if !strings.Contains(result, "Working directory: /home/user/project") {
+		t.Errorf("expected working directory, got %q", result)
+	}
+	// Title should NOT appear for new session
+	if strings.Contains(result, "Resumed session") {
+		t.Errorf("expected no resumed session line for new session, got %q", result)
+	}
+}
+
+func TestCompose_SessionWithLanguage(t *testing.T) {
+	pc := NewPromptComposer()
+	result := pc.Compose(PromptContext{
+		Session: &sessions.Session{
+			Language: "fr",
+		},
+		MessageCount: 0,
+	})
+	if !strings.Contains(result, "Preferred language: fr") {
+		t.Errorf("expected preferred language, got %q", result)
 	}
 }
 

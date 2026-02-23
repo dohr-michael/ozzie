@@ -54,7 +54,11 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	defer client.Close()
 
 	// Open or resume session
-	sid, err := client.OpenSession(sessionFlag)
+	cwd, _ := os.Getwd()
+	sid, err := client.OpenSession(wsclient.OpenSessionOpts{
+		SessionID: sessionFlag,
+		RootDir:   cwd,
+	})
 	if err != nil {
 		return fmt.Errorf("open session: %w", err)
 	}

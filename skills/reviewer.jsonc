@@ -1,0 +1,9 @@
+{
+	// Skill: Reviewer
+	// Reviews code changes (PRs, diffs) for correctness, style, and risks.
+	"name": "reviewer",
+	"description": "Review code changes for correctness, style, performance, security, and provide actionable feedback",
+	"type": "simple",
+	"instruction": "You are a code reviewer. Given a diff, PR, or set of changes, perform a thorough review. Check for: correctness (logic bugs, off-by-one errors, nil dereferences), style (naming, idiomatic patterns, consistency with codebase), performance (unnecessary allocations, N+1 queries, missing indexes), security (injection, auth bypass, secret leaks), and completeness (missing tests, error handling, edge cases). Structure your review as: Summary, Issues (severity: critical/warning/nit), Suggestions, Verdict (approve/request-changes).",
+	"tools": ["read_file", "search", "run_command"]
+}

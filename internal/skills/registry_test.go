@@ -125,6 +125,49 @@ func TestRegistry_LoadDir(t *testing.T) {
 	}
 }
 
+// TestLoadSkillFiles loads every .jsonc file from the project's skills/
+// directory and verifies that each one parses and validates successfully.
+func TestLoadSkillFiles(t *testing.T) {
+	// Resolve the project-root skills/ directory relative to this test file.
+	skillsDir := filepath.Join("..", "..", "skills")
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("read skills dir: %v", err)
+	}
+
+	var loaded int
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonc" {
+			continue
+		}
+		path := filepath.Join(skillsDir, entry.Name())
+		t.Run(entry.Name(), func(t *testing.T) {
+			s, err := LoadSkill(path)
+			if err != nil {
+				t.Fatalf("LoadSkill(%s): %v", entry.Name(), err)
+			}
+			if s.Name == "" {
+				t.Fatal("skill name is empty")
+			}
+			if s.Type != SkillTypeSimple && s.Type != SkillTypeWorkflow {
+				t.Fatalf("unexpected type: %q", s.Type)
+			}
+			if s.Type == SkillTypeWorkflow && len(s.Steps) == 0 {
+				t.Fatal("workflow skill has no steps")
+			}
+			if s.Type == SkillTypeSimple && s.Instruction == "" {
+				t.Fatal("simple skill has no instruction")
+			}
+		})
+		loaded++
+	}
+
+	if loaded == 0 {
+		t.Fatal("no .jsonc skill files found in skills/")
+	}
+	t.Logf("loaded %d skill files successfully", loaded)
+}
+
 func TestRegistry_LoadDir_MissingDir(t *testing.T) {
 	r := NewRegistry()
 	err := r.LoadDir("/nonexistent/path/skills")

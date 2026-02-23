@@ -10,6 +10,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
+	"github.com/cloudwego/eino/callbacks"
+	"github.com/cloudwego/eino/components"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 
@@ -66,26 +68,74 @@ func NewAnthropic(ctx context.Context, cfg config.ProviderConfig, auth ResolvedA
 	}, nil
 }
 
-func (m *AnthropicChatModel) Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	params := m.buildParams(messages, opts)
+func (m *AnthropicChatModel) Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (outMsg *schema.Message, err error) {
+	ctx = callbacks.EnsureRunInfo(ctx, "Anthropic", components.ComponentOfChatModel)
 
+	cbInput := &model.CallbackInput{
+		Messages: messages,
+		Tools:    m.tools,
+		Config:   &model.Config{Model: m.modelName},
+	}
+	ctx = callbacks.OnStart(ctx, cbInput)
+	defer func() {
+		if err != nil {
+			callbacks.OnError(ctx, err)
+		}
+	}()
+
+	params := m.buildParams(messages, opts)
 	resp, err := m.client.Messages.New(ctx, params)
 	if err != nil {
 		return nil, HandleError(err)
 	}
 
-	return m.convertResponse(resp), nil
+	outMsg = m.convertResponse(resp)
+
+	callbacks.OnEnd(ctx, &model.CallbackOutput{
+		Message: outMsg,
+		Config:  cbInput.Config,
+		TokenUsage: &model.TokenUsage{
+			PromptTokens:     int(resp.Usage.InputTokens),
+			CompletionTokens: int(resp.Usage.OutputTokens),
+			TotalTokens:      int(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+		},
+	})
+
+	return outMsg, nil
 }
 
-func (m *AnthropicChatModel) Stream(ctx context.Context, messages []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	params := m.buildParams(messages, opts)
+func (m *AnthropicChatModel) Stream(ctx context.Context, messages []*schema.Message, opts ...model.Option) (outStream *schema.StreamReader[*schema.Message], err error) {
+	ctx = callbacks.EnsureRunInfo(ctx, "Anthropic", components.ComponentOfChatModel)
 
+	cbInput := &model.CallbackInput{
+		Messages: messages,
+		Tools:    m.tools,
+		Config:   &model.Config{Model: m.modelName},
+	}
+	ctx = callbacks.OnStart(ctx, cbInput)
+	defer func() {
+		if err != nil {
+			callbacks.OnError(ctx, err)
+		}
+	}()
+
+	params := m.buildParams(messages, opts)
 	stream := m.client.Messages.NewStreaming(ctx, params)
 
-	reader, writer := schema.Pipe[*schema.Message](10)
-	go m.streamResponse(ctx, stream, writer)
+	sr, sw := schema.Pipe[*model.CallbackOutput](10)
+	go m.streamResponse(ctx, stream, sw, cbInput.Config)
 
-	return reader, nil
+	ctx, nsr := callbacks.OnEndWithStreamOutput(ctx, sr)
+
+	outStream = schema.StreamReaderWithConvert(nsr,
+		func(src *model.CallbackOutput) (*schema.Message, error) {
+			if src.Message == nil {
+				return nil, schema.ErrNoValue
+			}
+			return src.Message, nil
+		})
+
+	return outStream, nil
 }
 
 func (m *AnthropicChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
@@ -250,7 +300,7 @@ func (m *AnthropicChatModel) convertResponse(resp *anthropic.Message) *schema.Me
 	return result
 }
 
-func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestream.Stream[anthropic.MessageStreamEventUnion], writer *schema.StreamWriter[*schema.Message]) {
+func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestream.Stream[anthropic.MessageStreamEventUnion], writer *schema.StreamWriter[*model.CallbackOutput], cfg *model.Config) {
 	defer writer.Close()
 
 	var currentToolCall *schema.ToolCall
@@ -258,17 +308,29 @@ func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestre
 	var usage schema.TokenUsage
 	var content strings.Builder
 
+	send := func(msg *schema.Message, tu *model.TokenUsage, err error) bool {
+		return writer.Send(&model.CallbackOutput{
+			Message:    msg,
+			Config:     cfg,
+			TokenUsage: tu,
+		}, err)
+	}
+
+	finalMsg := func() *schema.Message {
+		return &schema.Message{
+			Role:    schema.Assistant,
+			Content: content.String(),
+			ResponseMeta: &schema.ResponseMeta{
+				Usage:        &usage,
+				FinishReason: "stop",
+			},
+		}
+	}
+
 	for stream.Next() {
 		select {
 		case <-ctx.Done():
-			writer.Send(&schema.Message{
-				Role:    schema.Assistant,
-				Content: content.String(),
-				ResponseMeta: &schema.ResponseMeta{
-					Usage:        &usage,
-					FinishReason: "stop",
-				},
-			}, ctx.Err())
+			send(finalMsg(), toModelTokenUsage(&usage), ctx.Err())
 			return
 		default:
 		}
@@ -276,6 +338,9 @@ func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestre
 		event := stream.Current()
 
 		switch event.Type {
+		case "message_start":
+			usage.PromptTokens = int(event.Message.Usage.InputTokens)
+
 		case "content_block_start":
 			cb := event.ContentBlock
 			if cb.Type == "tool_use" {
@@ -292,10 +357,12 @@ func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestre
 			delta := event.Delta
 			if delta.Type == "text_delta" {
 				content.WriteString(delta.Text)
-				writer.Send(&schema.Message{
+				if send(&schema.Message{
 					Role:    schema.Assistant,
 					Content: delta.Text,
-				}, nil)
+				}, nil, nil) {
+					return
+				}
 			} else if delta.Type == "input_json_delta" {
 				toolArgsJSON.WriteString(delta.PartialJSON)
 			}
@@ -303,10 +370,12 @@ func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestre
 		case "content_block_stop":
 			if currentToolCall != nil {
 				currentToolCall.Function.Arguments = toolArgsJSON.String()
-				writer.Send(&schema.Message{
+				if send(&schema.Message{
 					Role:      schema.Assistant,
 					ToolCalls: []schema.ToolCall{*currentToolCall},
-				}, nil)
+				}, nil, nil) {
+					return
+				}
 				currentToolCall = nil
 			}
 
@@ -314,28 +383,25 @@ func (m *AnthropicChatModel) streamResponse(ctx context.Context, stream *ssestre
 			usage.CompletionTokens = int(event.Usage.OutputTokens)
 
 		case "message_stop":
-			writer.Send(&schema.Message{
-				Role:    schema.Assistant,
-				Content: content.String(),
-				ResponseMeta: &schema.ResponseMeta{
-					Usage:        &usage,
-					FinishReason: "stop",
-				},
-			}, nil)
+			send(finalMsg(), toModelTokenUsage(&usage), nil)
 			return
 		}
 	}
 
 	if err := stream.Err(); err != nil {
-		writer.Send(&schema.Message{
-			Role:    schema.Assistant,
-			Content: content.String(),
-			ResponseMeta: &schema.ResponseMeta{
-				Usage:        &usage,
-				FinishReason: "stop",
-			},
-		}, err)
+		send(finalMsg(), toModelTokenUsage(&usage), err)
 		return
+	}
+}
+
+func toModelTokenUsage(u *schema.TokenUsage) *model.TokenUsage {
+	if u == nil {
+		return nil
+	}
+	return &model.TokenUsage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.PromptTokens + u.CompletionTokens,
 	}
 }
 

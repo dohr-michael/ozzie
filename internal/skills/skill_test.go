@@ -81,27 +81,6 @@ func TestLoadSkill_Workflow(t *testing.T) {
 	}
 }
 
-func TestLoadSkill_BackwardCompat(t *testing.T) {
-	dir := t.TempDir()
-	path := writeSkillFile(t, dir, "old.jsonc", `{
-		"name": "old-skill",
-		"description": "Uses system_prompt",
-		"type": "simple",
-		"system_prompt": "You are a helper."
-	}`)
-
-	s, err := LoadSkill(path)
-	if err != nil {
-		t.Fatalf("LoadSkill: %v", err)
-	}
-	if s.Instruction != "You are a helper." {
-		t.Fatalf("expected instruction from system_prompt, got %q", s.Instruction)
-	}
-	if s.SystemPrompt != "" {
-		t.Fatal("expected system_prompt to be cleared after migration")
-	}
-}
-
 func TestLoadSkill_InferType(t *testing.T) {
 	dir := t.TempDir()
 	// No explicit type, has steps → should infer workflow

@@ -138,7 +138,7 @@ func (h *Hub) unregisterClient(c *Client) {
 }
 
 // handleOpenSession creates or resumes a session for the client.
-func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string) {
+func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string, rootDir string) {
 	ctx := context.Background()
 
 	if sessionID != "" {
@@ -149,6 +149,13 @@ func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string) {
 			return
 		}
 		c.sessionID = s.ID
+
+		// Update root_dir if provided (client may have changed directory)
+		if rootDir != "" && rootDir != s.RootDir {
+			s.RootDir = rootDir
+			_ = h.store.UpdateMeta(s)
+		}
+
 		c.sendOK(ctx, frameID, map[string]string{
 			"session_id": s.ID,
 			"status":     "resumed",
@@ -164,6 +171,12 @@ func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string) {
 	}
 
 	c.sessionID = s.ID
+
+	// Store root_dir if provided
+	if rootDir != "" {
+		s.RootDir = rootDir
+		_ = h.store.UpdateMeta(s)
+	}
 
 	h.bus.Publish(events.NewEventWithSession(
 		events.EventSessionCreated, events.SourceHub,
@@ -264,6 +277,7 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 	case MethodOpenSession:
 		var params struct {
 			SessionID string `json:"session_id"`
+			RootDir   string `json:"root_dir"`
 		}
 		if frame.Params != nil {
 			if err := json.Unmarshal(frame.Params, &params); err != nil {
@@ -271,7 +285,7 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 				return
 			}
 		}
-		c.hub.handleOpenSession(c, frame.ID, params.SessionID)
+		c.hub.handleOpenSession(c, frame.ID, params.SessionID, params.RootDir)
 
 	case MethodSendMessage:
 		var params struct {

@@ -1,0 +1,59 @@
+{
+	// Meta-Skill: Developer
+	// Full-stack development workflow that orchestrates specialized skills.
+	// Each step's agent can invoke other skills (registered as tools) to delegate work.
+	"name": "developer",
+	"description": "End-to-end development workflow: analyze requirements, design architecture, implement, test, and review",
+	"type": "workflow",
+	"tools": [
+		"analyst", "architect", "backend-dev", "frontend-dev",
+		"tester", "reviewer", "qa", "refactor",
+		"read_file", "write_file", "search", "run_command"
+	],
+	"vars": {
+		"task": {
+			"description": "The feature, bug fix, or change to implement",
+			"required": true
+		},
+		"stack": {
+			"description": "Target stack (e.g., backend, frontend, fullstack)",
+			"default": "fullstack"
+		}
+	},
+	"steps": [
+		{
+			"id": "analyze",
+			"title": "Analyze Requirements",
+			"instruction": "Understand the task requirements. Use the analyst skill to produce a functional specification with user stories and acceptance criteria. Identify what parts of the codebase are affected.",
+			"tools": ["analyst", "read_file", "search"]
+		},
+		{
+			"id": "design",
+			"title": "Design Solution",
+			"instruction": "Based on the analysis, use the architect skill to design the solution. Choose appropriate patterns, identify interfaces to implement, and document key design decisions. Keep the design minimal and aligned with existing conventions.",
+			"tools": ["architect", "read_file", "search"],
+			"needs": ["analyze"]
+		},
+		{
+			"id": "implement",
+			"title": "Implement",
+			"instruction": "Implement the designed solution. Use backend-dev and/or frontend-dev skills depending on the stack variable. Follow the design from the previous step. Write clean, idiomatic code with proper error handling.",
+			"tools": ["backend-dev", "frontend-dev", "read_file", "write_file", "run_command"],
+			"needs": ["design"]
+		},
+		{
+			"id": "test",
+			"title": "Test",
+			"instruction": "Use the tester skill to ensure comprehensive test coverage. Write unit tests for new code, verify edge cases from the analysis, and run the full test suite to catch regressions.",
+			"tools": ["tester", "read_file", "write_file", "run_command"],
+			"needs": ["implement"]
+		},
+		{
+			"id": "review",
+			"title": "Review",
+			"instruction": "Use the reviewer and qa skills to inspect the deliverables. Check code quality, test coverage, spec conformity, and security. If issues are found, use the refactor skill to address them. Produce a final status report with verdict.",
+			"tools": ["reviewer", "qa", "refactor", "read_file", "search", "run_command"],
+			"needs": ["test"]
+		}
+	]
+}
