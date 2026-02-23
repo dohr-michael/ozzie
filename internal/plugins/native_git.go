@@ -11,6 +11,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/dohr-michael/ozzie/internal/events"
 )
 
 const defaultGitTimeout = 15 * time.Second
@@ -113,24 +115,26 @@ func (t *GitTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ..
 		return "", fmt.Errorf("git: action is required")
 	}
 
+	workDir := events.WorkDirFromContext(ctx)
+
 	var result gitResult
 	var err error
 
 	switch input.Action {
 	case "status":
-		result, err = gitStatus(ctx, input.Args)
+		result, err = gitStatus(ctx, workDir, input.Args)
 	case "diff":
-		result, err = gitDiff(ctx, input.Args)
+		result, err = gitDiff(ctx, workDir, input.Args)
 	case "log":
-		result, err = gitLog(ctx, input.Args)
+		result, err = gitLog(ctx, workDir, input.Args)
 	case "add":
-		result, err = gitAdd(ctx, input.Args)
+		result, err = gitAdd(ctx, workDir, input.Args)
 	case "commit":
-		result, err = gitCommit(ctx, input.Args)
+		result, err = gitCommit(ctx, workDir, input.Args)
 	case "branch":
-		result, err = gitBranch(ctx, input.Args)
+		result, err = gitBranch(ctx, workDir, input.Args)
 	case "checkout":
-		result, err = gitCheckout(ctx, input.Args)
+		result, err = gitCheckout(ctx, workDir, input.Args)
 	default:
 		return "", fmt.Errorf("git: unknown action %q", input.Action)
 	}
@@ -145,7 +149,7 @@ func (t *GitTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ..
 	return string(out), nil
 }
 
-func gitStatus(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitStatus(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitStatusArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -156,10 +160,10 @@ func gitStatus(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) 
 	if args.Path != "" {
 		cmdArgs = append(cmdArgs, args.Path)
 	}
-	return execGit(ctx, "", cmdArgs...)
+	return execGit(ctx, dir, cmdArgs...)
 }
 
-func gitDiff(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitDiff(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitDiffArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -173,10 +177,10 @@ func gitDiff(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
 	if args.Path != "" {
 		cmdArgs = append(cmdArgs, args.Path)
 	}
-	return execGit(ctx, "", cmdArgs...)
+	return execGit(ctx, dir, cmdArgs...)
 }
 
-func gitLog(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitLog(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitLogArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -194,10 +198,10 @@ func gitLog(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
 	if args.Path != "" {
 		cmdArgs = append(cmdArgs, "--", args.Path)
 	}
-	return execGit(ctx, "", cmdArgs...)
+	return execGit(ctx, dir, cmdArgs...)
 }
 
-func gitAdd(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitAdd(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitAddArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -208,10 +212,10 @@ func gitAdd(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
 		return gitResult{}, fmt.Errorf("git add: paths are required")
 	}
 	cmdArgs := append([]string{"add"}, args.Paths...)
-	return execGit(ctx, "", cmdArgs...)
+	return execGit(ctx, dir, cmdArgs...)
 }
 
-func gitCommit(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitCommit(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitCommitArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -221,10 +225,10 @@ func gitCommit(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) 
 	if args.Message == "" {
 		return gitResult{}, fmt.Errorf("git commit: message is required")
 	}
-	return execGit(ctx, "", "commit", "-m", args.Message)
+	return execGit(ctx, dir, "commit", "-m", args.Message)
 }
 
-func gitBranch(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitBranch(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitBranchArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -232,12 +236,12 @@ func gitBranch(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) 
 		}
 	}
 	if args.List || args.Name == "" {
-		return execGit(ctx, "", "branch", "-a")
+		return execGit(ctx, dir, "branch", "-a")
 	}
-	return execGit(ctx, "", "branch", args.Name)
+	return execGit(ctx, dir, "branch", args.Name)
 }
 
-func gitCheckout(ctx context.Context, rawArgs json.RawMessage) (gitResult, error) {
+func gitCheckout(ctx context.Context, dir string, rawArgs json.RawMessage) (gitResult, error) {
 	var args gitCheckoutArgs
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -247,7 +251,7 @@ func gitCheckout(ctx context.Context, rawArgs json.RawMessage) (gitResult, error
 	if args.Ref == "" {
 		return gitResult{}, fmt.Errorf("git checkout: ref is required")
 	}
-	return execGit(ctx, "", "checkout", args.Ref)
+	return execGit(ctx, dir, "checkout", args.Ref)
 }
 
 // execGit runs a git command and returns the output.
@@ -259,6 +263,7 @@ func execGit(ctx context.Context, dir string, args ...string) (gitResult, error)
 	if dir != "" {
 		cmd.Dir = dir
 	}
+	applyTaskEnv(ctx, cmd)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

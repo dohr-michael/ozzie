@@ -25,6 +25,7 @@ type RunnerConfig struct {
 	ModelRegistry *models.Registry
 	ToolRegistry  *plugins.ToolRegistry
 	EventBus      *events.Bus
+	Verifier      *Verifier
 }
 
 // WorkflowRunner executes a workflow skill by running its DAG of steps.
@@ -172,7 +173,7 @@ func (wr *WorkflowRunner) runStep(ctx context.Context, stepID string, vars map[s
 	instruction := wr.buildStepInstruction(step, vars, prevResults)
 
 	// Create ephemeral agent using agent.NewAgent
-	runner, err := agent.NewAgent(ctx, chatModel, instruction, stepTools)
+	runner, err := agent.NewAgent(ctx, chatModel, instruction, stepTools, nil)
 	if err != nil {
 		wr.emitStepCompleted(sessionID, stepID, step.Title, "", err, start)
 		return "", fmt.Errorf("create agent for step %q: %w", stepID, err)
@@ -186,6 +187,11 @@ func (wr *WorkflowRunner) runStep(ctx context.Context, stepID string, vars map[s
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 	output, err := consumeRunnerOutput(iter)
+
+	// Verify-and-retry loop
+	if err == nil && step.Acceptance.HasCriteria() && wr.cfg.Verifier != nil {
+		output, err = wr.verifyAndRetry(ctx, step, output, vars, prevResults)
+	}
 
 	wr.emitStepCompleted(sessionID, stepID, step.Title, output, err, start)
 	return output, err
@@ -217,12 +223,96 @@ func (wr *WorkflowRunner) buildStepInstruction(step *Step, vars map[string]strin
 	}
 
 	// Acceptance criteria
-	if step.Acceptance != "" {
+	if step.Acceptance.HasCriteria() {
 		sb.WriteString("\n\n## Acceptance Criteria\n\n")
-		sb.WriteString(step.Acceptance)
+		for _, c := range step.Acceptance.Criteria {
+			sb.WriteString(fmt.Sprintf("- %s\n", c))
+		}
 	}
 
 	return sb.String()
+}
+
+// verifyAndRetry runs the verify-and-retry loop for a step with acceptance criteria.
+func (wr *WorkflowRunner) verifyAndRetry(ctx context.Context, step *Step, output string, vars map[string]string, prevResults map[string]string) (string, error) {
+	sessionID := events.SessionIDFromContext(ctx)
+	maxAttempts := step.Acceptance.EffectiveMaxAttempts()
+	currentOutput := output
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result, err := wr.cfg.Verifier.Verify(ctx, step.Acceptance, step.Title, currentOutput)
+		if err != nil {
+			slog.Warn("verification failed, treating as pass", "step", step.ID, "error", err)
+			return currentOutput, nil
+		}
+
+		// Emit verification event
+		wr.cfg.EventBus.Publish(events.NewTypedEventWithSession(events.SourceSkill, events.TaskVerificationPayload{
+			SkillName: wr.skill.Name,
+			StepID:    step.ID,
+			Pass:      result.Pass,
+			Score:     result.Score,
+			Issues:    result.Issues,
+			Attempt:   attempt,
+		}, sessionID))
+
+		if result.Pass {
+			slog.Info("step verification passed", "step", step.ID, "score", result.Score, "attempt", attempt)
+			return currentOutput, nil
+		}
+
+		slog.Info("step verification failed, retrying", "step", step.ID, "score", result.Score, "attempt", attempt, "issues", result.Issues)
+
+		// Retry with feedback
+		if attempt < maxAttempts {
+			retryOutput, retryErr := wr.retryStep(ctx, step, currentOutput, result.Feedback, vars, prevResults)
+			if retryErr != nil {
+				slog.Warn("retry failed, using last output", "step", step.ID, "error", retryErr)
+				return currentOutput, nil
+			}
+			currentOutput = retryOutput
+		}
+	}
+
+	// All attempts exhausted — return last output
+	slog.Warn("max verification attempts reached", "step", step.ID, "max", maxAttempts)
+	return currentOutput, nil
+}
+
+// retryStep re-runs a step with augmented instruction including previous output and feedback.
+func (wr *WorkflowRunner) retryStep(ctx context.Context, step *Step, previousOutput, feedback string, vars map[string]string, prevResults map[string]string) (string, error) {
+	modelName := step.Model
+	if modelName == "" {
+		modelName = wr.skill.Model
+	}
+
+	chatModel, err := wr.cfg.ModelRegistry.Get(ctx, modelName)
+	if err != nil {
+		chatModel, err = wr.cfg.ModelRegistry.Default(ctx)
+		if err != nil {
+			return "", fmt.Errorf("resolve model for retry: %w", err)
+		}
+	}
+
+	stepTools := wr.resolveTools(step.Tools)
+
+	// Build augmented instruction
+	instruction := wr.buildStepInstruction(step, vars, prevResults)
+	instruction += fmt.Sprintf("\n\n## Previous Attempt Output\n\n%s", previousOutput)
+	instruction += fmt.Sprintf("\n\n## Verification Feedback\n\nThe previous output did not pass verification. Issues:\n%s\n\nPlease fix these issues and produce an improved output.", feedback)
+
+	runner, err := agent.NewAgent(ctx, chatModel, instruction, stepTools, nil)
+	if err != nil {
+		return "", fmt.Errorf("create retry agent: %w", err)
+	}
+
+	messages := []*schema.Message{
+		{Role: schema.User, Content: "Re-execute this step, addressing the verification feedback."},
+	}
+
+	checkpointID := uuid.New().String()
+	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
+	return consumeRunnerOutput(iter)
 }
 
 func (wr *WorkflowRunner) resolveTools(toolNames []string) []tool.InvokableTool {

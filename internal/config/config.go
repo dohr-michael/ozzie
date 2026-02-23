@@ -10,6 +10,27 @@ type Config struct {
 	Agent   AgentConfig   `json:"agent"`
 	Plugins PluginsConfig `json:"plugins"`
 	Skills  SkillsConfig  `json:"skills"`
+	Tools   ToolsConfig   `json:"tools"`
+	Sandbox SandboxConfig `json:"sandbox"`
+}
+
+// SandboxConfig configures the sandbox guard for autonomous sub-agents.
+type SandboxConfig struct {
+	Enabled      *bool    `json:"enabled"`       // default: true
+	AllowedPaths []string `json:"allowed_paths"` // extra paths allowed outside WorkDir
+}
+
+// IsSandboxEnabled returns true if the sandbox is enabled (default: true).
+func (c SandboxConfig) IsSandboxEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
+}
+
+// ToolsConfig configures tool permissions.
+type ToolsConfig struct {
+	AllowedDangerous []string `json:"allowed_dangerous"` // globally auto-approved dangerous tools
 }
 
 // SkillsConfig configures the skill system.
@@ -44,7 +65,8 @@ type ProviderConfig struct {
 	Auth      AuthConfig     `json:"auth"`
 	MaxTokens     int            `json:"max_tokens,omitempty"`
 	ContextWindow int            `json:"context_window,omitempty"` // total context window in tokens (0 = driver default)
-	Tags      []string       `json:"tags,omitempty"`
+	MaxConcurrent int            `json:"max_concurrent,omitempty"`
+	Tags          []string       `json:"tags,omitempty"`
 	Timeout   Duration       `json:"timeout,omitempty"`
 	Options   map[string]any `json:"options,omitempty"`
 }
@@ -57,12 +79,20 @@ type AuthConfig struct {
 
 // EventsConfig holds event bus settings.
 type EventsConfig struct {
-	BufferSize int `json:"buffer_size"`
+	BufferSize int    `json:"buffer_size"`
+	LogLevel   string `json:"log_level"` // "debug" | "info" | "warn" | "error" (default: "info")
+}
+
+// CoordinatorConfig configures the coordinator pattern defaults.
+type CoordinatorConfig struct {
+	DefaultLevel        string `json:"default_level"`         // "disabled" | "supervised" | "autonomous" (default: "disabled")
+	MaxValidationRounds int    `json:"max_validation_rounds"` // max plan-revise cycles before failure (default: 3)
 }
 
 // AgentConfig holds agent settings.
 type AgentConfig struct {
-	SystemPrompt string `json:"system_prompt,omitempty"`
+	SystemPrompt string            `json:"system_prompt,omitempty"`
+	Coordinator  CoordinatorConfig `json:"coordinator"`
 }
 
 // Duration wraps time.Duration for JSON unmarshaling.

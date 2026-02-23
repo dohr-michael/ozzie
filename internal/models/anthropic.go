@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	defaultAnthropicModel     = "claude-sonnet-4-20250514"
+	defaultAnthropicModel     = "claude-sonnet-4-6"
 	defaultAnthropicMaxTokens = 4096
 )
 
@@ -51,6 +51,8 @@ func NewAnthropic(ctx context.Context, cfg config.ProviderConfig, auth ResolvedA
 	default:
 		opts = append(opts, option.WithAPIKey(auth.Value))
 	}
+
+	//opts = append(opts, option.WithHeader("anthropic-beta", "interleaved-thinking-2025-05-14"))
 
 	if cfg.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.BaseURL))

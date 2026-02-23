@@ -27,9 +27,11 @@ func NewRootCommand() *cli.Command {
 			NewWakeCommand(),
 			NewGatewayCommand(),
 			NewAskCommand(),
-			NewTUICommand(),
 			NewStatusCommand(),
 			NewSessionsCommand(),
+			NewTasksCommand(),
+			NewScheduleCommand(),
+			NewMemoryCommand(),
 			NewMCPServeCommand(),
 		},
 	}

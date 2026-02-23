@@ -32,11 +32,13 @@ type ToolSpec struct {
 
 // ParamSpec describes a single tool parameter.
 type ParamSpec struct {
-	Type        string   `json:"type"` // "string", "number", "boolean", "integer"
-	Description string   `json:"description"`
-	Required    bool     `json:"required"`
-	Enum        []string `json:"enum,omitempty"`
-	Default     any      `json:"default,omitempty"`
+	Type        string               `json:"type"` // "string", "number", "boolean", "integer", "array", "object"
+	Description string               `json:"description"`
+	Required    bool                 `json:"required"`
+	Enum        []string             `json:"enum,omitempty"`
+	Default     any                  `json:"default,omitempty"`
+	Items       *ParamSpec           `json:"items,omitempty"`      // element schema for arrays
+	Properties  map[string]ParamSpec `json:"properties,omitempty"` // sub-properties for objects
 }
 
 // LoadManifest reads and parses a JSONC manifest file.

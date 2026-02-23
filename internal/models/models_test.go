@@ -103,7 +103,7 @@ func TestResolveAuth_UnknownDriver(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 	os.Unsetenv("OPENAI_API_KEY")
 
-	cfg := config.ProviderConfig{Driver: "mistral"}
+	cfg := config.ProviderConfig{Driver: "unknown-driver"}
 	_, err := ResolveAuth(cfg)
 	if err == nil {
 		t.Fatal("expected error for unknown driver")

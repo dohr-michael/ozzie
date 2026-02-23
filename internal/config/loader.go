@@ -54,8 +54,24 @@ func applyDefaults(cfg *Config) {
 	if cfg.Events.BufferSize == 0 {
 		cfg.Events.BufferSize = 1024
 	}
+	if cfg.Events.LogLevel == "" {
+		cfg.Events.LogLevel = "info"
+	}
 	if len(cfg.Skills.Dirs) == 0 {
 		cfg.Skills.Dirs = []string{filepath.Join(OzziePath(), "skills")}
+	}
+	if cfg.Agent.Coordinator.DefaultLevel == "" {
+		cfg.Agent.Coordinator.DefaultLevel = "disabled"
+	}
+	if cfg.Agent.Coordinator.MaxValidationRounds == 0 {
+		cfg.Agent.Coordinator.MaxValidationRounds = 3
+	}
+	// Default MaxConcurrent for providers
+	for name, p := range cfg.Models.Providers {
+		if p.MaxConcurrent <= 0 {
+			p.MaxConcurrent = 1
+			cfg.Models.Providers[name] = p
+		}
 	}
 	// Auth resolution is deferred to models.ResolveAuth() at model init time.
 }

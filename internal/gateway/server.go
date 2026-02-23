@@ -14,22 +14,24 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
+	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
 // Server is the Ozzie gateway HTTP server.
 type Server struct {
-	httpServer *http.Server
-	hub        *ws.Hub
-	bus        *events.Bus
-	store      sessions.Store
-	host       string
-	port       int
+	httpServer   *http.Server
+	hub          *ws.Hub
+	bus          *events.Bus
+	store        sessions.Store
+	taskHandler  *WSTaskHandler
+	host         string
+	port         int
 }
 
 // NewServer creates a new gateway server.
-func NewServer(bus *events.Bus, store sessions.Store, host string, port int) *Server {
-	hub := ws.NewHub(bus, store)
+func NewServer(bus *events.Bus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions) *Server {
+	hub := ws.NewHub(bus, store, perms)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -48,6 +50,9 @@ func NewServer(bus *events.Bus, store sessions.Store, host string, port int) *Se
 	r.Get("/api/ws", hub.ServeWS)
 	r.Get("/api/events", s.handleEvents)
 	r.Get("/api/sessions", s.handleSessions)
+
+	// API: tasks
+	r.Get("/api/tasks", s.handleTasks)
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),
@@ -123,4 +128,27 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(list)
+}
+
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	if s.taskHandler == nil {
+		http.Error(w, "task system not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	sessionID := r.URL.Query().Get("session_id")
+	result, err := s.taskHandler.List(sessionID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// SetTaskHandler configures the task handler for WS and HTTP task operations.
+func (s *Server) SetTaskHandler(th *WSTaskHandler) {
+	s.taskHandler = th
+	s.hub.SetTaskHandler(th)
 }

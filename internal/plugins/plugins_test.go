@@ -340,8 +340,8 @@ func TestToolRegistry_RegisterNative(t *testing.T) {
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	cmdTool := NewCmdTool(0)
-	err := registry.RegisterNative("cmd", cmdTool, CmdManifest())
+	execTool := NewExecuteTool()
+	err := registry.RegisterNative("run_command", execTool, ExecuteManifest())
 	if err != nil {
 		t.Fatalf("RegisterNative: %v", err)
 	}
@@ -352,22 +352,22 @@ func TestToolRegistry_RegisterNative(t *testing.T) {
 	}
 
 	// ToolSpec should be retrievable
-	spec := registry.ToolSpec("cmd")
+	spec := registry.ToolSpec("run_command")
 	if spec == nil {
-		t.Fatal("ToolSpec(cmd) = nil")
+		t.Fatal("ToolSpec(run_command) = nil")
 	}
-	if spec.Name != "cmd" {
-		t.Errorf("ToolSpec.Name = %q, want %q", spec.Name, "cmd")
+	if spec.Name != "run_command" {
+		t.Errorf("ToolSpec.Name = %q, want %q", spec.Name, "run_command")
 	}
 
 	// PluginTools should return the tool name
-	pt := registry.PluginTools("cmd")
-	if len(pt) != 1 || pt[0] != "cmd" {
-		t.Errorf("PluginTools(cmd) = %v, want [cmd]", pt)
+	pt := registry.PluginTools("run_command")
+	if len(pt) != 1 || pt[0] != "run_command" {
+		t.Errorf("PluginTools(run_command) = %v, want [run_command]", pt)
 	}
 
 	// Duplicate registration should fail
-	err = registry.RegisterNative("cmd", cmdTool, CmdManifest())
+	err = registry.RegisterNative("run_command", execTool, ExecuteManifest())
 	if err == nil {
 		t.Error("expected error for duplicate registration")
 	}
@@ -387,46 +387,34 @@ func TestToolRegistry_LoadPluginsDir_NoDir(t *testing.T) {
 	}
 }
 
-func TestCmdTool_Info(t *testing.T) {
-	cmdTool := NewCmdTool(0)
-	info, err := cmdTool.Info(context.Background())
+func TestExecuteTool_Info_Plugins(t *testing.T) {
+	execTool := NewExecuteTool()
+	info, err := execTool.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if info.Name != "cmd" {
-		t.Errorf("Name = %q, want %q", info.Name, "cmd")
+	if info.Name != "run_command" {
+		t.Errorf("Name = %q, want %q", info.Name, "run_command")
 	}
 }
 
-func TestRootCmdTool_Info(t *testing.T) {
-	tool := NewRootCmdTool(0)
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "root_cmd" {
-		t.Errorf("Name = %q, want %q", info.Name, "root_cmd")
-	}
-}
-
-func TestCmdTool_InvokableRun(t *testing.T) {
-	cmdTool := NewCmdTool(0)
-	result, err := cmdTool.InvokableRun(context.Background(), `{"command": "echo hello"}`)
+func TestExecuteTool_InvokableRun_Plugins(t *testing.T) {
+	execTool := NewExecuteTool()
+	result, err := execTool.InvokableRun(context.Background(), `{"command": "echo hello"}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
-	// Should contain "hello" in stdout
 	if !contains(result, "hello") {
 		t.Errorf("result %q does not contain 'hello'", result)
 	}
 }
 
-func TestCmdTool_InvokableRun_EmptyCommand(t *testing.T) {
-	cmdTool := NewCmdTool(0)
-	_, err := cmdTool.InvokableRun(context.Background(), `{"command": ""}`)
+func TestExecuteTool_InvokableRun_EmptyCommand_Plugins(t *testing.T) {
+	execTool := NewExecuteTool()
+	_, err := execTool.InvokableRun(context.Background(), `{"command": ""}`)
 	if err == nil {
 		t.Error("expected error for empty command")
 	}
@@ -434,7 +422,7 @@ func TestCmdTool_InvokableRun_EmptyCommand(t *testing.T) {
 
 func TestWasmToolIntegration(t *testing.T) {
 	// This test requires WASM plugins built with TinyGo (which exports functions properly).
-	wasmPath := filepath.Join("..", "..", "plugins", "calculator", "calculator.wasm")
+	wasmPath := filepath.Join("..", "..", "examples", "plugins", "calculator", "calculator.wasm")
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("calculator.wasm not built, run 'make build-plugins' first")
 	}
@@ -494,335 +482,13 @@ func searchString(s, sub string) bool {
 	return false
 }
 
-// --- ReadFileTool tests ---
+// --- ExecuteTool timeout tests ---
 
-func TestReadFileTool_Info(t *testing.T) {
-	tool := NewReadFileTool()
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "read_file" {
-		t.Errorf("Name = %q, want %q", info.Name, "read_file")
-	}
-	if info.ParamsOneOf == nil {
-		t.Error("ParamsOneOf is nil")
-	}
-}
-
-func TestReadFileTool_InvokableRun(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewReadFileTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "line1") {
-		t.Errorf("result %q does not contain 'line1'", result)
-	}
-	if !contains(result, `"lines":4`) {
-		t.Errorf("result %q does not contain lines count", result)
-	}
-}
-
-func TestReadFileTool_InvokableRun_OffsetLimit(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewReadFileTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "offset": 1, "limit": 2}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, `"truncated":true`) {
-		t.Errorf("expected truncated=true in result %q", result)
-	}
-	if !contains(result, "b") {
-		t.Errorf("result %q does not contain 'b'", result)
-	}
-}
-
-func TestReadFileTool_InvokableRun_FileNotFound(t *testing.T) {
-	tool := NewReadFileTool()
-	_, err := tool.InvokableRun(context.Background(), `{"path": "/nonexistent/file.txt"}`)
-	if err == nil {
-		t.Error("expected error for file not found")
-	}
-}
-
-func TestReadFileTool_InvokableRun_EmptyPath(t *testing.T) {
-	tool := NewReadFileTool()
-	_, err := tool.InvokableRun(context.Background(), `{"path": ""}`)
-	if err == nil {
-		t.Error("expected error for empty path")
-	}
-}
-
-// --- WriteFileTool tests ---
-
-func TestWriteFileTool_Info(t *testing.T) {
-	tool := NewWriteFileTool()
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "write_file" {
-		t.Errorf("Name = %q, want %q", info.Name, "write_file")
-	}
-}
-
-func TestWriteFileTool_InvokableRun(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "output.txt")
-
-	tool := NewWriteFileTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "content": "hello world"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, `"bytes_written":11`) {
-		t.Errorf("result %q does not contain bytes_written", result)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if string(data) != "hello world" {
-		t.Errorf("file content = %q, want %q", string(data), "hello world")
-	}
-}
-
-func TestWriteFileTool_InvokableRun_CreateDirs(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a", "b", "c", "file.txt")
-
-	tool := NewWriteFileTool()
-	_, err := tool.InvokableRun(context.Background(), `{"path": "`+path+`", "content": "nested"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile: %v", err)
-	}
-	if string(data) != "nested" {
-		t.Errorf("file content = %q, want %q", string(data), "nested")
-	}
-}
-
-func TestWriteFileTool_InvokableRun_EmptyPath(t *testing.T) {
-	tool := NewWriteFileTool()
-	_, err := tool.InvokableRun(context.Background(), `{"path": "", "content": "x"}`)
-	if err == nil {
-		t.Error("expected error for empty path")
-	}
-}
-
-// --- RunCmdTool tests ---
-
-func TestRunCmdTool_Info(t *testing.T) {
-	tool := NewRunCmdTool()
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "run_command" {
-		t.Errorf("Name = %q, want %q", info.Name, "run_command")
-	}
-}
-
-func TestRunCmdTool_InvokableRun(t *testing.T) {
-	tool := NewRunCmdTool()
-	result, err := tool.InvokableRun(context.Background(), `{"command": "echo hello"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "hello") {
-		t.Errorf("result %q does not contain 'hello'", result)
-	}
-}
-
-func TestRunCmdTool_InvokableRun_Timeout(t *testing.T) {
-	tool := NewRunCmdTool()
-	_, err := tool.InvokableRun(context.Background(), `{"command": "sleep 10", "timeout": 1}`)
+func TestExecuteTool_InvokableRun_Timeout_Plugins(t *testing.T) {
+	execTool := NewExecuteTool()
+	_, err := execTool.InvokableRun(context.Background(), `{"command": "sleep 10", "timeout": 1}`)
 	if err == nil {
 		t.Error("expected error for timeout")
-	}
-}
-
-func TestRunCmdTool_InvokableRun_EmptyCommand(t *testing.T) {
-	tool := NewRunCmdTool()
-	_, err := tool.InvokableRun(context.Background(), `{"command": ""}`)
-	if err == nil {
-		t.Error("expected error for empty command")
-	}
-}
-
-// --- SearchTool tests ---
-
-func TestSearchTool_Info(t *testing.T) {
-	tool := NewSearchTool()
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "search" {
-		t.Errorf("Name = %q, want %q", info.Name, "search")
-	}
-}
-
-func TestSearchTool_InvokableRun(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\nfoo bar\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\nfunc hello() {}\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewSearchTool()
-	result, err := tool.InvokableRun(context.Background(), `{"pattern": "hello", "path": "`+dir+`"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "hello") {
-		t.Errorf("result %q does not contain 'hello'", result)
-	}
-	if !contains(result, `"total":2`) {
-		t.Errorf("result %q does not contain total:2", result)
-	}
-}
-
-func TestSearchTool_InvokableRun_InvalidRegex(t *testing.T) {
-	tool := NewSearchTool()
-	_, err := tool.InvokableRun(context.Background(), `{"pattern": "[invalid"}`)
-	if err == nil {
-		t.Error("expected error for invalid regex")
-	}
-}
-
-func TestSearchTool_InvokableRun_GlobFilter(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("match here\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("match here too\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewSearchTool()
-	result, err := tool.InvokableRun(context.Background(), `{"pattern": "match", "path": "`+dir+`", "glob": "*.txt"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, `"total":1`) {
-		t.Errorf("expected total:1, got %q", result)
-	}
-}
-
-func TestSearchTool_InvokableRun_EmptyPattern(t *testing.T) {
-	tool := NewSearchTool()
-	_, err := tool.InvokableRun(context.Background(), `{"pattern": ""}`)
-	if err == nil {
-		t.Error("expected error for empty pattern")
-	}
-}
-
-// --- ListDirTool tests ---
-
-func TestListDirTool_Info(t *testing.T) {
-	tool := NewListDirTool()
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
-	if info.Name != "list_dir" {
-		t.Errorf("Name = %q, want %q", info.Name, "list_dir")
-	}
-}
-
-func TestListDirTool_InvokableRun(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "subdir"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewListDirTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "a.txt") {
-		t.Errorf("result %q does not contain 'a.txt'", result)
-	}
-	if !contains(result, "subdir") {
-		t.Errorf("result %q does not contain 'subdir'", result)
-	}
-	if !contains(result, `"total":2`) {
-		t.Errorf("result %q does not contain total:2", result)
-	}
-}
-
-func TestListDirTool_InvokableRun_Recursive(t *testing.T) {
-	dir := t.TempDir()
-	sub := filepath.Join(dir, "sub")
-	if err := os.Mkdir(sub, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sub, "deep.txt"), []byte("deep"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewListDirTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`", "recursive": true}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "deep.txt") {
-		t.Errorf("result %q does not contain 'deep.txt'", result)
-	}
-}
-
-func TestListDirTool_InvokableRun_Pattern(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.go"), []byte("b"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tool := NewListDirTool()
-	result, err := tool.InvokableRun(context.Background(), `{"path": "`+dir+`", "pattern": "*.go"}`)
-	if err != nil {
-		t.Fatalf("InvokableRun: %v", err)
-	}
-	if !contains(result, "b.go") {
-		t.Errorf("result %q does not contain 'b.go'", result)
-	}
-	if !contains(result, `"total":1`) {
-		t.Errorf("expected total:1, got %q", result)
-	}
-}
-
-func TestListDirTool_InvokableRun_EmptyPath(t *testing.T) {
-	tool := NewListDirTool()
-	_, err := tool.InvokableRun(context.Background(), `{"path": ""}`)
-	if err == nil {
-		t.Error("expected error for empty path")
 	}
 }
 
@@ -928,29 +594,29 @@ func TestActivateToolsTool_Info(t *testing.T) {
 }
 
 func TestActivateToolsTool_ActivateKnown(t *testing.T) {
-	activator := newMockActivator([]string{"search", "git"})
+	activator := newMockActivator([]string{"run_command", "git"})
 	bus := events.NewBus(16)
 	defer bus.Close()
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
 	// Register tools so we can get descriptions
-	if err := registry.RegisterNative("search", NewSearchTool(), SearchManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", NewExecuteTool(), ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
 	at := NewActivateToolsTool(activator, registry)
 	ctx := events.ContextWithSessionID(context.Background(), "sess1")
 
-	result, err := at.InvokableRun(ctx, `{"names": ["search"]}`)
+	result, err := at.InvokableRun(ctx, `{"names": ["run_command"]}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
-	if !contains(result, `"name":"search"`) {
-		t.Errorf("result %q does not contain activated search", result)
+	if !contains(result, `"name":"run_command"`) {
+		t.Errorf("result %q does not contain activated run_command", result)
 	}
-	if len(activator.activated["sess1"]) != 1 || activator.activated["sess1"][0] != "search" {
-		t.Errorf("activator.activated = %v, want [search]", activator.activated["sess1"])
+	if len(activator.activated["sess1"]) != 1 || activator.activated["sess1"][0] != "run_command" {
+		t.Errorf("activator.activated = %v, want [run_command]", activator.activated["sess1"])
 	}
 }
 

@@ -120,7 +120,7 @@ func TestBuildStepInstruction_WithAcceptance(t *testing.T) {
 	step := &Step{
 		ID:          "review",
 		Instruction: "Review the code.",
-		Acceptance:  "Output must include severity ratings.",
+		Acceptance:  &AcceptanceCriteria{Criteria: []string{"Output must include severity ratings."}},
 	}
 
 	result := wr.buildStepInstruction(step, nil, nil)
@@ -139,7 +139,7 @@ func TestBuildStepInstruction_Full(t *testing.T) {
 		ID:          "final",
 		Instruction: "Produce the final report.",
 		Needs:       []string{"analyze", "review"},
-		Acceptance:  "Must be in markdown format.",
+		Acceptance:  &AcceptanceCriteria{Criteria: []string{"Must be in markdown format."}},
 	}
 
 	vars := map[string]string{"project": "ozzie"}

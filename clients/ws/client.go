@@ -111,6 +111,62 @@ func (c *Client) SendMessage(content string) error {
 	return c.conn.Write(c.ctx, websocket.MessageText, data)
 }
 
+// RespondToPrompt sends a prompt_response to confirm or deny a tool execution.
+func (c *Client) RespondToPrompt(token string, cancelled bool) error {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	params, _ := json.Marshal(map[string]any{
+		"token":     token,
+		"cancelled": cancelled,
+	})
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: string(wsprotocol.MethodPromptResponse),
+		Params: params,
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return fmt.Errorf("marshal prompt_response: %w", err)
+	}
+
+	return c.conn.Write(c.ctx, websocket.MessageText, data)
+}
+
+// AcceptAllTools sends an accept_all_tools request to enable auto-approval
+// of all dangerous tools for the current session.
+func (c *Client) AcceptAllTools() error {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: string(wsprotocol.MethodAcceptAllTools),
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return fmt.Errorf("marshal accept_all_tools: %w", err)
+	}
+
+	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
+		return fmt.Errorf("send accept_all_tools: %w", err)
+	}
+
+	resp, err := c.ReadFrame()
+	if err != nil {
+		return fmt.Errorf("read accept_all_tools response: %w", err)
+	}
+
+	if resp.OK != nil && !*resp.OK {
+		return fmt.Errorf("accept_all_tools failed: %s", resp.Error)
+	}
+
+	return nil
+}
+
 // ReadFrame reads the next frame from the connection.
 func (c *Client) ReadFrame() (wsprotocol.Frame, error) {
 	_, data, err := c.conn.Read(c.ctx)

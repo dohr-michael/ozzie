@@ -23,6 +23,11 @@ var defaultContextWindows = map[string]int{
 	"gpt-3.5-turbo":    16385,
 	"o1":               200000,
 	"o3":               200000,
+	"mistral-large":    128000,
+	"mistral-small":    128000,
+	"codestral":        256000,
+	"open-mistral-nemo": 128000,
+	"pixtral":          128000,
 }
 
 const fallbackContextWindow = 100000

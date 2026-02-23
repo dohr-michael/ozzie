@@ -152,7 +152,7 @@ func (st *SkillTool) runSimple(ctx context.Context, request string) (string, err
 	}
 
 	// Create ephemeral agent
-	runner, err := agent.NewAgent(ctx, chatModel, st.skill.Instruction, tools)
+	runner, err := agent.NewAgent(ctx, chatModel, st.skill.Instruction, tools, nil)
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}

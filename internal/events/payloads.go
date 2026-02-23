@@ -250,3 +250,173 @@ func GetSkillStepStartedPayload(e Event) (SkillStepStartedPayload, bool) {
 func GetSkillStepCompletedPayload(e Event) (SkillStepCompletedPayload, bool) {
 	return ExtractPayload[SkillStepCompletedPayload](e)
 }
+
+// =============================================================================
+// TASK EVENTS
+// =============================================================================
+
+type TaskCreatedPayload struct {
+	TaskID      string `json:"task_id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	ParentID    string `json:"parent_id,omitempty"`
+}
+
+func (TaskCreatedPayload) EventType() EventType { return EventTaskCreated }
+
+type TaskStartedPayload struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+func (TaskStartedPayload) EventType() EventType { return EventTaskStarted }
+
+type TaskProgressPayload struct {
+	TaskID           string `json:"task_id"`
+	CurrentStep      int    `json:"current_step"`
+	TotalSteps       int    `json:"total_steps"`
+	CurrentStepLabel string `json:"current_step_label,omitempty"`
+	Percentage       int    `json:"percentage"`
+}
+
+func (TaskProgressPayload) EventType() EventType { return EventTaskProgress }
+
+type TaskCompletedPayload struct {
+	TaskID        string        `json:"task_id"`
+	Title         string        `json:"title"`
+	OutputSummary string        `json:"output_summary,omitempty"`
+	Duration      time.Duration `json:"duration,omitempty"`
+	TokensInput   int           `json:"tokens_input,omitempty"`
+	TokensOutput  int           `json:"tokens_output,omitempty"`
+}
+
+func (TaskCompletedPayload) EventType() EventType { return EventTaskCompleted }
+
+type TaskFailedPayload struct {
+	TaskID     string `json:"task_id"`
+	Title      string `json:"title"`
+	Error      string `json:"error"`
+	RetryCount int    `json:"retry_count"`
+	WillRetry  bool   `json:"will_retry"`
+}
+
+func (TaskFailedPayload) EventType() EventType { return EventTaskFailed }
+
+type TaskCancelledPayload struct {
+	TaskID string `json:"task_id"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func (TaskCancelledPayload) EventType() EventType { return EventTaskCancelled }
+
+func GetTaskCreatedPayload(e Event) (TaskCreatedPayload, bool) {
+	return ExtractPayload[TaskCreatedPayload](e)
+}
+
+func GetTaskStartedPayload(e Event) (TaskStartedPayload, bool) {
+	return ExtractPayload[TaskStartedPayload](e)
+}
+
+func GetTaskProgressPayload(e Event) (TaskProgressPayload, bool) {
+	return ExtractPayload[TaskProgressPayload](e)
+}
+
+func GetTaskCompletedPayload(e Event) (TaskCompletedPayload, bool) {
+	return ExtractPayload[TaskCompletedPayload](e)
+}
+
+func GetTaskFailedPayload(e Event) (TaskFailedPayload, bool) {
+	return ExtractPayload[TaskFailedPayload](e)
+}
+
+func GetTaskCancelledPayload(e Event) (TaskCancelledPayload, bool) {
+	return ExtractPayload[TaskCancelledPayload](e)
+}
+
+type TaskSuspendedPayload struct {
+	TaskID       string `json:"task_id"`
+	Title        string `json:"title"`
+	Reason       string `json:"reason,omitempty"`
+	SuspendCount int    `json:"suspend_count"`
+	PlanContent  string `json:"plan_content,omitempty"`
+	Token        string `json:"token,omitempty"`
+}
+
+func (TaskSuspendedPayload) EventType() EventType { return EventTaskSuspended }
+
+type TaskResumedPayload struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+func (TaskResumedPayload) EventType() EventType { return EventTaskResumed }
+
+func GetTaskSuspendedPayload(e Event) (TaskSuspendedPayload, bool) {
+	return ExtractPayload[TaskSuspendedPayload](e)
+}
+
+func GetTaskResumedPayload(e Event) (TaskResumedPayload, bool) {
+	return ExtractPayload[TaskResumedPayload](e)
+}
+
+// =============================================================================
+// SCHEDULER EVENTS
+// =============================================================================
+
+type ScheduleTriggerPayload struct {
+	EntryID   string `json:"entry_id,omitempty"`
+	SkillName string `json:"skill_name"`
+	Trigger   string `json:"trigger"`
+	TaskID    string `json:"task_id"`
+}
+
+func (ScheduleTriggerPayload) EventType() EventType { return EventScheduleTrigger }
+
+func GetScheduleTriggerPayload(e Event) (ScheduleTriggerPayload, bool) {
+	return ExtractPayload[ScheduleTriggerPayload](e)
+}
+
+type ScheduleCreatedPayload struct {
+	EntryID     string `json:"entry_id"`
+	Title       string `json:"title"`
+	Source      string `json:"source"`
+	CronSpec    string `json:"cron_spec,omitempty"`
+	IntervalSec int    `json:"interval_sec,omitempty"`
+}
+
+func (ScheduleCreatedPayload) EventType() EventType { return EventScheduleCreated }
+
+func GetScheduleCreatedPayload(e Event) (ScheduleCreatedPayload, bool) {
+	return ExtractPayload[ScheduleCreatedPayload](e)
+}
+
+type ScheduleRemovedPayload struct {
+	EntryID string `json:"entry_id"`
+	Title   string `json:"title"`
+}
+
+func (ScheduleRemovedPayload) EventType() EventType { return EventScheduleRemoved }
+
+func GetScheduleRemovedPayload(e Event) (ScheduleRemovedPayload, bool) {
+	return ExtractPayload[ScheduleRemovedPayload](e)
+}
+
+// =============================================================================
+// VERIFICATION EVENTS
+// =============================================================================
+
+type TaskVerificationPayload struct {
+	TaskID    string   `json:"task_id"`
+	SkillName string   `json:"skill_name"`
+	StepID    string   `json:"step_id"`
+	Pass      bool     `json:"pass"`
+	Score     int      `json:"score"`
+	Issues    []string `json:"issues,omitempty"`
+	Attempt   int      `json:"attempt"`
+}
+
+func (TaskVerificationPayload) EventType() EventType { return EventTaskVerification }
+
+func GetTaskVerificationPayload(e Event) (TaskVerificationPayload, bool) {
+	return ExtractPayload[TaskVerificationPayload](e)
+}

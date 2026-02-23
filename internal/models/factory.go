@@ -25,6 +25,12 @@ func CreateModel(ctx context.Context, cfg config.ProviderConfig) (model.ToolCall
 			return nil, fmt.Errorf("resolve auth: %w", err)
 		}
 		return NewOpenAI(ctx, cfg, auth)
+	case "mistral":
+		auth, err := ResolveAuth(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("resolve auth: %w", err)
+		}
+		return NewMistral(ctx, cfg, auth)
 	case "ollama":
 		return NewOllama(ctx, cfg)
 	default:

@@ -127,7 +127,7 @@ func TestNewMCPServer_AllTools(t *testing.T) {
 	registry := plugins.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("cmd", plugins.NewCmdTool(0), plugins.CmdManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -144,15 +144,12 @@ func TestNewMCPServer_WithFilter(t *testing.T) {
 	registry := plugins.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("cmd", plugins.NewCmdTool(0), plugins.CmdManifest()); err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.RegisterNative("root_cmd", plugins.NewRootCmdTool(0), plugins.RootCmdManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
 	// Filter by tool name
-	server := NewMCPServer(registry, "cmd")
+	server := NewMCPServer(registry, "run_command")
 	if server == nil {
 		t.Fatal("NewMCPServer with filter returned nil")
 	}
@@ -165,17 +162,17 @@ func TestMatchesFilter(t *testing.T) {
 	registry := plugins.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("cmd", plugins.NewCmdTool(0), plugins.CmdManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
 	// Direct tool name match
-	if !matchesFilter(registry, "cmd", "cmd") {
-		t.Error("matchesFilter(cmd, cmd) = false, want true")
+	if !matchesFilter(registry, "run_command", "run_command") {
+		t.Error("matchesFilter(run_command, run_command) = false, want true")
 	}
 
 	// Non-match
-	if matchesFilter(registry, "cmd", "other") {
-		t.Error("matchesFilter(cmd, other) = true, want false")
+	if matchesFilter(registry, "run_command", "other") {
+		t.Error("matchesFilter(run_command, other) = true, want false")
 	}
 }

@@ -13,21 +13,36 @@ import (
 // Run() call (sync.Once + atomic.frozen), so dynamic tool selection requires a
 // new runner for each turn.
 type AgentFactory struct {
-	chatModel model.ToolCallingChatModel
-	persona   string
+	chatModel   model.ToolCallingChatModel
+	persona     string
+	middlewares []adk.AgentMiddleware // base middlewares (without recovery)
 }
 
 // NewAgentFactory creates a new AgentFactory.
-func NewAgentFactory(chatModel model.ToolCallingChatModel, persona string) *AgentFactory {
+func NewAgentFactory(chatModel model.ToolCallingChatModel, persona string, middlewares []adk.AgentMiddleware) *AgentFactory {
 	return &AgentFactory{
-		chatModel: chatModel,
-		persona:   persona,
+		chatModel:   chatModel,
+		persona:     persona,
+		middlewares: middlewares,
 	}
+}
+
+// buildMiddlewares returns a fresh middleware chain with a new tool recovery
+// middleware prepended. Each runner gets its own recovery instance so that
+// error counters are isolated per turn/session.
+func (f *AgentFactory) buildMiddlewares() []adk.AgentMiddleware {
+	recoveryMw := adk.AgentMiddleware{
+		WrapToolCall: NewToolRecoveryMiddleware(ToolRecoveryConfig{}),
+	}
+	mws := make([]adk.AgentMiddleware, 0, 1+len(f.middlewares))
+	mws = append(mws, recoveryMw)
+	mws = append(mws, f.middlewares...)
+	return mws
 }
 
 // CreateRunner creates a new streaming ADK Runner configured with the given tools.
 func (f *AgentFactory) CreateRunner(ctx context.Context, tools []tool.InvokableTool) (*adk.Runner, error) {
-	return NewAgent(ctx, f.chatModel, f.persona, tools)
+	return NewAgent(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares())
 }
 
 // Persona returns the persona string used for agent creation.
@@ -37,5 +52,5 @@ func (f *AgentFactory) Persona() string { return f.persona }
 // Used for the buffered first attempt in dynamic tool selection to avoid
 // HTTP/2 stream errors when the response isn't consumed as a stream.
 func (f *AgentFactory) CreateRunnerBuffered(ctx context.Context, tools []tool.InvokableTool) (*adk.Runner, error) {
-	return NewAgentBuffered(ctx, f.chatModel, f.persona, tools)
+	return NewAgentBuffered(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares())
 }

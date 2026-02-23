@@ -128,8 +128,8 @@ func TestRegistry_LoadDir(t *testing.T) {
 // TestLoadSkillFiles loads every .jsonc file from the project's skills/
 // directory and verifies that each one parses and validates successfully.
 func TestLoadSkillFiles(t *testing.T) {
-	// Resolve the project-root skills/ directory relative to this test file.
-	skillsDir := filepath.Join("..", "..", "skills")
+	// Resolve the project-root examples/skills/ directory relative to this test file.
+	skillsDir := filepath.Join("..", "..", "examples", "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		t.Fatalf("read skills dir: %v", err)

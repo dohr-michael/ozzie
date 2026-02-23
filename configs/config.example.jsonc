@@ -18,6 +18,16 @@
 				"max_tokens": 4096
 			}
 
+			// Mistral AI (OpenAI-compatible API)
+			// "mistral": {
+			// 	"driver": "mistral",
+			// 	"model": "mistral-large-latest",
+			// 	"auth": {
+			// 		"env_var": "MISTRAL_API_KEY"
+			// 	},
+			// 	"max_tokens": 4096
+			// }
+
 			// Local model via Ollama (no auth required)
 			// "local": {
 			// 	"driver": "ollama",
@@ -33,14 +43,27 @@
 	},
 
 	"events": {
-		"buffer_size": 1024
+		"buffer_size": 1024,
+		// Log level: "debug" | "info" | "warn" | "error" (default: "info")
+		// Can be overridden by --debug CLI flag (forces "debug")
+		"log_level": "info"
 	},
 
 	"agent": {
 		// Leave empty to use the built-in Ozzie persona (recommended).
 		// Inspired by Ozzie Isaacs from the Commonwealth Saga:
 		// laid-back genius, explorer, pragmatist, dry wit.
-		"system_prompt": ""
+		"system_prompt": "",
+		"coordinator": {
+			// Default autonomy level for new tasks:
+			// "disabled" — standard single-step execution
+			// "supervised" — explore → plan → validate → execute (requires user approval)
+			// "autonomous" — explore → plan → execute (no validation)
+			// Can be overridden per-task via the "autonomy_level" parameter in submit_task.
+			"default_level": "disabled",
+			// Maximum plan-revise cycles before the task fails (supervised mode only).
+			"max_validation_rounds": 3
+		}
 	},
 
 	"plugins": {
@@ -58,5 +81,12 @@
 		"dirs": [],
 		// List of enabled skill names. Empty = all skills are loaded.
 		"enabled": []
+	},
+
+	"tools": {
+		// Dangerous tools that are always auto-approved (no confirmation prompt).
+		// Useful for async tasks where no interactive user is present.
+		// Example: ["cmd", "git"]
+		"allowed_dangerous": []
 	}
 }

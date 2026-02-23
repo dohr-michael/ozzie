@@ -38,4 +38,4 @@ Stub packages exist for: plugins, skills, sessions, scheduler, storage, TUI.
 | Gateway         | `internal/gateway/` (chi server + WS hub)           |
 | Agent           | `internal/agent/` (Eino ADK + EventRunner)          |
 | WS client       | `clients/ws/`                                       |
-| Default persona | `internal/agent/agent.go` → `DefaultSystemPrompt`   |
+| Default persona | `internal/agent/agent.go` → `DefaultPersona` + `AgentInstructions` |

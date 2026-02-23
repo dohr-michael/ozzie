@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -30,6 +32,16 @@ func NewAskCommand() *cli.Command {
 				Aliases: []string{"s"},
 				Usage:   "Session ID to resume (empty = new session)",
 			},
+			&cli.BoolFlag{
+				Name:    "dangerously-accept-all",
+				Aliases: []string{"y"},
+				Usage:   "Auto-approve all dangerous tool executions (no confirmation prompts)",
+			},
+			&cli.IntFlag{
+				Name:  "timeout",
+				Usage: "Response timeout in seconds",
+				Value: 120,
+			},
 		},
 		Action: runAsk,
 	}
@@ -43,8 +55,10 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 
 	gatewayURL := cmd.String("gateway")
 	sessionFlag := cmd.String("session")
+	acceptAll := cmd.Bool("dangerously-accept-all")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	timeoutSecs := cmd.Int("timeout")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
 
 	client, err := wsclient.Dial(ctx, gatewayURL)
@@ -64,6 +78,13 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	}
 	if sessionFlag == "" {
 		fmt.Fprintf(os.Stderr, "session: %s\n", sid)
+	}
+
+	// Enable accept-all mode if requested
+	if acceptAll {
+		if err := client.AcceptAllTools(); err != nil {
+			return fmt.Errorf("accept all tools: %w", err)
+		}
 	}
 
 	if err := client.SendMessage(message); err != nil {
@@ -105,6 +126,29 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 				if streaming {
 					fmt.Fprintln(os.Stdout)
 				}
+			}
+
+		case events.EventPromptRequest:
+			var evt events.Event
+			if err := json.Unmarshal(frame.Payload, &evt); err != nil {
+				continue
+			}
+			payload, ok := events.GetPromptRequestPayload(evt)
+			if !ok {
+				continue
+			}
+
+			// Ask the user for confirmation on stderr
+			fmt.Fprintf(os.Stderr, "\n%s [y/N] ", payload.Label)
+			scanner := bufio.NewScanner(os.Stdin)
+			cancelled := true
+			if scanner.Scan() {
+				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+				cancelled = answer != "y" && answer != "yes"
+			}
+
+			if err := client.RespondToPrompt(payload.Token, cancelled); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
 			}
 
 		case events.EventAssistantMessage:

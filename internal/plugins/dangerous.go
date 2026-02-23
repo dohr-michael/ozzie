@@ -16,14 +16,16 @@ const confirmationTimeout = 60 * time.Second
 
 // DangerousToolWrapper wraps a tool.InvokableTool with a confirmation step.
 // Before executing, it emits a confirmation event and waits for the user response.
+// If the tool is pre-approved via ToolPermissions, execution proceeds immediately.
 type DangerousToolWrapper struct {
 	inner tool.InvokableTool
 	name  string
 	bus   *events.Bus
+	perms *ToolPermissions
 }
 
 // WrapDangerous wraps a tool with confirmation if dangerous is true.
-func WrapDangerous(t tool.InvokableTool, name string, dangerous bool, bus *events.Bus) tool.InvokableTool {
+func WrapDangerous(t tool.InvokableTool, name string, dangerous bool, bus *events.Bus, perms *ToolPermissions) tool.InvokableTool {
 	if !dangerous {
 		return t
 	}
@@ -31,6 +33,7 @@ func WrapDangerous(t tool.InvokableTool, name string, dangerous bool, bus *event
 		inner: t,
 		name:  name,
 		bus:   bus,
+		perms: perms,
 	}
 }
 
@@ -39,11 +42,26 @@ func (d *DangerousToolWrapper) Info(ctx context.Context) (*schema.ToolInfo, erro
 	return d.inner.Info(ctx)
 }
 
-// InvokableRun asks for confirmation before executing the tool.
+// InvokableRun checks permissions before executing the tool.
+// If pre-approved (global or session), executes immediately.
+// In autonomous mode (async tasks), returns an error for unapproved tools.
+// In interactive mode, prompts the user and memorizes the approval.
 func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	sessionID := events.SessionIDFromContext(ctx)
+
+	// Check permissions — pre-approved tools execute immediately
+	if d.perms != nil && d.perms.IsAllowed(sessionID, d.name) {
+		return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
+	}
+
+	// Autonomous mode (async task) — no one to confirm, fail immediately
+	if events.IsAutonomousContext(ctx) {
+		return "", fmt.Errorf("tool %q requires approval but is not in allowed_dangerous list (autonomous mode)", d.name)
+	}
+
+	// Interactive mode — prompt the user
 	token := uuid.New().String()
 
-	// Emit confirmation request
 	d.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.ToolCallPayload{
 		Status:    events.ToolStatusStarted,
 		Name:      d.name,
@@ -56,7 +74,6 @@ func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON
 		Token: token,
 	}))
 
-	// Wait for response
 	ch, unsub := d.bus.SubscribeChan(1, events.EventPromptResponse)
 	defer unsub()
 
@@ -73,7 +90,10 @@ func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON
 			if payload.Cancelled {
 				return "", fmt.Errorf("tool %q execution denied by user", d.name)
 			}
-			// Confirmed — execute
+			// Confirmed — memorize for session and execute
+			if d.perms != nil && sessionID != "" {
+				d.perms.AllowForSession(sessionID, d.name)
+			}
 			return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
 		case <-ctx.Done():
 			return "", fmt.Errorf("tool %q confirmation timed out", d.name)

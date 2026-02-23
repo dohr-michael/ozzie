@@ -23,27 +23,11 @@ func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus *events.Bus)
 		slog.Warn("failed to load plugins", "dir", pluginDir, "error", err)
 	}
 
-	// Register native tools (without dangerous wrapper)
-	if err := registry.RegisterNative("cmd", NewCmdTool(0), CmdManifest()); err != nil {
-		slog.Warn("failed to register cmd tool", "error", err)
-	}
-	if err := registry.RegisterNative("root_cmd", NewRootCmdTool(0), RootCmdManifest()); err != nil {
-		slog.Warn("failed to register root_cmd tool", "error", err)
-	}
-	if err := registry.RegisterNative("read_file", NewReadFileTool(), ReadFileManifest()); err != nil {
-		slog.Warn("failed to register read_file tool", "error", err)
-	}
-	if err := registry.RegisterNative("write_file", NewWriteFileTool(), WriteFileManifest()); err != nil {
-		slog.Warn("failed to register write_file tool", "error", err)
-	}
-	if err := registry.RegisterNative("run_command", NewRunCmdTool(), RunCmdManifest()); err != nil {
+	// Register native tools (without dangerous wrapper).
+	// Filesystem tools (read_file, write_file, list_dir, search) are provided by the
+	// Eino filesystem middleware and are NOT registered here.
+	if err := registry.RegisterNative("run_command", NewExecuteTool(), ExecuteManifest()); err != nil {
 		slog.Warn("failed to register run_command tool", "error", err)
-	}
-	if err := registry.RegisterNative("search", NewSearchTool(), SearchManifest()); err != nil {
-		slog.Warn("failed to register search tool", "error", err)
-	}
-	if err := registry.RegisterNative("list_dir", NewListDirTool(), ListDirManifest()); err != nil {
-		slog.Warn("failed to register list_dir tool", "error", err)
 	}
 	if err := registry.RegisterNative("git", NewGitTool(), GitManifest()); err != nil {
 		slog.Warn("failed to register git tool", "error", err)
@@ -52,14 +36,39 @@ func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus *events.Bus)
 	return registry, nil
 }
 
+// WrapRegistrySandbox wraps exec and filesystem tools with sandbox validation.
+// Must be called BEFORE WrapRegistryDangerous so the chain is:
+// DangerousToolWrapper → SandboxGuard → inner tool.
+func WrapRegistrySandbox(registry *ToolRegistry, allowedPaths []string) {
+	for _, name := range registry.ToolNames() {
+		manifest := registry.Manifest(name)
+		if manifest == nil {
+			continue
+		}
+		caps := manifest.Capabilities
+
+		switch {
+		case caps.Elevated:
+			// root_cmd — blocked unconditionally in autonomous mode
+			registry.tools[name] = WrapSandbox(registry.tools[name], name, sandboxExec, true, allowedPaths)
+		case caps.Exec:
+			registry.tools[name] = WrapSandbox(registry.tools[name], name, sandboxExec, false, allowedPaths)
+		case caps.Filesystem != nil && !caps.Filesystem.ReadOnly:
+			// Read-only filesystem tools (read_file, list_dir, search) are not sandboxed —
+			// sub-agents may need to read reference files outside their WorkDir.
+			registry.tools[name] = WrapSandbox(registry.tools[name], name, sandboxFilesystem, false, allowedPaths)
+		}
+	}
+}
+
 // WrapRegistryDangerous wraps all dangerous tools in the registry with confirmation.
 // Used by the gateway; MCP mode skips this.
-func WrapRegistryDangerous(registry *ToolRegistry, bus *events.Bus) {
+func WrapRegistryDangerous(registry *ToolRegistry, bus *events.Bus, perms *ToolPermissions) {
 	for _, name := range registry.ToolNames() {
 		spec := registry.ToolSpec(name)
 		if spec != nil && spec.Dangerous {
 			original := registry.tools[name]
-			registry.tools[name] = WrapDangerous(original, name, true, bus)
+			registry.tools[name] = WrapDangerous(original, name, true, bus, perms)
 		}
 	}
 }

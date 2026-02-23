@@ -42,16 +42,31 @@ func toolSpecToToolInfo(spec *ToolSpec) *schema.ToolInfo {
 	if len(spec.Parameters) > 0 {
 		params := make(map[string]*schema.ParameterInfo, len(spec.Parameters))
 		for name, p := range spec.Parameters {
-			params[name] = &schema.ParameterInfo{
-				Type:     paramTypeToDataType(p.Type),
-				Desc:     p.Description,
-				Required: p.Required,
-				Enum:     p.Enum,
-			}
+			params[name] = paramSpecToParameterInfo(p)
 		}
 		info.ParamsOneOf = schema.NewParamsOneOfByParams(params)
 	}
 
+	return info
+}
+
+// paramSpecToParameterInfo recursively converts a ParamSpec to an Eino ParameterInfo.
+func paramSpecToParameterInfo(p ParamSpec) *schema.ParameterInfo {
+	info := &schema.ParameterInfo{
+		Type:     paramTypeToDataType(p.Type),
+		Desc:     p.Description,
+		Required: p.Required,
+		Enum:     p.Enum,
+	}
+	if p.Items != nil {
+		info.ElemInfo = paramSpecToParameterInfo(*p.Items)
+	}
+	if len(p.Properties) > 0 {
+		info.SubParams = make(map[string]*schema.ParameterInfo, len(p.Properties))
+		for name, sub := range p.Properties {
+			info.SubParams[name] = paramSpecToParameterInfo(sub)
+		}
+	}
 	return info
 }
 

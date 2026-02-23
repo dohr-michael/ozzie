@@ -46,23 +46,38 @@ const (
 
 	// Scheduler
 	EventScheduleTrigger EventType = "schedule.trigger"
+	EventScheduleCreated EventType = "schedule.created"
+	EventScheduleRemoved EventType = "schedule.removed"
 
 	// Skills
 	EventSkillStarted       EventType = "skill.started"
 	EventSkillCompleted     EventType = "skill.completed"
 	EventSkillStepStarted   EventType = "skill.step.started"
 	EventSkillStepCompleted EventType = "skill.step.completed"
+
+	// Tasks
+	EventTaskCreated      EventType = "task.created"
+	EventTaskStarted      EventType = "task.started"
+	EventTaskProgress     EventType = "task.progress"
+	EventTaskCompleted    EventType = "task.completed"
+	EventTaskFailed       EventType = "task.failed"
+	EventTaskCancelled    EventType = "task.cancelled"
+	EventTaskVerification EventType = "task.verification"
+	EventTaskSuspended    EventType = "task.suspended"
+	EventTaskResumed      EventType = "task.resumed"
 )
 
 // EventSource identifies the component that emitted an event.
 type EventSource string
 
 const (
-	SourceAgent  EventSource = "agent"
-	SourceHub    EventSource = "hub"
-	SourceWS     EventSource = "ws"
-	SourcePlugin EventSource = "plugin"
-	SourceSkill  EventSource = "skill"
+	SourceAgent     EventSource = "agent"
+	SourceHub       EventSource = "hub"
+	SourceWS        EventSource = "ws"
+	SourcePlugin    EventSource = "plugin"
+	SourceSkill     EventSource = "skill"
+	SourceTask      EventSource = "task"
+	SourceScheduler EventSource = "scheduler"
 )
 
 // Event represents an event in the system.

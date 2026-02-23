@@ -13,6 +13,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/marcozac/go-jsonc v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.3.1
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/urfave/cli/v3 v3.6.2
 )
 

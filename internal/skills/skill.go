@@ -31,9 +31,23 @@ type Skill struct {
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
+// EventTrigger describes an event-based trigger for a skill.
+type EventTrigger struct {
+	Event  string            `json:"event"`
+	Filter map[string]string `json:"filter,omitempty"`
+}
+
 // TriggerConfig controls how a skill can be invoked.
 type TriggerConfig struct {
-	Delegation bool `json:"delegation"`
+	Delegation bool          `json:"delegation"`
+	Cron       string        `json:"cron,omitempty"`
+	OnEvent    *EventTrigger `json:"on_event,omitempty"`
+	Keywords   []string      `json:"keywords,omitempty"`
+}
+
+// HasScheduleTrigger returns true if the skill has a cron or event trigger.
+func (tc TriggerConfig) HasScheduleTrigger() bool {
+	return tc.Cron != "" || tc.OnEvent != nil
 }
 
 // Var describes a skill input variable.
@@ -45,13 +59,13 @@ type Var struct {
 
 // Step describes a single step in a workflow skill.
 type Step struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Instruction string   `json:"instruction"`
-	Tools       []string `json:"tools"`
-	Model       string   `json:"model"`
-	Needs       []string `json:"needs"`
-	Acceptance  string   `json:"acceptance"`
+	ID          string              `json:"id"`
+	Title       string              `json:"title"`
+	Instruction string              `json:"instruction"`
+	Tools       []string            `json:"tools"`
+	Model       string              `json:"model"`
+	Needs       []string            `json:"needs"`
+	Acceptance  *AcceptanceCriteria `json:"acceptance,omitempty"`
 }
 
 // LoadSkill reads a JSONC skill definition from disk.

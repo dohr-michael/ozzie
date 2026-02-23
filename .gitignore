@@ -2,10 +2,13 @@
 build/
 bin/
 dev_home/
+e2e/target/
+e2e/.bin/
 
 # Environment
 .env
 .env.*
+.config.jsonc
 
 # OS
 .DS_Store

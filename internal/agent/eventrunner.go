@@ -23,6 +23,28 @@ type ToolLookup interface {
 	ToolsByNames(names []string) []tool.InvokableTool
 }
 
+// CapacitySlot represents an acquired LLM capacity slot.
+// Implemented by actors.Actor.
+type CapacitySlot interface{}
+
+// CapacityPool acquires and releases LLM capacity slots.
+// Implemented by actors.ActorPool.
+type CapacityPool interface {
+	AcquireInteractive(providerName string) (CapacitySlot, error)
+	Release(slot CapacitySlot)
+}
+
+// TaskStore provides mailbox access for the EventRunner.
+type TaskStore interface {
+	LoadMailbox(taskID string) ([]TaskMailboxMessage, error)
+}
+
+// TaskMailboxMessage mirrors tasks.MailboxMessage to avoid import cycle.
+type TaskMailboxMessage struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
 // EventRunner wraps an AgentFactory and provides event-driven execution
 // with dynamic tool selection.
 type EventRunner struct {
@@ -31,12 +53,11 @@ type EventRunner struct {
 	registry   ToolLookup
 	bus        *events.Bus
 	store      sessions.Store
+	taskStore  TaskStore
 	compressor *Compressor
 
-	composer            *PromptComposer
-	customInstructions  string
-	allToolDescriptions map[string]string
-	skillDescriptions   map[string]string
+	pool            CapacityPool // actor pool for capacity management (optional)
+	defaultProvider string       // default provider name for AcquireInteractive
 
 	mu           sync.Mutex
 	running      map[string]bool // per-session lock
@@ -49,15 +70,15 @@ type EventRunner struct {
 
 // EventRunnerConfig contains configuration for the EventRunner.
 type EventRunnerConfig struct {
-	Factory             *AgentFactory
-	ToolSet             *ToolSet
-	Registry            ToolLookup
-	EventBus            *events.Bus
-	Store               sessions.Store
-	ContextWindow       int               // total context window in tokens
-	CustomInstructions  string            // Layer 2: from config.Agent.SystemPrompt
-	AllToolDescriptions map[string]string // Full catalog: tool name → description
-	SkillDescriptions   map[string]string // Layer 3b: skill name → description
+	Factory         *AgentFactory
+	ToolSet         *ToolSet
+	Registry        ToolLookup
+	EventBus        *events.Bus
+	Store           sessions.Store
+	TaskStore       TaskStore    // task store for mailbox access (optional)
+	Pool            CapacityPool // actor pool for capacity management (optional)
+	DefaultProvider string       // default provider name for AcquireInteractive
+	ContextWindow   int          // total context window in tokens (for compression)
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -65,23 +86,24 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	er := &EventRunner{
-		factory:             cfg.Factory,
-		toolSet:             cfg.ToolSet,
-		registry:            cfg.Registry,
-		bus:                 cfg.EventBus,
-		store:               cfg.Store,
-		compressor:          NewCompressor(CompressorConfig{ContextWindow: cfg.ContextWindow}),
-		composer:            NewPromptComposer(),
-		customInstructions:  cfg.CustomInstructions,
-		allToolDescriptions: cfg.AllToolDescriptions,
-		skillDescriptions:   cfg.SkillDescriptions,
-		running:             make(map[string]bool),
-		ctx:                 ctx,
-		cancel:              cancel,
+		factory:         cfg.Factory,
+		toolSet:         cfg.ToolSet,
+		registry:        cfg.Registry,
+		bus:             cfg.EventBus,
+		store:           cfg.Store,
+		taskStore:       cfg.TaskStore,
+		compressor:      NewCompressor(CompressorConfig{ContextWindow: cfg.ContextWindow}),
+		pool:            cfg.Pool,
+		defaultProvider: cfg.DefaultProvider,
+		running:         make(map[string]bool),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
 		events.EventUserMessage,
+		events.EventTaskCompleted,
+		events.EventTaskSuspended,
 	)
 
 	return er
@@ -92,6 +114,14 @@ func (er *EventRunner) handleEvent(event events.Event) {
 	case events.EventUserMessage:
 		if payload, ok := events.GetUserMessagePayload(event); ok && payload.Content != "" {
 			go er.processMessage(event.SessionID, payload.Content)
+		}
+	case events.EventTaskCompleted:
+		if payload, ok := events.GetTaskCompletedPayload(event); ok && event.SessionID != "" {
+			go er.handleTaskCompleted(event.SessionID, payload)
+		}
+	case events.EventTaskSuspended:
+		if payload, ok := events.GetTaskSuspendedPayload(event); ok && event.SessionID != "" {
+			go er.handleTaskSuspended(event.SessionID, payload)
 		}
 	}
 }
@@ -112,6 +142,17 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		er.mu.Unlock()
 	}()
 
+	// Acquire a capacity slot from the actor pool (if configured)
+	if er.pool != nil {
+		slot, err := er.pool.AcquireInteractive(er.defaultProvider)
+		if err != nil {
+			slog.Error("acquire interactive slot", "error", err, "session_id", sessionID)
+			er.emitError(sessionID, "All LLM capacity is currently in use. Please try again shortly.")
+			return
+		}
+		defer er.pool.Release(slot)
+	}
+
 	// Persist user message
 	userMsg := sessions.Message{Role: string(schema.User), Content: content, Ts: time.Now()}
 	if err := er.store.AppendMessage(sessionID, userMsg); err != nil {
@@ -126,16 +167,22 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		return
 	}
 
-	messages := make([]*schema.Message, len(history))
-	for i, m := range history {
-		messages[i] = m.ToSchemaMessage()
+	messages := make([]*schema.Message, 0, len(history))
+	for _, m := range history {
+		msg := m.ToSchemaMessage()
+		// Skip messages with empty content — APIs reject these.
+		if msg.Content == "" && msg.Role != schema.Assistant {
+			continue
+		}
+		messages = append(messages, msg)
 	}
 
-	// Context compression
+	// Context compression — estimate system prompt as persona only;
+	// dynamic context (tools, session, memories) is injected by middlewares.
 	if session, err := er.store.Get(sessionID); err == nil {
 		sysEstimate := er.compressor.EstimateTokens([]*schema.Message{{
 			Role:    schema.System,
-			Content: er.estimateSystemPrompt(sessionID, len(history)),
+			Content: er.factory.Persona(),
 		}})
 
 		result, compErr := er.compressor.Compress(er.ctx, session, messages, sysEstimate, er.summarize)
@@ -158,8 +205,6 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 
 		er.toolSet.ResetTurnFlag(sessionID)
 
-		fullMessages := er.prependDynamicContext(sessionID, messages, len(history), activeNames)
-
 		// First attempt with inactive tools: run buffered (non-streaming) to detect activation
 		if attempt == 0 && er.toolSet.HasInactiveTools(sessionID) {
 			runner, err := er.factory.CreateRunnerBuffered(er.ctx, tools)
@@ -169,7 +214,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 				return
 			}
 
-			content := er.runAgentBuffered(sessionID, runner, fullMessages)
+			content := er.runAgentBuffered(sessionID, runner, messages)
 
 			if er.toolSet.ActivatedDuringTurn(sessionID) {
 				// Tools were activated — retry with expanded tool set (streamed)
@@ -197,32 +242,9 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		}
 
 		er.emitStreamStart(sessionID)
-		er.runAgent(sessionID, runner, fullMessages)
+		er.runAgent(sessionID, runner, messages)
 		return
 	}
-}
-
-func (er *EventRunner) prependDynamicContext(sessionID string, messages []*schema.Message, msgCount int, activeNames []string) []*schema.Message {
-	pctx := PromptContext{
-		CustomInstructions:  er.customInstructions,
-		ActiveToolNames:     activeNames,
-		AllToolDescriptions: er.allToolDescriptions,
-		SkillDescriptions:   er.skillDescriptions,
-		MessageCount:        msgCount,
-	}
-
-	// Load session metadata (ignore errors — session may not exist yet)
-	if sess, err := er.store.Get(sessionID); err == nil {
-		pctx.Session = sess
-	}
-
-	dynamic := er.composer.Compose(pctx)
-	if dynamic == "" {
-		return messages
-	}
-
-	systemMsg := &schema.Message{Role: schema.System, Content: dynamic}
-	return append([]*schema.Message{systemMsg}, messages...)
 }
 
 func (er *EventRunner) runAgent(sessionID string, runner *adk.Runner, messages []*schema.Message) {
@@ -430,19 +452,43 @@ func (er *EventRunner) summarize(ctx context.Context, prompt string) (string, er
 	return content, nil
 }
 
-// estimateSystemPrompt generates the system prompt text for token estimation.
-func (er *EventRunner) estimateSystemPrompt(sessionID string, msgCount int) string {
-	pctx := PromptContext{
-		CustomInstructions:  er.customInstructions,
-		AllToolDescriptions: er.allToolDescriptions,
-		SkillDescriptions:   er.skillDescriptions,
-		MessageCount:        msgCount,
-	}
-	if sess, err := er.store.Get(sessionID); err == nil {
-		pctx.Session = sess
+// handleTaskCompleted appends a system message to the session so the user sees
+// the notification on their next interaction.
+func (er *EventRunner) handleTaskCompleted(sessionID string, payload events.TaskCompletedPayload) {
+	summary := fmt.Sprintf("[Task completed] %s", payload.Title)
+	if payload.OutputSummary != "" {
+		summary += "\n" + payload.OutputSummary
 	}
 
-	return er.factory.Persona() + "\n\n" + er.composer.Compose(pctx)
+	msg := sessions.Message{
+		Role:    "system",
+		Content: summary,
+		Ts:      time.Now(),
+	}
+	if err := er.store.AppendMessage(sessionID, msg); err != nil {
+		slog.Error("persist task completed notification", "error", err, "session_id", sessionID)
+	}
+}
+
+// handleTaskSuspended injects a validation request into the session so the user
+// can see the plan and reply.
+func (er *EventRunner) handleTaskSuspended(sessionID string, payload events.TaskSuspendedPayload) {
+	// Only relay validation requests (tasks waiting for user reply)
+	if payload.PlanContent == "" {
+		return
+	}
+
+	summary := fmt.Sprintf("[Validation needed — %s (task %s)]\n\n%s\n\nReply with your feedback to resume this task.",
+		payload.Title, payload.TaskID, payload.PlanContent)
+
+	msg := sessions.Message{
+		Role:    "system",
+		Content: summary,
+		Ts:      time.Now(),
+	}
+	if err := er.store.AppendMessage(sessionID, msg); err != nil {
+		slog.Error("persist task suspended notification", "error", err, "session_id", sessionID)
+	}
 }
 
 // Close stops the event runner.

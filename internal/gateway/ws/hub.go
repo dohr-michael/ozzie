@@ -10,6 +10,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -21,21 +22,33 @@ type Client struct {
 	sessionID string
 }
 
+// TaskHandler provides task operations for WS methods.
+type TaskHandler interface {
+	Submit(sessionID string, title, description string, tools []string, priority string) (string, error)
+	Check(taskID string) (any, error)
+	Cancel(taskID string, reason string) error
+	List(sessionID string) (any, error)
+	ReplyTask(taskID string, feedback string, status string, sessionID string) error
+}
+
 // Hub manages WebSocket clients and bridges them to the event bus.
 type Hub struct {
 	mu          sync.RWMutex
 	clients     map[*Client]struct{}
 	bus         *events.Bus
 	store       sessions.Store
+	tasks       TaskHandler
+	perms       *plugins.ToolPermissions
 	unsubscribe func()
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
-func NewHub(bus *events.Bus, store sessions.Store) *Hub {
+func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermissions) *Hub {
 	h := &Hub{
 		clients: make(map[*Client]struct{}),
 		bus:     bus,
 		store:   store,
+		perms:   perms,
 	}
 
 	// Subscribe to all events and bridge to WS clients
@@ -59,6 +72,11 @@ func NewHub(bus *events.Bus, store sessions.Store) *Hub {
 	})
 
 	return h
+}
+
+// SetTaskHandler sets the optional task handler for WS task methods.
+func (h *Hub) SetTaskHandler(th TaskHandler) {
+	h.tasks = th
 }
 
 // broadcast sends data to all connected clients.
@@ -127,6 +145,9 @@ func (h *Hub) unregisterClient(c *Client) {
 			if err := h.store.Close(sessionID); err != nil {
 				slog.Error("close session", "error", err, "session_id", sessionID)
 			}
+			// NOTE: do NOT cleanup tool permissions here — async tasks
+			// may still be running with this session's accept-all flag.
+			// Permissions are lightweight and scoped to the gateway lifetime.
 			h.bus.Publish(events.NewEventWithSession(
 				events.EventSessionClosed, events.SourceHub,
 				map[string]any{"session_id": sessionID}, sessionID,
@@ -315,9 +336,151 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 		c.hub.bus.Publish(events.NewTypedEventWithSession(events.SourceWS, params, c.sessionID))
 		c.sendOK(ctx, frame.ID, map[string]string{"status": "sent"})
 
+	case MethodSubmitTask:
+		c.handleSubmitTask(ctx, frame)
+
+	case MethodCheckTask:
+		c.handleCheckTask(ctx, frame)
+
+	case MethodCancelTask:
+		c.handleCancelTask(ctx, frame)
+
+	case MethodListTasks:
+		c.handleListTasks(ctx, frame)
+
+	case MethodReplyTask:
+		c.handleReplyTask(ctx, frame)
+
+	case MethodAcceptAllTools:
+		c.hub.ensureSession(c)
+		if c.hub.perms != nil && c.sessionID != "" {
+			c.hub.perms.AllowAllForSession(c.sessionID)
+		}
+		c.sendOK(ctx, frame.ID, map[string]string{"status": "accepted"})
+
 	default:
 		c.sendError(ctx, frame.ID, "unknown method: "+frame.Method)
 	}
+}
+
+func (c *Client) handleSubmitTask(ctx context.Context, frame Frame) {
+	if c.hub.tasks == nil {
+		c.sendError(ctx, frame.ID, "task system not available")
+		return
+	}
+
+	var params struct {
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Tools       []string `json:"tools"`
+		Priority    string   `json:"priority"`
+	}
+	if err := json.Unmarshal(frame.Params, &params); err != nil {
+		c.sendError(ctx, frame.ID, "invalid params")
+		return
+	}
+
+	c.hub.ensureSession(c)
+
+	taskID, err := c.hub.tasks.Submit(c.sessionID, params.Title, params.Description, params.Tools, params.Priority)
+	if err != nil {
+		c.sendError(ctx, frame.ID, err.Error())
+		return
+	}
+
+	c.sendOK(ctx, frame.ID, map[string]string{"task_id": taskID, "status": "submitted"})
+}
+
+func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
+	if c.hub.tasks == nil {
+		c.sendError(ctx, frame.ID, "task system not available")
+		return
+	}
+
+	var params struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(frame.Params, &params); err != nil {
+		c.sendError(ctx, frame.ID, "invalid params")
+		return
+	}
+
+	result, err := c.hub.tasks.Check(params.TaskID)
+	if err != nil {
+		c.sendError(ctx, frame.ID, err.Error())
+		return
+	}
+
+	c.sendOK(ctx, frame.ID, result)
+}
+
+func (c *Client) handleCancelTask(ctx context.Context, frame Frame) {
+	if c.hub.tasks == nil {
+		c.sendError(ctx, frame.ID, "task system not available")
+		return
+	}
+
+	var params struct {
+		TaskID string `json:"task_id"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(frame.Params, &params); err != nil {
+		c.sendError(ctx, frame.ID, "invalid params")
+		return
+	}
+
+	if err := c.hub.tasks.Cancel(params.TaskID, params.Reason); err != nil {
+		c.sendError(ctx, frame.ID, err.Error())
+		return
+	}
+
+	c.sendOK(ctx, frame.ID, map[string]string{"task_id": params.TaskID, "status": "cancelled"})
+}
+
+func (c *Client) handleListTasks(ctx context.Context, frame Frame) {
+	if c.hub.tasks == nil {
+		c.sendError(ctx, frame.ID, "task system not available")
+		return
+	}
+
+	result, err := c.hub.tasks.List(c.sessionID)
+	if err != nil {
+		c.sendError(ctx, frame.ID, err.Error())
+		return
+	}
+
+	c.sendOK(ctx, frame.ID, result)
+}
+
+func (c *Client) handleReplyTask(ctx context.Context, frame Frame) {
+	if c.hub.tasks == nil {
+		c.sendError(ctx, frame.ID, "task system not available")
+		return
+	}
+
+	var params struct {
+		TaskID   string `json:"task_id"`
+		Feedback string `json:"feedback"`
+		Status   string `json:"status"` // "approved" | "revise"
+	}
+	if err := json.Unmarshal(frame.Params, &params); err != nil {
+		c.sendError(ctx, frame.ID, "invalid params")
+		return
+	}
+
+	// Default to "approved" for backwards compatibility
+	if params.Status == "" {
+		params.Status = "approved"
+	}
+
+	c.hub.ensureSession(c)
+
+	if err := c.hub.tasks.ReplyTask(params.TaskID, params.Feedback, params.Status, c.sessionID); err != nil {
+		c.sendError(ctx, frame.ID, err.Error())
+		return
+	}
+
+	c.sendOK(ctx, frame.ID, map[string]string{"task_id": params.TaskID, "status": "replied"})
 }
 
 // writePump writes queued messages to the WS connection.
