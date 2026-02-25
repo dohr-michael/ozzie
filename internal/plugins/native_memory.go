@@ -18,12 +18,14 @@ import (
 
 // StoreMemoryTool creates a new memory entry.
 type StoreMemoryTool struct {
-	store memory.Store
+	store    memory.Store
+	pipeline *memory.Pipeline
 }
 
 // NewStoreMemoryTool creates a new store_memory tool.
-func NewStoreMemoryTool(store memory.Store) *StoreMemoryTool {
-	return &StoreMemoryTool{store: store}
+// pipeline may be nil if embeddings are disabled.
+func NewStoreMemoryTool(store memory.Store, pipeline *memory.Pipeline) *StoreMemoryTool {
+	return &StoreMemoryTool{store: store, pipeline: pipeline}
 }
 
 // StoreMemoryManifest returns the plugin manifest for the store_memory tool.
@@ -109,6 +111,15 @@ func (t *StoreMemoryTool) InvokableRun(_ context.Context, argumentsInJSON string
 		return "", fmt.Errorf("store_memory: %w", err)
 	}
 
+	// Enqueue embedding job if pipeline is available
+	if t.pipeline != nil {
+		t.pipeline.Enqueue(memory.EmbedJob{
+			ID:      entry.ID,
+			Content: memory.BuildEmbedText(entry, input.Content),
+			Meta:    memory.BuildEmbedMeta(entry),
+		})
+	}
+
 	result, _ := json.Marshal(map[string]string{
 		"id":     entry.ID,
 		"status": "stored",
@@ -124,11 +135,11 @@ var _ tool.InvokableTool = (*StoreMemoryTool)(nil)
 
 // QueryMemoriesTool searches memories by query and tags.
 type QueryMemoriesTool struct {
-	retriever *memory.Retriever
+	retriever *memory.HybridRetriever
 }
 
 // NewQueryMemoriesTool creates a new query_memories tool.
-func NewQueryMemoriesTool(retriever *memory.Retriever) *QueryMemoriesTool {
+func NewQueryMemoriesTool(retriever *memory.HybridRetriever) *QueryMemoriesTool {
 	return &QueryMemoriesTool{retriever: retriever}
 }
 
@@ -234,12 +245,14 @@ var _ tool.InvokableTool = (*QueryMemoriesTool)(nil)
 
 // ForgetMemoryTool deletes a memory entry by ID.
 type ForgetMemoryTool struct {
-	store memory.Store
+	store    memory.Store
+	pipeline *memory.Pipeline
 }
 
 // NewForgetMemoryTool creates a new forget_memory tool.
-func NewForgetMemoryTool(store memory.Store) *ForgetMemoryTool {
-	return &ForgetMemoryTool{store: store}
+// pipeline may be nil if embeddings are disabled.
+func NewForgetMemoryTool(store memory.Store, pipeline *memory.Pipeline) *ForgetMemoryTool {
+	return &ForgetMemoryTool{store: store, pipeline: pipeline}
 }
 
 // ForgetMemoryManifest returns the plugin manifest for the forget_memory tool.
@@ -285,6 +298,11 @@ func (t *ForgetMemoryTool) InvokableRun(_ context.Context, argumentsInJSON strin
 
 	if err := t.store.Delete(input.ID); err != nil {
 		return "", fmt.Errorf("forget_memory: %w", err)
+	}
+
+	// Enqueue vector deletion if pipeline is available
+	if t.pipeline != nil {
+		t.pipeline.Enqueue(memory.EmbedJob{ID: input.ID, Delete: true})
 	}
 
 	result, _ := json.Marshal(map[string]string{

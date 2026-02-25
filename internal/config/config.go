@@ -7,8 +7,9 @@ type Config struct {
 	Gateway GatewayConfig `json:"gateway"`
 	Models  ModelsConfig  `json:"models"`
 	Events  EventsConfig  `json:"events"`
-	Agent   AgentConfig   `json:"agent"`
-	Plugins PluginsConfig `json:"plugins"`
+	Agent     AgentConfig     `json:"agent"`
+	Embedding EmbeddingConfig `json:"embedding"`
+	Plugins   PluginsConfig   `json:"plugins"`
 	Skills  SkillsConfig  `json:"skills"`
 	Tools   ToolsConfig   `json:"tools"`
 	Sandbox SandboxConfig `json:"sandbox"`
@@ -26,6 +27,22 @@ func (c SandboxConfig) IsSandboxEnabled() bool {
 		return true
 	}
 	return *c.Enabled
+}
+
+// EmbeddingConfig configures the embedding model for semantic memory.
+type EmbeddingConfig struct {
+	Enabled   *bool      `json:"enabled"`              // default: false (opt-in)
+	Driver    string     `json:"driver"`               // "openai" | "ollama"
+	Model     string     `json:"model"`                // e.g. "text-embedding-3-small", "nomic-embed-text"
+	BaseURL   string     `json:"base_url,omitempty"`   // for ollama or custom endpoints
+	Dims      int        `json:"dims,omitempty"`       // embedding dimensions (OpenAI v3 supports this)
+	Auth      AuthConfig `json:"auth,omitempty"`       // reuses existing AuthConfig
+	QueueSize int        `json:"queue_size,omitempty"` // buffer channel size (default: 100)
+}
+
+// IsEnabled returns true if embeddings are enabled (default: false).
+func (c EmbeddingConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // ToolsConfig configures tool permissions.

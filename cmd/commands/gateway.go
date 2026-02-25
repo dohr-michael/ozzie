@@ -262,13 +262,45 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	sched.Start()
 	defer sched.Stop()
 
-	// Memory store + retriever
+	// Memory store + optional vector embedding
 	memoryDir := filepath.Join(config.OzziePath(), "memory")
 	memoryStore := memory.NewFileStore(memoryDir)
-	memoryRetriever := memory.NewRetriever(memoryStore)
+
+	var vectorStore *memory.VectorStore
+	var pipeline *memory.Pipeline
+	if cfg.Embedding.IsEnabled() {
+		embedder, embedErr := memory.NewEmbedder(ctx, cfg.Embedding)
+		if embedErr != nil {
+			slog.Warn("embedding disabled: failed to create embedder", "error", embedErr)
+		} else {
+			vs, vsErr := memory.NewVectorStore(ctx, memoryDir, embedder)
+			if vsErr != nil {
+				slog.Warn("embedding disabled: failed to create vector store", "error", vsErr)
+			} else {
+				vectorStore = vs
+				queueSize := cfg.Embedding.QueueSize
+				if queueSize <= 0 {
+					queueSize = 100
+				}
+				pipeline = memory.NewPipeline(vectorStore, queueSize)
+				pipeline.Start(ctx)
+				defer pipeline.Stop()
+
+				// Async startup reindex
+				go func() {
+					if _, err := memory.Reindex(ctx, memoryStore, vectorStore); err != nil {
+						slog.Warn("startup reindex failed", "error", err)
+					}
+				}()
+				slog.Info("semantic memory enabled", "driver", cfg.Embedding.Driver, "model", cfg.Embedding.Model)
+			}
+		}
+	}
+
+	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
 
 	// Register memory tools
-	storeMemTool := plugins.NewStoreMemoryTool(memoryStore)
+	storeMemTool := plugins.NewStoreMemoryTool(memoryStore, pipeline)
 	if err := toolRegistry.RegisterNative("store_memory", storeMemTool, plugins.StoreMemoryManifest()); err != nil {
 		slog.Warn("failed to register store_memory tool", "error", err)
 	}
@@ -278,7 +310,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register query_memories tool", "error", err)
 	}
 
-	forgetMemTool := plugins.NewForgetMemoryTool(memoryStore)
+	forgetMemTool := plugins.NewForgetMemoryTool(memoryStore, pipeline)
 	if err := toolRegistry.RegisterNative("forget_memory", forgetMemTool, plugins.ForgetMemoryManifest()); err != nil {
 		slog.Warn("failed to register forget_memory tool", "error", err)
 	}

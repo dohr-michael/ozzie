@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
@@ -42,6 +43,11 @@ func NewMemoryCommand() *cli.Command {
 				ArgsUsage: "<id>",
 				Action:    runMemoryForget,
 			},
+			{
+				Name:   "reindex",
+				Usage:  "Rebuild vector embeddings for all memories",
+				Action: runMemoryReindex,
+			},
 		},
 		DefaultCommand: "list",
 	}
@@ -77,15 +83,30 @@ func runMemoryList(_ context.Context, _ *cli.Command) error {
 	return w.Flush()
 }
 
-func runMemorySearch(_ context.Context, cmd *cli.Command) error {
+func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 	query := cmd.Args().First()
 	if query == "" {
 		return fmt.Errorf("usage: ozzie memory search <query>")
 	}
 
 	store := newMemoryStore()
-	retriever := memory.NewRetriever(store)
 
+	// Use hybrid retriever if embeddings are enabled
+	var vectorStore *memory.VectorStore
+	configPath := cmd.String("config")
+	cfg, cfgErr := config.Load(configPath)
+	if cfgErr == nil && cfg.Embedding.IsEnabled() {
+		embedder, err := memory.NewEmbedder(ctx, cfg.Embedding)
+		if err == nil {
+			memoryDir := filepath.Join(config.OzziePath(), "memory")
+			vs, err := memory.NewVectorStore(ctx, memoryDir, embedder)
+			if err == nil {
+				vectorStore = vs
+			}
+		}
+	}
+
+	retriever := memory.NewHybridRetriever(store, vectorStore)
 	results, err := retriever.Retrieve(query, nil, 10)
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
@@ -95,6 +116,12 @@ func runMemorySearch(_ context.Context, cmd *cli.Command) error {
 		fmt.Println("No matching memories found.")
 		return nil
 	}
+
+	mode := "keyword"
+	if vectorStore != nil {
+		mode = "hybrid"
+	}
+	fmt.Printf("Search mode: %s\n\n", mode)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "SCORE\tID\tTYPE\tTITLE")
@@ -147,5 +174,39 @@ func runMemoryForget(_ context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Printf("Memory %s deleted.\n", id)
+	return nil
+}
+
+func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
+	configPath := cmd.String("config")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if !cfg.Embedding.IsEnabled() {
+		return fmt.Errorf("embedding is not enabled in config (set embedding.enabled = true)")
+	}
+
+	embedder, err := memory.NewEmbedder(ctx, cfg.Embedding)
+	if err != nil {
+		return fmt.Errorf("create embedder: %w", err)
+	}
+
+	memoryDir := filepath.Join(config.OzziePath(), "memory")
+	store := memory.NewFileStore(memoryDir)
+
+	vectorStore, err := memory.NewVectorStore(ctx, memoryDir, embedder)
+	if err != nil {
+		return fmt.Errorf("create vector store: %w", err)
+	}
+
+	slog.Info("starting reindex", "driver", cfg.Embedding.Driver, "model", cfg.Embedding.Model)
+	stats, err := memory.Reindex(ctx, store, vectorStore)
+	if err != nil {
+		return fmt.Errorf("reindex: %w", err)
+	}
+
+	fmt.Printf("Reindex complete: %d/%d indexed, %d errors\n", stats.Indexed, stats.Total, stats.Errors)
 	return nil
 }

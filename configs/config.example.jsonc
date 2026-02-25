@@ -66,6 +66,29 @@
 		}
 	},
 
+	// Embedding configuration for semantic memory search.
+	// When enabled, memories are indexed with vector embeddings for
+	// semantic retrieval (hybrid keyword + cosine similarity scoring).
+	// "embedding": {
+	// 	"enabled": true,
+	// 	"driver": "openai",              // "openai" | "ollama"
+	// 	"model": "text-embedding-3-small",
+	// 	// "base_url": "",               // for ollama or custom endpoints
+	// 	// "dims": 1536,                 // embedding dimensions (optional)
+	// 	// "auth": {
+	// 	// 	"api_key": ""               // reads from OPENAI_API_KEY env var by default
+	// 	// },
+	// 	// "queue_size": 100             // async pipeline buffer size
+	// },
+
+	// Ollama embedding example (local, no auth):
+	// "embedding": {
+	// 	"enabled": true,
+	// 	"driver": "ollama",
+	// 	"model": "nomic-embed-text",
+	// 	"base_url": "http://localhost:11434"
+	// },
+
 	"plugins": {
 		// Directory containing WASM plugin subdirectories.
 		// Each subdirectory should have a manifest.jsonc and a .wasm file.
