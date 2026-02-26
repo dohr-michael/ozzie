@@ -484,6 +484,8 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		}
 	}
 
+	tier := p.models.ProviderTier(actor.ProviderName)
+
 	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
 		Store:               p.store,
 		Bus:                 p.bus,
@@ -494,6 +496,7 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		MaxValidationRounds: p.maxValidationRounds,
 		Middlewares:         p.taskMiddlewares,
 		Retriever:           p.retriever,
+		Tier:                tier,
 	})
 
 	if err := runner.Run(ctx); err != nil {

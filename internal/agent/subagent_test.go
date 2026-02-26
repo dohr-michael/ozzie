@@ -43,7 +43,7 @@ func TestAgentInstructions_ContainsMemoryProtocol(t *testing.T) {
 }
 
 func TestNewSubAgentMiddleware_InjectsInstructions(t *testing.T) {
-	mw := NewSubAgentMiddleware("")
+	mw := NewSubAgentMiddleware("", TierLarge)
 	if mw.AdditionalInstruction != SubAgentInstructions {
 		t.Errorf("middleware AdditionalInstruction = %q, want SubAgentInstructions", mw.AdditionalInstruction)
 	}
@@ -51,11 +51,18 @@ func TestNewSubAgentMiddleware_InjectsInstructions(t *testing.T) {
 
 func TestNewSubAgentMiddleware_WithRuntimeInstruction(t *testing.T) {
 	runtime := "## Runtime Environment\n\nYou are running in **container** mode."
-	mw := NewSubAgentMiddleware(runtime)
+	mw := NewSubAgentMiddleware(runtime, TierLarge)
 	if !strings.Contains(mw.AdditionalInstruction, SubAgentInstructions) {
 		t.Error("middleware should contain SubAgentInstructions")
 	}
 	if !strings.Contains(mw.AdditionalInstruction, runtime) {
 		t.Error("middleware should contain runtime instruction")
+	}
+}
+
+func TestNewSubAgentMiddleware_TierSmall(t *testing.T) {
+	mw := NewSubAgentMiddleware("", TierSmall)
+	if mw.AdditionalInstruction != SubAgentInstructionsCompact {
+		t.Errorf("expected compact instructions for TierSmall")
 	}
 }

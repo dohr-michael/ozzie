@@ -79,11 +79,18 @@ type EventRunnerConfig struct {
 	Pool            CapacityPool // actor pool for capacity management (optional)
 	DefaultProvider string       // default provider name for AcquireInteractive
 	ContextWindow   int          // total context window in tokens (for compression)
+	Tier            ModelTier    // model tier for adaptive compression
 }
 
 // NewEventRunner creates a new event-driven runner.
 func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	compCfg := CompressorConfig{ContextWindow: cfg.ContextWindow}
+	if cfg.Tier == TierSmall {
+		compCfg.Threshold = 0.60
+		compCfg.PreserveRatio = 0.40
+	}
 
 	er := &EventRunner{
 		factory:         cfg.Factory,
@@ -92,7 +99,7 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		bus:             cfg.EventBus,
 		store:           cfg.Store,
 		taskStore:       cfg.TaskStore,
-		compressor:      NewCompressor(CompressorConfig{ContextWindow: cfg.ContextWindow}),
+		compressor:      NewCompressor(compCfg),
 		pool:            cfg.Pool,
 		defaultProvider: cfg.DefaultProvider,
 		running:         make(map[string]bool),

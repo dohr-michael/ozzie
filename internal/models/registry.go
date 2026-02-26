@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 
+	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/config"
 )
 
@@ -106,6 +107,23 @@ func (r *Registry) ContextWindow(name string) int {
 		return fallbackContextWindow
 	}
 	return resolveContextWindow(entry.Config)
+}
+
+// ProviderTier returns the resolved ModelTier for the named provider.
+func (r *Registry) ProviderTier(name string) agent.ModelTier {
+	r.mu.RLock()
+	entry, ok := r.providers[name]
+	r.mu.RUnlock()
+
+	if !ok {
+		return agent.TierLarge
+	}
+	return agent.ResolveTier(entry.Config.Tier, resolveContextWindow(entry.Config))
+}
+
+// DefaultTier returns the ModelTier for the default provider.
+func (r *Registry) DefaultTier() agent.ModelTier {
+	return r.ProviderTier(r.defaultName)
 }
 
 // resolveContextWindow determines context window: explicit config > model prefix > driver default > fallback.

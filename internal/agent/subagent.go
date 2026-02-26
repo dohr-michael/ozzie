@@ -32,8 +32,8 @@ Do NOT just describe what you would do — actually call the tools to do it.
 // (and optionally the runtime instruction) into every sub-agent via AdditionalInstruction.
 // This is the sub-agent equivalent of the context middleware that injects AgentInstructions
 // for the main agent.
-func NewSubAgentMiddleware(runtimeInstruction string) adk.AgentMiddleware {
-	instruction := SubAgentInstructions
+func NewSubAgentMiddleware(runtimeInstruction string, tier ModelTier) adk.AgentMiddleware {
+	instruction := SubAgentInstructionsForTier(tier)
 	if runtimeInstruction != "" {
 		instruction += "\n\n" + runtimeInstruction
 	}

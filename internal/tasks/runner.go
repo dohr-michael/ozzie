@@ -43,6 +43,7 @@ type TaskRunner struct {
 	maxValidationRounds int
 	middlewares         []adk.AgentMiddleware
 	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
+	tier                agent.ModelTier       // model tier for prompt adaptation
 
 	selfSuspendCh chan events.ValidationRequest // side channel for self-suspension
 }
@@ -58,6 +59,7 @@ type TaskRunnerConfig struct {
 	MaxValidationRounds int                    // max plan-revise cycles (0 = default 3)
 	Middlewares         []adk.AgentMiddleware   // middlewares for sub-agents (e.g. filesystem, reduction)
 	Retriever           agent.MemoryRetriever  // pre-task memory retrieval (optional)
+	Tier                agent.ModelTier        // model tier for prompt adaptation
 }
 
 // NewTaskRunner creates a runner for a specific task.
@@ -86,6 +88,7 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 		maxValidationRounds: maxRounds,
 		middlewares:         mws,
 		retriever:           cfg.Retriever,
+		tier:                cfg.Tier,
 		selfSuspendCh:       make(chan events.ValidationRequest, 1),
 	}
 }
@@ -265,10 +268,10 @@ func (r *TaskRunner) runCoordinatorPlanning(ctx context.Context, task *Task, sta
 		tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
 	}
 
-	depContext := buildDependencyContext(r.store, task.DependsOn)
+	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := agent.LoadCoordinatorPrompt()
+	instruction := agent.CoordinatorPromptForTier(agent.LoadCoordinatorPrompt(), r.tier)
 	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
@@ -453,10 +456,10 @@ func (r *TaskRunner) runCoordinatorAutonomous(ctx context.Context, task *Task, s
 		}
 	}
 
-	depContext := buildDependencyContext(r.store, task.DependsOn)
+	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := agent.LoadAutonomousPrompt()
+	instruction := agent.AutonomousPromptForTier(agent.LoadAutonomousPrompt(), r.tier)
 	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
@@ -820,6 +823,7 @@ const maxMemoryContextLen = 2000
 
 // buildMemoryContext retrieves relevant memories for the task and formats them
 // as an instruction block. Single retrieval per task at startup — not per LLM call.
+// Limits are reduced for TierSmall.
 func (r *TaskRunner) buildMemoryContext() string {
 	if r.retriever == nil {
 		return ""
@@ -832,7 +836,15 @@ func (r *TaskRunner) buildMemoryContext() string {
 	if len(r.task.Tags) > 0 {
 		tags = r.task.Tags
 	}
-	memories, err := r.retriever.Retrieve(query, tags, 5)
+
+	limit := 5
+	maxLen := maxMemoryContextLen
+	if r.tier == agent.TierSmall {
+		limit = 2
+		maxLen = 800
+	}
+
+	memories, err := r.retriever.Retrieve(query, tags, limit)
 	if err != nil || len(memories) == 0 {
 		return ""
 	}
@@ -842,7 +854,7 @@ func (r *TaskRunner) buildMemoryContext() string {
 	total := 0
 	for _, m := range memories {
 		line := fmt.Sprintf("- **[%s] %s**: %s\n", m.Entry.Type, m.Entry.Title, m.Content)
-		if total+len(line) > maxMemoryContextLen {
+		if total+len(line) > maxLen {
 			break
 		}
 		b.WriteString(line)
@@ -855,9 +867,23 @@ func (r *TaskRunner) buildMemoryContext() string {
 // injected into the instruction. Prevents context window overflow.
 const maxDependencyOutputLen = 1000
 
+// buildDependencyContextAdaptive calls buildDependencyContext with a tier-aware output limit.
+func (r *TaskRunner) buildDependencyContextAdaptive(dependsOn []string) string {
+	maxLen := maxDependencyOutputLen
+	if r.tier == agent.TierSmall {
+		maxLen = 400
+	}
+	return buildDependencyContextWithLimit(r.store, dependsOn, maxLen)
+}
+
 // buildDependencyContext reads outputs from completed dependency tasks
 // and formats them as an instruction block for the sub-agent.
 func buildDependencyContext(store Store, dependsOn []string) string {
+	return buildDependencyContextWithLimit(store, dependsOn, maxDependencyOutputLen)
+}
+
+// buildDependencyContextWithLimit is like buildDependencyContext but with a configurable output limit.
+func buildDependencyContextWithLimit(store Store, dependsOn []string, maxOutputLen int) string {
 	if len(dependsOn) == 0 {
 		return ""
 	}
@@ -893,8 +919,8 @@ func buildDependencyContext(store Store, dependsOn []string) string {
 		}
 
 		fmt.Fprintf(&b, "\n### %s (%s)\n", dep.Title, dep.ID)
-		if len(output) > maxDependencyOutputLen {
-			output = output[:maxDependencyOutputLen] + "\n... (truncated)"
+		if len(output) > maxOutputLen {
+			output = output[:maxOutputLen] + "\n... (truncated)"
 		}
 		b.WriteString(output)
 		b.WriteString("\n")

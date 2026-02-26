@@ -30,6 +30,7 @@ type ContextMiddlewareConfig struct {
 	Store               sessions.Store    // Session store for metadata
 	ToolSet             *ToolSet          // For active/inactive tool lists
 	Retriever           MemoryRetriever   // Layer 6: memory retrieval (optional)
+	Tier                ModelTier         // Model tier for prompt adaptation
 }
 
 // NewContextMiddleware builds an AgentMiddleware that injects dynamic context
@@ -42,7 +43,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 	var instruction strings.Builder
 
 	// Layer 1b: Agent operating instructions (not overridable)
-	instruction.WriteString(AgentInstructions)
+	instruction.WriteString(AgentInstructionsForTier(cfg.Tier))
 	instruction.WriteString("\n\n")
 
 	// Layer 1c: Runtime environment (container/local + system tools)
@@ -58,7 +59,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		instruction.WriteString("\n\n")
 	}
 
-	// Layer 3b: Available skills
+	// Layer 3b: Available skills (limited to 5 for TierSmall)
 	if len(cfg.SkillDescriptions) > 0 {
 		names := make([]string, 0, len(cfg.SkillDescriptions))
 		for name := range cfg.SkillDescriptions {
@@ -66,9 +67,14 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		}
 		sort.Strings(names)
 
+		maxSkills := len(names)
+		if cfg.Tier == TierSmall && maxSkills > 5 {
+			maxSkills = 5
+		}
+
 		instruction.WriteString("## Available Skills\n\n")
 		instruction.WriteString("You can delegate complex tasks to these specialized skills:\n")
-		for _, name := range names {
+		for _, name := range names[:maxSkills] {
 			instruction.WriteString(fmt.Sprintf("- **%s**: %s\n", name, cfg.SkillDescriptions[name]))
 		}
 		instruction.WriteString("\n")
@@ -91,7 +97,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		if cfg.ToolSet != nil && sessionID != "" {
 			activeNames := cfg.ToolSet.ActiveToolNames(sessionID)
 			if len(activeNames) > 0 {
-				sections = append(sections, buildToolSection(activeNames, cfg.AllToolDescriptions))
+				sections = append(sections, buildToolSection(activeNames, cfg.AllToolDescriptions, cfg.Tier))
 			}
 		}
 
@@ -124,11 +130,22 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 					query = query + " " + recent
 				}
 
-				if memories, err := cfg.Retriever.Retrieve(query, tags, 5); err == nil && len(memories) > 0 {
+					memLimit := 5
+				memContentMax := 0 // 0 = no truncation
+				if cfg.Tier == TierSmall {
+					memLimit = 3
+					memContentMax = 100
+				}
+
+				if memories, err := cfg.Retriever.Retrieve(query, tags, memLimit); err == nil && len(memories) > 0 {
 					var sb strings.Builder
 					sb.WriteString("## Relevant Memories\n\n")
 					for _, m := range memories {
-						sb.WriteString(fmt.Sprintf("- **[%s] %s**: %s\n", m.Entry.Type, m.Entry.Title, m.Content))
+						content := m.Content
+						if memContentMax > 0 && len(content) > memContentMax {
+							content = content[:memContentMax] + "..."
+						}
+						sb.WriteString(fmt.Sprintf("- **[%s] %s**: %s\n", m.Entry.Type, m.Entry.Title, content))
 					}
 					sections = append(sections, sb.String())
 				}
@@ -154,7 +171,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 	return mw
 }
 
-func buildToolSection(activeNames []string, allDescs map[string]string) string {
+func buildToolSection(activeNames []string, allDescs map[string]string, tier ModelTier) string {
 	activeSet := make(map[string]bool, len(activeNames))
 	sorted := make([]string, len(activeNames))
 	copy(sorted, activeNames)
@@ -171,6 +188,11 @@ func buildToolSection(activeNames []string, allDescs map[string]string) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("- **%s**\n", name))
 		}
+	}
+
+	// TierSmall: skip inactive tools section to save tokens
+	if tier == TierSmall {
+		return sb.String()
 	}
 
 	var inactive []string

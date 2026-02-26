@@ -182,8 +182,12 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register update_session tool", "error", err)
 	}
 
+	// Resolve default model tier (used for prompt adaptation)
+	defaultTier := registry.DefaultTier()
+	slog.Info("default model tier", "tier", defaultTier)
+
 	// Agent — persona from SOUL.md or DefaultPersona fallback (layer 1)
-	persona := agent.LoadPersona()
+	persona := agent.PersonaForTier(agent.LoadPersona(), defaultTier)
 	slog.Debug("loaded persona", "length", len(persona), "persona", persona)
 
 	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
@@ -212,7 +216,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	runtimeInstruction := agent.BuildRuntimeInstruction(cfg.Runtime.Environment, systemTools)
 
 	// SubAgent middleware — injects SubAgentInstructions + runtime (tool reference + workflow)
-	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction)
+	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction, defaultTier)
 
 	// Task middlewares — subagent instructions + filesystem + reduction for sub-agents (no context middleware)
 	taskMiddlewares := []adk.AgentMiddleware{subAgentMw, fsMw, reductionMw}
@@ -415,6 +419,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		Store:               sessionStore,
 		ToolSet:             toolSet,
 		Retriever:           memoryRetriever,
+		Tier:                defaultTier,
 	})
 
 	var middlewares []adk.AgentMiddleware
@@ -438,6 +443,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		Pool:            actors.NewPoolAdapter(pool),
 		DefaultProvider: registry.DefaultName(),
 		ContextWindow:   registry.DefaultContextWindow(),
+		Tier:            defaultTier,
 	})
 	defer eventRunner.Close()
 
