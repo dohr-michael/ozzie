@@ -21,6 +21,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/models"
 )
 
 // ErrPreempted is returned when a task is preempted by a higher-priority request.
@@ -223,6 +224,11 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 
 	output, err := r.consumeRunnerOutput(ctx, runner, messages)
 	if err != nil {
+		// Model unavailable: don't fail task, let actor pool handle retry
+		var unavail *models.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			return err
+		}
 		if errors.Is(err, ErrPreempted) {
 			return r.suspendTask(task, "preempted during single step")
 		}
@@ -279,6 +285,10 @@ func (r *TaskRunner) runCoordinatorPlanning(ctx context.Context, task *Task, sta
 
 	output, err := r.consumeRunnerOutput(ctx, runner, messages)
 	if err != nil {
+		var unavail *models.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			return err
+		}
 		if errors.Is(err, ErrPreempted) {
 			return r.suspendTask(task, "preempted during coordinator planning")
 		}
@@ -411,6 +421,10 @@ Focus on implementation — the exploration phase is complete.`, task.Title, tas
 
 	output, err := r.consumeRunnerOutput(ctx, runner, messages)
 	if err != nil {
+		var unavail *models.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			return err
+		}
 		if errors.Is(err, ErrPreempted) {
 			return r.suspendTask(task, "preempted during coordinator execution")
 		}
@@ -458,6 +472,10 @@ func (r *TaskRunner) runCoordinatorAutonomous(ctx context.Context, task *Task, s
 
 	output, err := r.consumeRunnerOutput(ctx, runner, messages)
 	if err != nil {
+		var unavail *models.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			return err
+		}
 		if errors.Is(err, ErrPreempted) {
 			return r.suspendTask(task, "preempted during autonomous execution")
 		}
@@ -603,6 +621,10 @@ func (r *TaskRunner) runPlanSteps(ctx context.Context, task *Task, startedAt tim
 
 		output, err := r.consumeRunnerOutput(ctx, runner, messages)
 		if err != nil {
+			var unavail *models.ErrModelUnavailable
+			if errors.As(err, &unavail) {
+				return err
+			}
 			if errors.Is(err, ErrPreempted) {
 				return r.suspendTask(task, fmt.Sprintf("preempted during step %d/%d", i+1, len(task.Plan.Steps)))
 			}

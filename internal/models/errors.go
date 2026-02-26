@@ -36,6 +36,22 @@ func HandleError(err error) error {
 	return err
 }
 
+// ErrModelUnavailable indicates the model backend returned a non-JSON or error response.
+type ErrModelUnavailable struct {
+	Provider string
+	Body     string // raw response body (truncated)
+	Cause    error  // original error if any
+}
+
+func (e *ErrModelUnavailable) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("model %s unavailable: %s", e.Provider, e.Body)
+	}
+	return fmt.Sprintf("model %s unavailable: %v", e.Provider, e.Cause)
+}
+
+func (e *ErrModelUnavailable) Unwrap() error { return e.Cause }
+
 func containsAny(s string, substrs ...string) bool {
 	for _, sub := range substrs {
 		if strings.Contains(s, sub) {

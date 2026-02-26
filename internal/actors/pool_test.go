@@ -194,6 +194,147 @@ func TestAcquireInteractiveNoProvider(t *testing.T) {
 	}
 }
 
+func TestSubmitDefaultMaxRetries(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	task := &tasks.Task{
+		Title:       "test-default-retries",
+		Description: "Should get default MaxRetries",
+	}
+	if err := pool.Submit(task); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if task.MaxRetries != defaultMaxRetries {
+		t.Errorf("MaxRetries: got %d, want %d", task.MaxRetries, defaultMaxRetries)
+	}
+}
+
+func TestSubmitExplicitMaxRetries(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	task := &tasks.Task{
+		Title:       "test-explicit-retries",
+		Description: "Has explicit MaxRetries",
+		MaxRetries:  5,
+	}
+	if err := pool.Submit(task); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if task.MaxRetries != 5 {
+		t.Errorf("MaxRetries: got %d, want 5", task.MaxRetries)
+	}
+}
+
+func TestRequeueForRetry(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	task := &tasks.Task{
+		Title:       "test-requeue",
+		Description: "Will be requeued",
+		MaxRetries:  3,
+	}
+	if err := pool.Submit(task); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Simulate running
+	task.Status = tasks.TaskRunning
+	_ = pool.store.Update(task)
+
+	// Requeue
+	pool.requeueForRetry(task)
+
+	got, _ := pool.store.Get(task.ID)
+	if got.Status != tasks.TaskPending {
+		t.Errorf("status: got %s, want pending", got.Status)
+	}
+	if got.RetryCount != 1 {
+		t.Errorf("RetryCount: got %d, want 1", got.RetryCount)
+	}
+}
+
+func TestRequeueForRetry_ExceedsMax(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	task := &tasks.Task{
+		Title:       "test-max-retries",
+		Description: "Will exceed retries",
+		MaxRetries:  1,
+		RetryCount:  1, // already at max
+	}
+	if err := pool.Submit(task); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	pool.requeueForRetry(task)
+
+	got, _ := pool.store.Get(task.ID)
+	if got.Status != tasks.TaskFailed {
+		t.Errorf("status: got %s, want failed", got.Status)
+	}
+}
+
+func TestProviderCooldown(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"broken": {MaxConcurrent: 1},
+		"healthy": {MaxConcurrent: 1},
+	})
+
+	// Put "broken" in cooldown
+	pool.mu.Lock()
+	pool.providerCooldown["broken"] = time.Now().Add(5 * time.Minute)
+	pool.mu.Unlock()
+
+	pool.mu.Lock()
+	actor := pool.findIdleActor("", nil)
+	pool.mu.Unlock()
+
+	if actor == nil {
+		t.Fatal("expected to find an idle actor")
+	}
+	if actor.ProviderName != "healthy" {
+		t.Errorf("provider: got %q, want %q", actor.ProviderName, "healthy")
+	}
+}
+
+func TestProviderCooldownExpired(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"ollama": {MaxConcurrent: 1},
+	})
+
+	// Put in expired cooldown
+	pool.mu.Lock()
+	pool.providerCooldown["ollama"] = time.Now().Add(-1 * time.Second)
+	pool.mu.Unlock()
+
+	pool.mu.Lock()
+	actor := pool.findIdleActor("", nil)
+	pool.mu.Unlock()
+
+	if actor == nil {
+		t.Fatal("expected to find actor after cooldown expired")
+	}
+	if actor.ProviderName != "ollama" {
+		t.Errorf("provider: got %q, want %q", actor.ProviderName, "ollama")
+	}
+
+	// Verify cooldown was cleaned up
+	pool.mu.Lock()
+	_, stillCooling := pool.providerCooldown["ollama"]
+	pool.mu.Unlock()
+	if stillCooling {
+		t.Error("expected cooldown entry to be cleaned up after expiry")
+	}
+}
+
 func TestPriorityRank(t *testing.T) {
 	if priorityRank(tasks.PriorityLow) >= priorityRank(tasks.PriorityNormal) {
 		t.Error("low should rank below normal")

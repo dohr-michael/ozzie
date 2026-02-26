@@ -2,6 +2,7 @@ package actors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -19,6 +20,12 @@ import (
 // preemptionTimeout is the hard cancel delay after a cooperative preemption request.
 const preemptionTimeout = 30 * time.Second
 
+// providerCooldownDuration is how long a provider is skipped after returning ErrModelUnavailable.
+const providerCooldownDuration = 2 * time.Minute
+
+// defaultMaxRetries is applied to tasks that don't specify MaxRetries.
+const defaultMaxRetries = 3
+
 // runningTask tracks a task currently executing on an actor.
 type runningTask struct {
 	taskID    string
@@ -29,13 +36,14 @@ type runningTask struct {
 
 // ActorPool manages LLM capacity slots and task scheduling.
 type ActorPool struct {
-	mu           sync.Mutex
-	actors       []*Actor
-	runners      map[string]*runningTask // taskID → running state
-	store        tasks.Store
-	bus          *events.Bus
-	models       *models.Registry
-	toolRegistry agent.ToolLookup
+	mu               sync.Mutex
+	actors           []*Actor
+	runners          map[string]*runningTask // taskID → running state
+	providerCooldown map[string]time.Time    // provider → cooldown expiry
+	store            tasks.Store
+	bus              *events.Bus
+	models           *models.Registry
+	toolRegistry     agent.ToolLookup
 
 	autonomyDefault     string
 	maxValidationRounds int
@@ -83,6 +91,7 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 	return &ActorPool{
 		actors:              actors,
 		runners:             make(map[string]*runningTask),
+		providerCooldown:    make(map[string]time.Time),
 		store:               cfg.Store,
 		bus:                 cfg.Bus,
 		models:              cfg.Models,
@@ -127,6 +136,9 @@ func (p *ActorPool) Submit(t *tasks.Task) error {
 	}
 	if t.Priority == "" {
 		t.Priority = tasks.PriorityNormal
+	}
+	if t.MaxRetries == 0 {
+		t.MaxRetries = defaultMaxRetries
 	}
 
 	if err := p.store.Create(t); err != nil {
@@ -309,6 +321,7 @@ func (p *ActorPool) schedule() {
 }
 
 // findIdleActor returns the first idle actor matching the provider (if non-empty) and tags.
+// Actors whose provider is in cooldown are skipped.
 // Caller must hold p.mu.
 func (p *ActorPool) findIdleActor(providerName string, requiredTags []string) *Actor {
 	for _, a := range p.actors {
@@ -320,6 +333,13 @@ func (p *ActorPool) findIdleActor(providerName string, requiredTags []string) *A
 		}
 		if !a.MatchesTags(requiredTags) {
 			continue
+		}
+		// Skip providers in cooldown
+		if expiry, ok := p.providerCooldown[a.ProviderName]; ok {
+			if time.Now().Before(expiry) {
+				continue
+			}
+			delete(p.providerCooldown, a.ProviderName)
 		}
 		return a
 	}
@@ -473,12 +493,38 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 	})
 
 	if err := runner.Run(ctx); err != nil {
+		var unavail *models.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			// Mark provider as temporarily down and re-queue
+			p.mu.Lock()
+			p.providerCooldown[actor.ProviderName] = time.Now().Add(providerCooldownDuration)
+			p.mu.Unlock()
+			slog.Warn("model unavailable, will retry on another actor",
+				"provider", actor.ProviderName, "task_id", t.ID, "error", unavail)
+			p.requeueForRetry(t)
+			return
+		}
 		if ctx.Err() != nil {
 			slog.Info("task cancelled", "task_id", t.ID)
 		} else {
 			slog.Error("task failed", "error", err, "task_id", t.ID)
 		}
 	}
+}
+
+// requeueForRetry re-queues a task for retry on a different actor.
+func (p *ActorPool) requeueForRetry(t *tasks.Task) {
+	t.RetryCount++
+	if t.RetryCount > t.MaxRetries {
+		slog.Error("task exceeded max retries", "task_id", t.ID, "retries", t.RetryCount)
+		_ = p.failTaskDirect(t, fmt.Errorf("model unavailable after %d retries", t.RetryCount))
+		return
+	}
+	t.Status = tasks.TaskPending
+	t.CompletedAt = nil
+	t.Result = nil
+	_ = p.store.Update(t)
+	slog.Info("task re-queued for retry", "task_id", t.ID, "retry", t.RetryCount, "max", t.MaxRetries)
 }
 
 func (p *ActorPool) failTaskDirect(t *tasks.Task, taskErr error) error {

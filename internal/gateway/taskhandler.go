@@ -33,6 +33,11 @@ func (h *WSTaskHandler) Submit(sessionID, title, description string, tools []str
 		p = tasks.TaskPriority(priority)
 	}
 
+	// Default tools if none specified
+	if len(tools) == 0 {
+		tools = []string{"run_command", "git", "query_memories"}
+	}
+
 	t := &tasks.Task{
 		SessionID:   sessionID,
 		Title:       title,

@@ -150,13 +150,19 @@ func (t *PlanTaskTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			deps = append(deps, taskIDs[dep])
 		}
 
+		// Default tools if step doesn't specify any
+		tools := step.Tools
+		if len(tools) == 0 {
+			tools = []string{"run_command", "git", "query_memories"}
+		}
+
 		task := &tasks.Task{
 			SessionID:   sessionID,
 			Title:       step.Title,
 			Description: step.Description,
 			DependsOn:   deps,
 			Config: tasks.TaskConfig{
-				Tools:   step.Tools,
+				Tools:   tools,
 				WorkDir: input.WorkDir,
 				Env:     input.Env,
 			},
