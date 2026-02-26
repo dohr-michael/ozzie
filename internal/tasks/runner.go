@@ -42,6 +42,7 @@ type TaskRunner struct {
 	preemptionCheck     func() bool
 	maxValidationRounds int
 	middlewares         []adk.AgentMiddleware
+	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
 
 	selfSuspendCh chan events.ValidationRequest // side channel for self-suspension
 }
@@ -56,6 +57,7 @@ type TaskRunnerConfig struct {
 	PreemptionCheck     func() bool
 	MaxValidationRounds int                    // max plan-revise cycles (0 = default 3)
 	Middlewares         []adk.AgentMiddleware   // middlewares for sub-agents (e.g. filesystem, reduction)
+	Retriever           agent.MemoryRetriever  // pre-task memory retrieval (optional)
 }
 
 // NewTaskRunner creates a runner for a specific task.
@@ -83,6 +85,7 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 		preemptionCheck:     cfg.PreemptionCheck,
 		maxValidationRounds: maxRounds,
 		middlewares:         mws,
+		retriever:           cfg.Retriever,
 		selfSuspendCh:       make(chan events.ValidationRequest, 1),
 	}
 }
@@ -203,8 +206,9 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
-	instruction := fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext)
+	memoryContext := r.buildMemoryContext()
+	instruction := fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s%s",
+		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
 	slog.Debug("task agent instruction",
 		"task_id", task.ID,
@@ -263,9 +267,10 @@ func (r *TaskRunner) runCoordinatorPlanning(ctx context.Context, task *Task, sta
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
+	memoryContext := r.buildMemoryContext()
 	instruction := agent.LoadCoordinatorPrompt()
-	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext)
+	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
+		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
 	slog.Debug("task agent instruction",
 		"task_id", task.ID,
@@ -450,9 +455,10 @@ func (r *TaskRunner) runCoordinatorAutonomous(ctx context.Context, task *Task, s
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
+	memoryContext := r.buildMemoryContext()
 	instruction := agent.LoadAutonomousPrompt()
-	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext)
+	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
+		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
 	slog.Debug("task agent instruction",
 		"task_id", task.ID,
@@ -588,17 +594,19 @@ func (r *TaskRunner) runPlanSteps(ctx context.Context, task *Task, startedAt tim
 			tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
 		}
 
-		// Build step instruction (dependency context only on first step)
+		// Build step instruction (dependency context + memory context only on first step)
 		depCtx := ""
+		memCtx := ""
 		if i == 0 {
 			depCtx = buildDependencyContext(r.store, task.DependsOn)
+			memCtx = r.buildMemoryContext()
 		}
 		instruction := fmt.Sprintf("You are executing step %d/%d of a task.\n\nTask: %s\nStep: %s",
 			i+1, len(task.Plan.Steps), task.Title, step.Title)
 		if step.Description != "" {
 			instruction += fmt.Sprintf("\n\nStep details:\n%s", step.Description)
 		}
-		instruction += formatContextBlock(task.Config) + depCtx
+		instruction += formatContextBlock(task.Config) + depCtx + memCtx
 		if lastOutput != "" {
 			instruction += fmt.Sprintf("\n\nPrevious step output:\n%s", lastOutput)
 		}
@@ -803,6 +811,42 @@ func formatContextBlock(cfg TaskConfig) string {
 		for _, k := range slices.Sorted(maps.Keys(cfg.Env)) {
 			fmt.Fprintf(&b, "- %s=%s\n", k, cfg.Env[k])
 		}
+	}
+	return b.String()
+}
+
+// maxMemoryContextLen is the maximum total length of the memory context block.
+const maxMemoryContextLen = 2000
+
+// buildMemoryContext retrieves relevant memories for the task and formats them
+// as an instruction block. Single retrieval per task at startup — not per LLM call.
+func (r *TaskRunner) buildMemoryContext() string {
+	if r.retriever == nil {
+		return ""
+	}
+	query := r.task.Title + " " + r.task.Description
+	if len(query) > 500 {
+		query = query[:500]
+	}
+	var tags []string
+	if len(r.task.Tags) > 0 {
+		tags = r.task.Tags
+	}
+	memories, err := r.retriever.Retrieve(query, tags, 5)
+	if err != nil || len(memories) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Relevant Memories\n")
+	b.WriteString("Past learnings that may be relevant to this task:\n")
+	total := 0
+	for _, m := range memories {
+		line := fmt.Sprintf("- **[%s] %s**: %s\n", m.Entry.Type, m.Entry.Title, m.Content)
+		if total+len(line) > maxMemoryContextLen {
+			break
+		}
+		b.WriteString(line)
+		total += len(line)
 	}
 	return b.String()
 }

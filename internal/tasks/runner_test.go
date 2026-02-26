@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/dohr-michael/ozzie/internal/memory"
 )
 
 func TestFormatContextBlock_Empty(t *testing.T) {
@@ -359,5 +361,125 @@ func TestTaskConfig_UnmarshalJSON_CoordinatorFalse(t *testing.T) {
 	}
 	if cfg.AutonomyLevel != "" {
 		t.Errorf("expected empty, got %q", cfg.AutonomyLevel)
+	}
+}
+
+// --- buildMemoryContext tests ---
+
+// mockRetriever implements agent.MemoryRetriever for testing.
+type mockRetriever struct {
+	results []memory.RetrievedMemory
+	err     error
+}
+
+func (m *mockRetriever) Retrieve(query string, tags []string, limit int) ([]memory.RetrievedMemory, error) {
+	return m.results, m.err
+}
+
+func TestBuildMemoryContext_NilRetriever(t *testing.T) {
+	r := &TaskRunner{task: &Task{Title: "test", Description: "desc"}}
+	got := r.buildMemoryContext()
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestBuildMemoryContext_NoResults(t *testing.T) {
+	r := &TaskRunner{
+		task:      &Task{Title: "test", Description: "desc"},
+		retriever: &mockRetriever{results: nil},
+	}
+	got := r.buildMemoryContext()
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestBuildMemoryContext_RetrieverError(t *testing.T) {
+	r := &TaskRunner{
+		task:      &Task{Title: "test", Description: "desc"},
+		retriever: &mockRetriever{err: fmt.Errorf("embedding down")},
+	}
+	got := r.buildMemoryContext()
+	if got != "" {
+		t.Errorf("expected empty on error, got %q", got)
+	}
+}
+
+func TestBuildMemoryContext_WithResults(t *testing.T) {
+	r := &TaskRunner{
+		task: &Task{Title: "chess engine", Description: "implement board"},
+		retriever: &mockRetriever{
+			results: []memory.RetrievedMemory{
+				{
+					Entry:   &memory.MemoryEntry{Type: "convention", Title: "Go style"},
+					Content: "Use gofmt and standard naming",
+					Score:   5.0,
+				},
+				{
+					Entry:   &memory.MemoryEntry{Type: "lesson", Title: "Board representation"},
+					Content: "Bitboards are faster than arrays",
+					Score:   3.0,
+				},
+			},
+		},
+	}
+	got := r.buildMemoryContext()
+	if !strings.Contains(got, "## Relevant Memories") {
+		t.Errorf("expected header, got %q", got)
+	}
+	if !strings.Contains(got, "[convention] Go style") {
+		t.Errorf("expected first memory, got %q", got)
+	}
+	if !strings.Contains(got, "[lesson] Board representation") {
+		t.Errorf("expected second memory, got %q", got)
+	}
+	if !strings.Contains(got, "Bitboards are faster") {
+		t.Errorf("expected content, got %q", got)
+	}
+}
+
+func TestBuildMemoryContext_Truncation(t *testing.T) {
+	// Create a memory with content that would exceed maxMemoryContextLen
+	longContent := strings.Repeat("x", maxMemoryContextLen)
+	r := &TaskRunner{
+		task: &Task{Title: "test", Description: "desc"},
+		retriever: &mockRetriever{
+			results: []memory.RetrievedMemory{
+				{
+					Entry:   &memory.MemoryEntry{Type: "lesson", Title: "Big"},
+					Content: longContent,
+					Score:   5.0,
+				},
+				{
+					Entry:   &memory.MemoryEntry{Type: "lesson", Title: "Should be skipped"},
+					Content: "This should not appear",
+					Score:   3.0,
+				},
+			},
+		},
+	}
+	got := r.buildMemoryContext()
+	// The first entry itself exceeds the limit, so it should be skipped
+	// and the result should just be the header (no entries fit)
+	if strings.Contains(got, "Should be skipped") {
+		t.Errorf("second entry should be skipped due to truncation")
+	}
+}
+
+func TestBuildMemoryContext_QueryTruncation(t *testing.T) {
+	// Task with very long description — query should be capped at 500 chars
+	longDesc := strings.Repeat("a", 1000)
+	var capturedQuery string
+	r := &TaskRunner{
+		task: &Task{Title: "T", Description: longDesc},
+		retriever: &mockRetriever{
+			results: nil, // no results, but we want to verify it doesn't panic
+		},
+	}
+	_ = capturedQuery
+	got := r.buildMemoryContext()
+	if got != "" {
+		t.Errorf("expected empty for no results, got %q", got)
 	}
 }

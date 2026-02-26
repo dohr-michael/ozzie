@@ -49,6 +49,7 @@ type ActorPool struct {
 	maxValidationRounds int
 	skillRunner         tasks.SkillExecutor
 	taskMiddlewares     []adk.AgentMiddleware
+	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
 
 	scheduleCh chan struct{} // wake-up signal for the scheduler
 	ctx        context.Context
@@ -67,6 +68,7 @@ type ActorPoolConfig struct {
 	MaxValidationRounds int                 // max plan-revise cycles (0 = default 3)
 	SkillRunner         tasks.SkillExecutor // optional skill executor for direct skill tasks
 	TaskMiddlewares     []adk.AgentMiddleware // middlewares for sub-agents (filesystem, reduction)
+	Retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
 }
 
 // NewActorPool creates an ActorPool from provider configurations.
@@ -100,6 +102,7 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 		maxValidationRounds: cfg.MaxValidationRounds,
 		skillRunner:         cfg.SkillRunner,
 		taskMiddlewares:     cfg.TaskMiddlewares,
+		retriever:           cfg.Retriever,
 		scheduleCh:          make(chan struct{}, 1),
 	}
 }
@@ -490,6 +493,7 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		PreemptionCheck:     preemptionCheck,
 		MaxValidationRounds: p.maxValidationRounds,
 		Middlewares:         p.taskMiddlewares,
+		Retriever:           p.retriever,
 	})
 
 	if err := runner.Run(ctx); err != nil {

@@ -216,55 +216,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Skill executor for direct skill tasks
 	skillExecutor := skills.NewPoolSkillExecutor(skillRegistry, skillRunCfg)
 
-	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
-	pool := actors.NewActorPool(actors.ActorPoolConfig{
-		Providers:           cfg.Models.Providers,
-		Store:               taskStore,
-		Bus:                 bus,
-		Models:              registry,
-		ToolRegistry:        toolRegistry,
-		AutonomyDefault:     cfg.Agent.Coordinator.DefaultLevel,
-		MaxValidationRounds: cfg.Agent.Coordinator.MaxValidationRounds,
-		SkillRunner:         skillExecutor,
-		TaskMiddlewares:     taskMiddlewares,
-	})
-	pool.Start()
-	defer pool.Stop()
-
-	// Schedule store — persistent dynamic schedule entries
-	schedulesDir := filepath.Join(config.OzziePath(), "schedules")
-	scheduleStore := scheduler.NewScheduleStore(schedulesDir)
-
-	// Extract skill schedule info for the scheduler (avoids import cycle)
-	var schedSkills []scheduler.SkillScheduleInfo
-	for _, sk := range skillRegistry.All() {
-		if !sk.Triggers.HasScheduleTrigger() {
-			continue
-		}
-		info := scheduler.SkillScheduleInfo{
-			Name: sk.Name,
-			Cron: sk.Triggers.Cron,
-		}
-		if sk.Triggers.OnEvent != nil {
-			info.OnEvent = &scheduler.EventTrigger{
-				Event:  sk.Triggers.OnEvent.Event,
-				Filter: sk.Triggers.OnEvent.Filter,
-			}
-		}
-		schedSkills = append(schedSkills, info)
-	}
-
-	// Scheduler — cron + event-triggered + dynamic schedule execution
-	sched := scheduler.New(scheduler.Config{
-		Pool:   pool,
-		Bus:    bus,
-		Skills: schedSkills,
-		Store:  scheduleStore,
-	})
-	sched.Start()
-	defer sched.Stop()
-
-	// Memory store + optional vector embedding
+	// Memory store + optional vector embedding (before pool — retriever is passed to actors)
 	memoryDir := filepath.Join(config.OzziePath(), "memory")
 	memoryStore := memory.NewFileStore(memoryDir)
 
@@ -314,6 +266,55 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 
 	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
+
+	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
+	pool := actors.NewActorPool(actors.ActorPoolConfig{
+		Providers:           cfg.Models.Providers,
+		Store:               taskStore,
+		Bus:                 bus,
+		Models:              registry,
+		ToolRegistry:        toolRegistry,
+		AutonomyDefault:     cfg.Agent.Coordinator.DefaultLevel,
+		MaxValidationRounds: cfg.Agent.Coordinator.MaxValidationRounds,
+		SkillRunner:         skillExecutor,
+		TaskMiddlewares:     taskMiddlewares,
+		Retriever:           memoryRetriever,
+	})
+	pool.Start()
+	defer pool.Stop()
+
+	// Schedule store — persistent dynamic schedule entries
+	schedulesDir := filepath.Join(config.OzziePath(), "schedules")
+	scheduleStore := scheduler.NewScheduleStore(schedulesDir)
+
+	// Extract skill schedule info for the scheduler (avoids import cycle)
+	var schedSkills []scheduler.SkillScheduleInfo
+	for _, sk := range skillRegistry.All() {
+		if !sk.Triggers.HasScheduleTrigger() {
+			continue
+		}
+		info := scheduler.SkillScheduleInfo{
+			Name: sk.Name,
+			Cron: sk.Triggers.Cron,
+		}
+		if sk.Triggers.OnEvent != nil {
+			info.OnEvent = &scheduler.EventTrigger{
+				Event:  sk.Triggers.OnEvent.Event,
+				Filter: sk.Triggers.OnEvent.Filter,
+			}
+		}
+		schedSkills = append(schedSkills, info)
+	}
+
+	// Scheduler — cron + event-triggered + dynamic schedule execution
+	sched := scheduler.New(scheduler.Config{
+		Pool:   pool,
+		Bus:    bus,
+		Skills: schedSkills,
+		Store:  scheduleStore,
+	})
+	sched.Start()
+	defer sched.Stop()
 
 	// Register memory tools
 	storeMemTool := plugins.NewStoreMemoryTool(memoryStore, pipeline)

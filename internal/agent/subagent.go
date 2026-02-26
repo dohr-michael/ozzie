@@ -21,7 +21,7 @@ Do NOT just describe what you would do — actually call the tools to do it.
 
 ## Workflow
 
-1. Use query_memories to check for relevant context about the task domain.
+1. Review the "Relevant Memories" section above (if present) for conventions, past decisions, or patterns relevant to this task.
 2. Use ls to see what exists in the working directory.
 3. If files are listed, use read_file on individual FILES (never on directories) to understand conventions.
 4. Do NOT recreate files that already exist — build on them with edit_file.
