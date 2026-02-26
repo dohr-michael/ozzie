@@ -15,7 +15,7 @@ single living creature on this world, he just couldn't quite bring himself to tr
 nights with a pizza, a couple of six-packs, some grass, and a bad sci-fi DVD. God only knew what lurked along the bottom
 of the river, maybe nothing, but he certainly wasn't going to wind up with alien eggs hatching out of his ass, thank
 you. "*
-> — Peter F. Hamilton, *Pandora'Star*
+> — Peter F. Hamilton, *Pandora's Star*
 
 ---
 
@@ -29,31 +29,40 @@ executable code. Ozzie takes a different approach:
   connect ephemerally via WebSocket
 - **Event-driven backbone** — Every action (message, decision, tool call) is an immutable event — auditable, replayable,
   human-readable
+- **Multi-LLM** — 4 drivers (Anthropic, OpenAI, Mistral, Ollama) with lazy-init registry, provider cooldown, and
+  automatic task retry on failure
+- **Agent autonomy** — Coordinator pattern (explore → plan → validate → execute), async task delegation, ephemeral
+  sub-agents, cron/event scheduler
+- **Semantic memory** — Hybrid retrieval (keyword + vector embeddings), cross-task learning, automatic memory extraction
 - **3-level plugin architecture** — Communication (senses), Tools (hands), Skills (expertise) — each with distinct
   isolation boundaries
-- **Multi-tool plugins** — A single WASM plugin can expose multiple tools (e.g. a "controlm" plugin with 13 tools)
 - **MCP server** — Expose all Ozzie tools as an MCP server for Claude Code or any MCP-compatible client
-- **Tag-based model routing** — Select models by security tier, cost, speed, or jurisdiction — not by hard-coded
-  provider names
-- **Language-agnostic** — Write plugins in Rust, Go, JS, or any language that compiles to Wasm
+- **Container-ready** — Multi-arch Docker images, goreleaser builds, GitHub Actions CI/CD
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│         GATEWAY  (ozzie gateway)        │
-│         127.0.0.1:18420                 │
-├─────────────────────────────────────────┤
-│  Agent Core (Eino)                      │
-│  Event Bus + Store                      │
-│  Plugin Router (Extism + MCP)           │
-│  Scheduler (heartbeat, cron, triggers)  │
-└──────────────────┬──────────────────────┘
-                   │ WebSocket
-         ┌─────────┼─────────┐
-         ↓         ↓         ↓
-       TUI       CLI       Web
-    (Bubbletea) (one-shot)  (SPA)
+┌───────────────────────────────────────────────┐
+│           GATEWAY  (ozzie gateway)            │
+│           127.0.0.1:18420                     │
+├───────────────────────────────────────────────┤
+│  Agent Core (Eino ADK)                        │
+│  ├─ Coordinator (explore/plan/validate/exec)  │
+│  ├─ Actor Pool (capacity-aware, cooldown)     │
+│  ├─ Task Runner (async, suspend/resume)       │
+│  └─ Memory (hybrid keyword + vector)          │
+│                                               │
+│  Event Bus (36 typed events, ring buffer)     │
+│  Plugin Router (Extism WASM + native tools)   │
+│  Skill Engine (DAG workflows, acceptance)     │
+│  Scheduler (cron, event triggers, cooldown)   │
+│  MCP Server (stdio)                           │
+└────────────────────┬──────────────────────────┘
+                     │ WebSocket
+           ┌─────────┼─────────┐
+           ↓         ↓         ↓
+         TUI       CLI       Web
+      (planned)  (one-shot)  (planned)
 ```
 
 ## Quick Start
@@ -70,6 +79,66 @@ make build
 # In another terminal
 ./build/ozzie ask "Hello, who are you?"
 ```
+
+### Docker
+
+```bash
+# Build
+go build -o build/ozzie ./cmd/ozzie
+docker build -t ozzie .
+
+# Run (mount Docker socket for container-based tasks)
+docker run -d \
+  -v ~/.ozzie:/home/ozzie/.ozzie \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -p 18420:18420 \
+  ozzie
+```
+
+## Agent System
+
+### Coordinator Pattern
+
+Ozzie uses a 5-phase coordinator for complex tasks:
+
+1. **Explore** — Gather context, read files, understand the problem
+2. **Plan** — Design an approach based on findings
+3. **Validate** — Request human approval (supervised mode) or auto-approve (autonomous mode)
+4. **Execute** — Run the plan via sub-agents with tool access
+5. **Verify** — Check results against acceptance criteria
+
+Modes: `disabled` (direct execution), `supervised` (human-in-the-loop), `autonomous` (full autopilot).
+
+### Async Tasks
+
+```bash
+# Submit a background task
+./build/ozzie ask "Refactor the auth module"
+
+# Check task status
+./build/ozzie tasks list
+./build/ozzie tasks get <task-id>
+```
+
+Tasks run in isolated sub-agents with their own tool sets, crash recovery, and heartbeat monitoring.
+
+### Memory
+
+Ozzie maintains a persistent semantic memory system:
+
+- **Hybrid retrieval** — Keyword scoring (tag match, title match, recency) blended with vector cosine similarity
+- **Async embedding pipeline** — Memory storage returns immediately; vector indexing happens in background
+- **Cross-task learning** — Sub-agents automatically receive relevant memories at startup (deterministic injection)
+- **Auto-extraction** — Completed tasks are analyzed to extract reusable lessons (preferences, facts, procedures)
+
+### Skills
+
+Declarative workflows defined in JSONC:
+
+- **Simple skills** — Single-step tool execution with parameters
+- **Workflow skills** — Multi-step DAG with dependencies and parallel execution
+- **Triggers** — Cron schedules, event-based activation, manual invocation
+- **Acceptance criteria** — LLM-verified output validation
 
 ## Plugins
 
@@ -120,7 +189,9 @@ Plugins are built with [TinyGo](https://tinygo.org/) targeting `wasip1`:
 make build-plugins
 ```
 
-### Existing plugins
+### Plugin catalog
+
+**WASM plugins:**
 
 | Plugin | Tools | Description |
 |--------|-------|-------------|
@@ -128,8 +199,24 @@ make build-plugins
 | `todo` | `todo` | Task list (add/list/done/remove) with KV storage |
 | `web_crawler` | `web_crawler` | Fetch and extract text from web pages |
 | `patch` | `patch` | Apply unified diff patches to files |
-| `cmd` (native) | `cmd` | Execute shell commands |
-| `root_cmd` (native) | `root_cmd` | Execute commands with sudo |
+
+**Native tools (built-in):**
+
+| Tool | Description |
+|------|-------------|
+| `run_command` | Execute shell commands |
+| `submit_task` | Delegate work to async sub-agents |
+| `check_task` / `cancel_task` / `list_tasks` | Task lifecycle management |
+| `plan_task` / `reply_task` | Coordinator pattern tools |
+| `request_validation` | Request human approval |
+| `store_memory` / `query_memories` / `forget_memory` | Persistent semantic memory |
+| `update_session` | Update session metadata |
+| `schedule_task` / `unschedule_task` / `list_schedules` | Dynamic scheduling |
+| `activate_tools` | Dynamically enable WASM plugin tools |
+
+**Filesystem tools (via Eino ADK middleware):**
+
+`ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`
 
 ## MCP Server
 
@@ -180,6 +267,16 @@ make run-gateway    # Build and run the gateway
 make run-ask        # Build and run ask with a test message
 ```
 
+### Quality gates
+
+Every change must pass all three — no exceptions:
+
+```bash
+go build ./...              # compile
+~/go/bin/staticcheck ./...  # lint
+go test ./...               # tests
+```
+
 ### Plugin development with Claude Code
 
 Use the `/dev-plugin` slash command to start an interactive plugin development session with MCP:
@@ -194,24 +291,57 @@ This sets up the MCP server, scaffolds the plugin structure, and iterates on the
 
 | Component     | Choice               | Why                                                 |
 |---------------|----------------------|-----------------------------------------------------|
-| Language      | **Go**               | Single binary, goroutines, fast compilation         |
-| Router        | **go-chi**           | Lightweight, idiomatic, middleware support          |
+| Language      | **Go 1.25**          | Single binary, goroutines, fast compilation         |
+| Router        | **go-chi**           | Lightweight, idiomatic, middleware support           |
 | LLM Framework | **Eino** (CloudWeGo) | Type-safe, streaming-first, Deep Agent, MCP native  |
 | Sandbox       | **Extism** (wazero)  | Pure Go, no CGo, capabilities-based isolation       |
 | MCP SDK       | **go-sdk**           | Official MCP Go SDK, stdio transport                |
-| Event Bus     | In-memory channels   | Proven pattern, typed payloads, ring buffer history |
+| Event Bus     | In-memory channels   | Typed payloads, ring buffer, session-scoped routing |
 | Config        | **JSONC**            | Comments in JSON, env variable templating           |
+| Build/Release | **goreleaser**       | Multi-arch binaries + Docker images + manifests     |
+| CI/CD         | **GitHub Actions**   | Quality gates + snapshot + semver release           |
 
 ## Roadmap
 
-- [x] **Phase 1a** — Gateway + Event Bus + Model Registry + CLI `ask` (E2E flow)
-- [x] **Phase 1b** — Extism runtime + plugin system + tool calling
-- [x] **Phase 1b+** — Multi-tool plugins + MCP server
-- [ ] **Phase 1c** — TUI client
-- [ ] **Phase 1d** — Skill loader + Telegram connector + Scheduling
-- [ ] **Phase 2** — Web portal + Vector search + Multi-agent workflows
+### Done
+
+- [x] **Phase 1 — Foundations** — Gateway, WS hub, Event bus (36 types), CLI, Config (JSONC + env templating)
+- [x] **Phase 1a — Agent Core** — Eino ADK agent, coordinator pattern, 13+ native tools, async tasks, actor pool
+- [x] **Phase 1b — Ecosystem** — Skills (DAG workflows), scheduler (cron/event), WASM plugins (Extism), MCP server
+- [x] **Phase 2a — Intelligence** — Semantic memory (hybrid keyword + vector), cross-task learning, auto-extraction
+- [x] **Phase 3a — Containerization** — Dockerfile, goreleaser multi-arch, GitHub Actions CI/CD, runtime awareness
+
+### In Progress
+
+- [ ] **SLM optimization** — Prompt tuning for smaller local models (Ollama), instruction compression
+- [ ] **WASM hardening** — CPU/memory limits (Extism fuel metering), timeout enforcement, hostile input testing
+
+### Planned
+
+- [ ] **Sub-agent persistence** — State continuity across tasks (beyond current checkpoint system)
+- [ ] **TUI client** — Interactive terminal UI (Bubbletea)
+- [ ] **Web portal** — SPA for session management and monitoring
+- [ ] **Integrations** — Discord, Telegram, WhatsApp connectors
+- [ ] **Distributed events** — NATS-backed event bus for multi-instance deployments
+
+### Long-term Vision
+
+Ozzie aims to be a **personal AI operating system** — a single self-hosted process that:
+
+1. **Orchestrates any LLM** — Cloud (Anthropic, OpenAI, Mistral) and local (Ollama) models with automatic failover,
+   provider cooldown, and capacity-aware routing
+2. **Learns continuously** — Semantic memory accumulates across conversations and tasks; sub-agents inherit relevant
+   context automatically
+3. **Operates autonomously** — The coordinator pattern enables supervised-to-autonomous progression; cron/event
+   scheduling drives proactive behavior
+4. **Stays secure** — Zero-trust WASM sandbox for plugins, deny-by-default capabilities, destructive command blocking
+   in autonomous mode
+5. **Connects everywhere** — MCP server for IDE integration, WebSocket for custom clients, messaging connectors for
+   human-facing channels
+
+The end state: an always-on agent that manages your dev environment, automates workflows, and grows smarter with every
+interaction — while you keep full control over what it can access and do.
 
 ## License
-
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
