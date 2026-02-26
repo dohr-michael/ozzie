@@ -1,115 +1,106 @@
 {
-	// Ozzie Configuration
-	"gateway": {
-		"host": "127.0.0.1",
-		"port": 18420
-	},
+  // Ozzie Configuration
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18420
+  },
+  "models": {
+    "default": "claude",
+    "providers": {
+      "claude": {
+        "driver": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "auth": {
+          // Reads from ANTHROPIC_API_KEY env var automatically
+          "env_var": "ANTHROPIC_API_KEY"
+        },
+        "max_tokens": 4096
+      }
 
-	"models": {
-		"default": "claude",
-		"providers": {
-			"claude": {
-				"driver": "anthropic",
-				"model": "claude-sonnet-4-20250514",
-				"auth": {
-					// Reads from ANTHROPIC_API_KEY env var automatically
-					"env_var": "ANTHROPIC_API_KEY"
-				},
-				"max_tokens": 4096
-			}
+      // Mistral AI (OpenAI-compatible API)
+      // "mistral": {
+      // 	"driver": "mistral",
+      // 	"model": "mistral-large-latest",
+      // 	"auth": {
+      // 		"env_var": "MISTRAL_API_KEY"
+      // 	},
+      // 	"max_tokens": 4096
+      // }
 
-			// Mistral AI (OpenAI-compatible API)
-			// "mistral": {
-			// 	"driver": "mistral",
-			// 	"model": "mistral-large-latest",
-			// 	"auth": {
-			// 		"env_var": "MISTRAL_API_KEY"
-			// 	},
-			// 	"max_tokens": 4096
-			// }
-
-			// Local model via Ollama (no auth required)
-			// "local": {
-			// 	"driver": "ollama",
-			// 	"model": "llama3.1:8b",
-			// 	"base_url": "http://localhost:11434",
-			// 	"max_tokens": 4096,
-			// 	"options": {
-			// 		"temperature": 0.7,
-			// 		"num_ctx": 8192
-			// 	}
-			// }
-		}
-	},
-
-	"events": {
-		"buffer_size": 1024,
-		// Log level: "debug" | "info" | "warn" | "error" (default: "info")
-		// Can be overridden by --debug CLI flag (forces "debug")
-		"log_level": "info"
-	},
-
-	"agent": {
-		// Leave empty to use the built-in Ozzie persona (recommended).
-		// Inspired by Ozzie Isaacs from the Commonwealth Saga:
-		// laid-back genius, explorer, pragmatist, dry wit.
-		"system_prompt": "",
-		"coordinator": {
-			// Default autonomy level for new tasks:
-			// "disabled" — standard single-step execution
-			// "supervised" — explore → plan → validate → execute (requires user approval)
-			// "autonomous" — explore → plan → execute (no validation)
-			// Can be overridden per-task via the "autonomy_level" parameter in submit_task.
-			"default_level": "disabled",
-			// Maximum plan-revise cycles before the task fails (supervised mode only).
-			"max_validation_rounds": 3
-		}
-	},
-
-	// Embedding configuration for semantic memory search.
-	// When enabled, memories are indexed with vector embeddings for
-	// semantic retrieval (hybrid keyword + cosine similarity scoring).
-	// "embedding": {
-	// 	"enabled": true,
-	// 	"driver": "openai",              // "openai" | "ollama"
-	// 	"model": "text-embedding-3-small",
-	// 	// "base_url": "",               // for ollama or custom endpoints
-	// 	// "dims": 1536,                 // embedding dimensions (optional)
-	// 	// "auth": {
-	// 	// 	"api_key": ""               // reads from OPENAI_API_KEY env var by default
-	// 	// },
-	// 	// "queue_size": 100             // async pipeline buffer size
-	// },
-
-	// Ollama embedding example (local, no auth):
-	// "embedding": {
-	// 	"enabled": true,
-	// 	"driver": "ollama",
-	// 	"model": "nomic-embed-text",
-	// 	"base_url": "http://localhost:11434"
-	// },
-
-	"plugins": {
-		// Directory containing WASM plugin subdirectories.
-		// Each subdirectory should have a manifest.jsonc and a .wasm file.
-		// Default: ~/.ozzie/plugins
-		"dir": "",
-		// List of enabled plugin names. Empty = all plugins in dir are loaded.
-		"enabled": []
-	},
-
-	"skills": {
-		// Directories containing skill JSONC definitions.
-		// Default: [~/.ozzie/skills]
-		"dirs": [],
-		// List of enabled skill names. Empty = all skills are loaded.
-		"enabled": []
-	},
-
-	"tools": {
-		// Dangerous tools that are always auto-approved (no confirmation prompt).
-		// Useful for async tasks where no interactive user is present.
-		// Example: ["cmd", "git"]
-		"allowed_dangerous": []
-	}
+      // Local model via Ollama (no auth required)
+      // "local": {
+      // 	"driver": "ollama",
+      // 	"model": "llama3.1:8b",
+      // 	"base_url": "http://localhost:11434",
+      // 	"max_tokens": 4096,
+      // 	"options": {
+      // 		"temperature": 0.7,
+      // 		"num_ctx": 8192
+      // 	}
+      // }
+    }
+  },
+  "events": {
+    "buffer_size": 1024,
+    // Log level: "debug" | "info" | "warn" | "error" (default: "info")
+    // Can be overridden by --debug CLI flag (forces "debug")
+    "log_level": "info"
+  },
+  "agent": {
+    // Leave empty to use the built-in Ozzie persona (recommended).
+    // Inspired by Ozzie Isaacs from the Commonwealth Saga:
+    // laid-back genius, explorer, pragmatist, dry wit.
+    "system_prompt": "",
+    "coordinator": {
+      // Default autonomy level for new tasks:
+      // "disabled" — standard single-step execution
+      // "supervised" — explore → plan → validate → execute (requires user approval)
+      // "autonomous" — explore → plan → execute (no validation)
+      // Can be overridden per-task via the "autonomy_level" parameter in submit_task.
+      "default_level": "disabled",
+      // Maximum plan-revise cycles before the task fails (supervised mode only).
+      "max_validation_rounds": 3
+    }
+  },
+  // Semantic memory: vector embeddings for meaning-based retrieval.
+  // Hybrid scoring: 30% keyword + 70% cosine similarity.
+  // Disabled by default — enable and pick a driver below.
+  "embedding": {
+    "enabled": true,
+    //
+    // 	// --- Option A: OpenAI API (recommended for quality) ---
+    // 	"driver": "openai",                // uses OPENAI_API_KEY env var
+    // 	"model": "text-embedding-3-small", // or "text-embedding-3-large"
+    // 	// "dims": 1536,                   // optional dimension override
+    // 	// "auth": { "api_key": "" },      // explicit key (overrides env var)
+    //
+    // 	// --- Option B: Ollama (local, free, no API key) ---
+    "driver": "ollama",
+    "model": "nomic-embed-text",
+    // requires: ollama pull nomic-embed-text
+    "base_url": "http://localhost:11434"
+    //
+    // 	// "queue_size": 100               // async pipeline buffer (default: 100)
+  },
+  "plugins": {
+    // Directory containing WASM plugin subdirectories.
+    // Each subdirectory should have a manifest.jsonc and a .wasm file.
+    // Default: ~/.ozzie/plugins
+    "dir": "",
+    // List of enabled plugin names. Empty = all plugins in dir are loaded.
+    "enabled": []
+  },
+  "skills": {
+    // Directories containing skill JSONC definitions.
+    // Default: [~/.ozzie/skills]
+    "dirs": [],
+    // List of enabled skill names. Empty = all skills are loaded.
+    "enabled": []
+  },
+  "tools": {
+    // Dangerous tools that are always auto-approved (no confirmation prompt).
+    // Useful for async tasks where no interactive user is present.
+    // Example: ["cmd", "git"]
+    "allowed_dangerous": []
+  }
 }

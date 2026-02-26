@@ -29,6 +29,28 @@ type MemoryEntry struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 	LastUsedAt time.Time  `json:"last_used_at"`
 	Confidence float64    `json:"confidence"`
+
+	// Embedding tracking — set after successful vector indexing.
+	// Empty EmbeddingModel means the entry has never been indexed.
+	EmbeddingModel string     `json:"embedding_model,omitempty"`
+	IndexedAt      *time.Time `json:"indexed_at,omitempty"`
+}
+
+// IsIndexed returns true if this entry has been indexed with embeddings.
+func (e *MemoryEntry) IsIndexed() bool {
+	return e.EmbeddingModel != "" && e.IndexedAt != nil
+}
+
+// IsStale returns true if the entry content was updated after last indexing,
+// or if the embedding model has changed.
+func (e *MemoryEntry) IsStale(currentModel string) bool {
+	if !e.IsIndexed() {
+		return true
+	}
+	if e.EmbeddingModel != currentModel {
+		return true
+	}
+	return e.IndexedAt.Before(e.UpdatedAt)
 }
 
 // generateMemoryID creates a unique memory identifier.

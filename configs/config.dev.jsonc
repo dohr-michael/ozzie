@@ -17,6 +17,16 @@
 	},
 	"events": { "buffer_size": 1024 },
 	"agent": { "system_prompt": "" },
+
+	// Semantic memory — local Ollama embeddings (no API key needed)
+	// Requires: ollama pull nomic-embed-text
+	"embedding": {
+		"enabled": false,
+		"driver": "ollama",
+		"model": "nomic-embed-text",
+		"base_url": "http://localhost:11434"
+	},
+
 	"plugins": {
 		"dir": "./build/plugins",
 		"enabled": []

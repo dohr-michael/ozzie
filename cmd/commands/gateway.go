@@ -12,6 +12,8 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	einoCallbacks "github.com/cloudwego/eino/callbacks"
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
 	"github.com/urfave/cli/v3"
 
 	einoFs "github.com/cloudwego/eino/adk/middlewares/filesystem"
@@ -282,19 +284,33 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 				if queueSize <= 0 {
 					queueSize = 100
 				}
-				pipeline = memory.NewPipeline(vectorStore, queueSize)
+				embeddingModel := cfg.Embedding.Model
+				pipeline = memory.NewPipeline(vectorStore, memoryStore, embeddingModel, queueSize)
 				pipeline.Start(ctx)
 				defer pipeline.Stop()
 
-				// Async startup reindex
+				// Async startup reindex (incremental — skips already-indexed entries)
 				go func() {
-					if _, err := memory.Reindex(ctx, memoryStore, vectorStore); err != nil {
+					if _, err := memory.Reindex(ctx, memoryStore, vectorStore, embeddingModel); err != nil {
 						slog.Warn("startup reindex failed", "error", err)
 					}
 				}()
-				slog.Info("semantic memory enabled", "driver", cfg.Embedding.Driver, "model", cfg.Embedding.Model)
+				slog.Info("semantic memory enabled", "driver", cfg.Embedding.Driver, "model", embeddingModel)
 			}
 		}
+	}
+
+	// Cross-task learning: extract reusable lessons from completed tasks
+	if pipeline != nil {
+		extractor := memory.NewExtractor(memory.ExtractorConfig{
+			Store:      memoryStore,
+			Pipeline:   pipeline,
+			TaskReader: taskStore,
+			Summarizer: &extractorLLMAdapter{chatModel: chatModel},
+			Bus:        bus,
+		})
+		extractor.Start()
+		defer extractor.Stop()
 	}
 
 	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
@@ -451,6 +467,19 @@ type taskStoreAdapter struct {
 
 func newTaskStoreAdapter(s tasks.Store) *taskStoreAdapter {
 	return &taskStoreAdapter{store: s}
+}
+
+// extractorLLMAdapter adapts a ToolCallingChatModel to memory.LLMSummarizer.
+type extractorLLMAdapter struct {
+	chatModel model.ToolCallingChatModel
+}
+
+func (a *extractorLLMAdapter) Summarize(ctx context.Context, prompt string) (string, error) {
+	resp, err := a.chatModel.Generate(ctx, []*schema.Message{{Role: schema.User, Content: prompt}})
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
 
 func resolveLogLevel(s string) slog.Level {

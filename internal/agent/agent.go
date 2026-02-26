@@ -65,10 +65,12 @@ You are the user’s primary interface. Stay responsive and available — never 
 - Each step should be specific and independently executable by a sub-agent.
 - Use depends_on to enforce ordering between steps that depend on each other.
 
-### Context Continuity
-- Store important decisions, findings, and user preferences with store_memory.
-- Query memories to recall context from previous sessions.
-- Update session metadata (title, language, working directory) to keep context fresh.`
+### Memory Protocol
+- **Before non-trivial tasks**: call query_memories to check for existing context, preferences, or past decisions.
+- **After discovering reusable patterns**: store_memory (type=procedure) — workflows, commands, gotchas that worked.
+- **When learning user preferences**: store_memory (type=preference) — formatting, naming, tool choices.
+- **After key decisions**: store_memory (type=fact) with the decision rationale for future recall.
+- **Do NOT over-store**: only information useful across sessions. Tag consistently with lowercase keywords.`
 
 // LoadPersona reads SOUL.md from OZZIE_PATH if it exists,
 // otherwise returns DefaultPersona.

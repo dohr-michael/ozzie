@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -96,11 +97,27 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 			}
 		}
 
-		// Layer 6: Relevant memories
+		// Layer 6: Relevant memories (enriched with session context)
 		if cfg.Retriever != nil {
 			lastMsg := lastUserMessageContent(state.Messages)
 			if lastMsg != "" {
-				if memories, err := cfg.Retriever.Retrieve(lastMsg, nil, 5); err == nil && len(memories) > 0 {
+				query := lastMsg
+				var tags []string
+
+				// Enrich query with session context
+				if cfg.Store != nil && sessionID != "" {
+					if sess, err := cfg.Store.Get(sessionID); err == nil {
+						query = enrichQueryWithSession(lastMsg, sess)
+						tags = extractSessionTags(sess)
+					}
+				}
+
+				// Add recent user context for broader semantic match
+				if recent := recentUserContext(state.Messages, 2); recent != "" {
+					query = query + " " + recent
+				}
+
+				if memories, err := cfg.Retriever.Retrieve(query, tags, 5); err == nil && len(memories) > 0 {
 					var sb strings.Builder
 					sb.WriteString("## Relevant Memories\n\n")
 					for _, m := range memories {
@@ -207,4 +224,55 @@ func lastUserMessageContent(messages []*schema.Message) string {
 		}
 	}
 	return ""
+}
+
+// enrichQueryWithSession adds session title and project directory to the query
+// for better semantic matching.
+func enrichQueryWithSession(query string, sess *sessions.Session) string {
+	var parts []string
+	parts = append(parts, query)
+	if sess.Title != "" {
+		parts = append(parts, sess.Title)
+	}
+	if sess.RootDir != "" {
+		parts = append(parts, filepath.Base(sess.RootDir))
+	}
+	return strings.Join(parts, " ")
+}
+
+// extractSessionTags returns tags derived from session metadata.
+func extractSessionTags(sess *sessions.Session) []string {
+	var tags []string
+	if sess.Language != "" {
+		tags = append(tags, strings.ToLower(sess.Language))
+	}
+	if sess.Metadata != nil {
+		if project, ok := sess.Metadata["project"]; ok && project != "" {
+			tags = append(tags, strings.ToLower(project))
+		}
+	}
+	return tags
+}
+
+// recentUserContext returns the concatenated content of the N most recent user
+// messages (excluding the last one), each truncated to 200 chars.
+func recentUserContext(messages []*schema.Message, maxN int) string {
+	var userMsgs []string
+	skippedLast := false
+	for i := len(messages) - 1; i >= 0 && len(userMsgs) < maxN; i-- {
+		if messages[i].Role != schema.User {
+			continue
+		}
+		// Skip the very last user message (already used as primary query)
+		if !skippedLast {
+			skippedLast = true
+			continue
+		}
+		content := messages[i].Content
+		if len(content) > 200 {
+			content = content[:200]
+		}
+		userMsgs = append(userMsgs, content)
+	}
+	return strings.Join(userMsgs, " ")
 }

@@ -4,6 +4,8 @@ bin/
 dev_home/
 e2e/target/
 e2e/.bin/
+e2e/reports/**/*.md
+local-memo
 
 # Environment
 .env

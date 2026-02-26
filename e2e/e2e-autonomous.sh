@@ -29,13 +29,13 @@ wait_tasks_done 300
 
 section "Assertions — functional"
 
-assert_log_contains "task.created"
-assert_task_count_ge 1
+assert_file_exists_recursive "$TARGET" "go.mod"
+assert_file_exists_recursive "$TARGET" "main.go"
 
-section "Assertions — output (model-dependent)"
+section "Assertions — task delegation (model-dependent)"
 
-soft_assert_file_exists_recursive "$TARGET" "go.mod"
-soft_assert_file_exists_recursive "$TARGET" "main.go"
+soft_assert_log_contains "task.created"
+soft_assert_task_count_ge 1
 
 section "Assertions — autonomous flow (model-dependent)"
 

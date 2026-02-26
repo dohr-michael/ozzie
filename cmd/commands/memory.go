@@ -71,14 +71,18 @@ func runMemoryList(_ context.Context, _ *cli.Command) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tTYPE\tTITLE\tTAGS\tCONFIDENCE")
+	fmt.Fprintln(w, "ID\tTYPE\tTITLE\tTAGS\tIDX\tCONFIDENCE")
 	for _, e := range entries {
 		tags := "-"
 		if len(e.Tags) > 0 {
 			tags = fmt.Sprintf("%v", e.Tags)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%.1f\n",
-			e.ID, e.Type, e.Title, tags, e.Confidence)
+		idx := "-"
+		if e.IsIndexed() {
+			idx = "Y"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%.1f\n",
+			e.ID, e.Type, e.Title, tags, idx, e.Confidence)
 	}
 	return w.Flush()
 }
@@ -156,6 +160,11 @@ func runMemoryShow(_ context.Context, cmd *cli.Command) error {
 	if len(entry.Tags) > 0 {
 		fmt.Printf("Tags:       %v\n", entry.Tags)
 	}
+	if entry.IsIndexed() {
+		fmt.Printf("Indexed:    %s (model: %s)\n", entry.IndexedAt.Format("2006-01-02 15:04:05"), entry.EmbeddingModel)
+	} else {
+		fmt.Printf("Indexed:    no\n")
+	}
 	fmt.Printf("\nContent:\n%s\n", content)
 
 	return nil
@@ -202,11 +211,12 @@ func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	slog.Info("starting reindex", "driver", cfg.Embedding.Driver, "model", cfg.Embedding.Model)
-	stats, err := memory.Reindex(ctx, store, vectorStore)
+	stats, err := memory.Reindex(ctx, store, vectorStore, cfg.Embedding.Model)
 	if err != nil {
 		return fmt.Errorf("reindex: %w", err)
 	}
 
-	fmt.Printf("Reindex complete: %d/%d indexed, %d errors\n", stats.Indexed, stats.Total, stats.Errors)
+	fmt.Printf("Reindex complete: %d/%d indexed, %d skipped, %d errors\n",
+		stats.Indexed, stats.Total, stats.Skipped, stats.Errors)
 	return nil
 }

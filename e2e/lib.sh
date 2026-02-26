@@ -549,6 +549,8 @@ teardown() {
     stop_gateway
     info "Run artifacts: $E2E_RUNDIR"
 
+    echo "E2E_RESULT:failures=$FAILURES:warnings=$WARNINGS"
+
     echo ""
     if [ "$WARNINGS" -gt 0 ]; then
         echo -e "${YELLOW}WARNINGS: $WARNINGS soft assertion(s) (model-dependent features)${NC}"

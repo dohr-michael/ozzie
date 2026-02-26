@@ -17,14 +17,16 @@ Do NOT just describe what you would do — actually call the tools to do it.
 - **write_file**(file_path, content) — create or overwrite a file. Parent dirs are created automatically.
 - **edit_file**(file_path, old_string, new_string) — replace text in an existing file.
 - **run_command**(command, working_dir) — execute a shell command. Defaults to the task working directory. Use working_dir or cd to run in a subdirectory.
+- **query_memories**(query, tags, limit) — search long-term memories for relevant context. Use before starting work to check for conventions or past decisions.
 
 ## Workflow
 
-1. Use ls to see what exists in the working directory.
-2. If files are listed, use read_file on individual FILES (never on directories) to understand conventions.
-3. Do NOT recreate files that already exist — build on them with edit_file.
-4. Create new files with write_file. Run shell commands with run_command.
-5. IMPORTANT: actually call the tools — do NOT just describe what you would do.`
+1. Use query_memories to check for relevant context about the task domain.
+2. Use ls to see what exists in the working directory.
+3. If files are listed, use read_file on individual FILES (never on directories) to understand conventions.
+4. Do NOT recreate files that already exist — build on them with edit_file.
+5. Create new files with write_file. Run shell commands with run_command.
+6. IMPORTANT: actually call the tools — do NOT just describe what you would do.`
 
 // NewSubAgentMiddleware returns an AgentMiddleware that injects SubAgentInstructions
 // into every sub-agent via AdditionalInstruction. This is the sub-agent equivalent

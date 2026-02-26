@@ -132,7 +132,7 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	tools := input.Tools
 	// Default tools: if none specified and not a skill task, provide base action tools
 	if len(tools) == 0 && input.Skill == "" {
-		tools = []string{"run_command", "git"}
+		tools = []string{"run_command", "git", "query_memories"}
 	}
 	// Supervised mode: ensure request_validation is in the tool set
 	if autonomy == tasks.AutonomySupervised && !containsStr(tools, "request_validation") {

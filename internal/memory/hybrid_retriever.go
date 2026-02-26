@@ -2,7 +2,9 @@ package memory
 
 import (
 	"context"
+	"log/slog"
 	"sort"
+	"time"
 )
 
 const (
@@ -37,7 +39,11 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 
 	// Keyword-only fallback when vector store is not available
 	if hr.vector == nil {
-		return hr.keyword.Retrieve(query, tags, limit)
+		results, err := hr.keyword.Retrieve(query, tags, limit)
+		if err == nil && len(results) > 0 {
+			go hr.reinforceResults(results)
+		}
+		return results, err
 	}
 
 	// Fetch expanded result sets from both sources
@@ -51,10 +57,16 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 	semanticResults, err := hr.vector.Query(context.Background(), query, fetchLimit)
 	if err != nil {
 		// Graceful degradation: fall back to keyword-only on vector error
-		return hr.keyword.Retrieve(query, tags, limit)
+		results, kwErr := hr.keyword.Retrieve(query, tags, limit)
+		if kwErr == nil && len(results) > 0 {
+			go hr.reinforceResults(results)
+		}
+		return results, kwErr
 	}
 
-	return hr.mergeResults(keywordResults, semanticResults, limit), nil
+	merged := hr.mergeResults(keywordResults, semanticResults, limit)
+	go hr.reinforceResults(merged)
+	return merged, nil
 }
 
 // mergeResults combines keyword and semantic results with hybrid scoring.
@@ -126,4 +138,21 @@ func (hr *HybridRetriever) mergeResults(keywordResults []RetrievedMemory, semant
 		})
 	}
 	return out
+}
+
+// reinforceResults updates LastUsedAt and Confidence for retrieved memories.
+// Fire-and-forget: errors are logged but do not affect retrieval.
+func (hr *HybridRetriever) reinforceResults(results []RetrievedMemory) {
+	now := time.Now()
+	for _, r := range results {
+		entry, content, err := hr.store.Get(r.Entry.ID)
+		if err != nil || entry == nil {
+			continue
+		}
+		entry.LastUsedAt = now
+		entry.Confidence = min(entry.Confidence+0.05, 1.0)
+		if err := hr.store.Update(entry, content); err != nil {
+			slog.Debug("reinforce memory failed", "id", r.Entry.ID, "error", err)
+		}
+	}
 }

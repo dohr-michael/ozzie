@@ -282,7 +282,11 @@ func TestPipeline_EnqueueProcess(t *testing.T) {
 		t.Fatalf("NewVectorStore: %v", err)
 	}
 
-	p := NewPipeline(vs, 10)
+	store := newMemoryStoreStub()
+	entry := newTestMemoryEntry("doc1", "Test doc", nil)
+	_ = store.Create(entry, "test content for embedding")
+
+	p := NewPipeline(vs, store, "test-model", 10)
 	p.Start(ctx)
 
 	// Enqueue a job
@@ -298,6 +302,15 @@ func TestPipeline_EnqueueProcess(t *testing.T) {
 	if vs.Count() != 1 {
 		t.Fatalf("expected 1 document after pipeline processing, got %d", vs.Count())
 	}
+
+	// Verify entry was marked as indexed
+	updated, _, _ := store.Get("doc1")
+	if !updated.IsIndexed() {
+		t.Error("expected entry to be marked as indexed after pipeline processing")
+	}
+	if updated.EmbeddingModel != "test-model" {
+		t.Errorf("expected embedding_model=test-model, got %s", updated.EmbeddingModel)
+	}
 }
 
 func TestPipeline_Delete(t *testing.T) {
@@ -312,12 +325,14 @@ func TestPipeline_Delete(t *testing.T) {
 		t.Fatalf("NewVectorStore: %v", err)
 	}
 
+	store := newMemoryStoreStub()
+
 	// Pre-populate
 	if err := vs.Upsert(ctx, "doc1", "some content", nil); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	p := NewPipeline(vs, 10)
+	p := NewPipeline(vs, store, "test-model", 10)
 	p.Start(ctx)
 
 	p.Enqueue(EmbedJob{ID: "doc1", Delete: true})
@@ -345,7 +360,7 @@ func TestReindex(t *testing.T) {
 		_ = store.Create(entry, "Content for "+id)
 	}
 
-	stats, err := Reindex(ctx, store, vs)
+	stats, err := Reindex(ctx, store, vs, "test-model")
 	if err != nil {
 		t.Fatalf("Reindex: %v", err)
 	}
@@ -361,6 +376,100 @@ func TestReindex(t *testing.T) {
 	}
 	if vs.Count() != 5 {
 		t.Errorf("expected vector count=5, got %d", vs.Count())
+	}
+
+	// Verify entries are marked as indexed
+	entries, _ := store.List()
+	for _, e := range entries {
+		if !e.IsIndexed() {
+			t.Errorf("entry %s not marked as indexed", e.ID)
+		}
+		if e.EmbeddingModel != "test-model" {
+			t.Errorf("entry %s: expected model=test-model, got %s", e.ID, e.EmbeddingModel)
+		}
+	}
+}
+
+func TestReindex_Incremental(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockEmbedder{}
+	dir := t.TempDir()
+
+	vs, err := NewVectorStore(ctx, dir, mock)
+	if err != nil {
+		t.Fatalf("NewVectorStore: %v", err)
+	}
+
+	store := newMemoryStoreStub()
+	for i := range 3 {
+		id := "mem" + string(rune('1'+i))
+		entry := newTestMemoryEntry(id, "Memory "+id, []string{"test"})
+		_ = store.Create(entry, "Content for "+id)
+	}
+
+	// First reindex — all entries
+	stats, _ := Reindex(ctx, store, vs, "test-model")
+	if stats.Indexed != 3 {
+		t.Fatalf("first reindex: expected indexed=3, got %d", stats.Indexed)
+	}
+
+	// Second reindex — same model, nothing changed → all skipped
+	stats, _ = Reindex(ctx, store, vs, "test-model")
+	if stats.Skipped != 3 {
+		t.Errorf("second reindex: expected skipped=3, got %d", stats.Skipped)
+	}
+	if stats.Indexed != 0 {
+		t.Errorf("second reindex: expected indexed=0, got %d", stats.Indexed)
+	}
+
+	// Third reindex — different model → all re-indexed
+	stats, _ = Reindex(ctx, store, vs, "new-model")
+	if stats.Indexed != 3 {
+		t.Errorf("model change reindex: expected indexed=3, got %d", stats.Indexed)
+	}
+	if stats.Skipped != 0 {
+		t.Errorf("model change reindex: expected skipped=0, got %d", stats.Skipped)
+	}
+}
+
+func TestHybridRetriever_Reinforcement(t *testing.T) {
+	store := newMemoryStoreStub()
+	initial := time.Now().Add(-time.Hour)
+	entry := &MemoryEntry{
+		ID:         "mem1",
+		Title:      "Go programming",
+		Type:       MemoryFact,
+		Source:     "test",
+		Tags:       []string{"go", "programming"},
+		CreatedAt:  initial,
+		UpdatedAt:  initial,
+		LastUsedAt: initial,
+		Confidence: 0.5,
+	}
+	_ = store.Create(entry, "Go is a great language for concurrency")
+
+	// vector=nil → keyword-only, but reinforcement still runs
+	hr := NewHybridRetriever(store, nil)
+	results, err := hr.Retrieve("go programming", nil, 5)
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+
+	// Wait for async reinforcement goroutine
+	time.Sleep(200 * time.Millisecond)
+
+	updated, _, err := store.Get("mem1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if updated.Confidence != 0.55 {
+		t.Errorf("expected confidence 0.55, got %f", updated.Confidence)
+	}
+	if !updated.LastUsedAt.After(initial) {
+		t.Errorf("expected LastUsedAt to be updated, got %v", updated.LastUsedAt)
 	}
 }
 

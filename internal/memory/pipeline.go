@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 )
 
 // EmbedJob represents a single embedding task.
@@ -18,20 +19,26 @@ type EmbedJob struct {
 
 // Pipeline processes embedding jobs asynchronously via a single worker goroutine.
 type Pipeline struct {
-	vector *VectorStore
-	jobs   chan EmbedJob
-	wg     sync.WaitGroup
+	vector    *VectorStore
+	store     Store
+	modelName string
+	jobs      chan EmbedJob
+	wg        sync.WaitGroup
 }
 
 // NewPipeline creates a new embedding pipeline.
+// store is used to persist indexing metadata on entries after successful embedding.
+// modelName identifies the embedding model (e.g. "text-embedding-3-small") for staleness detection.
 // queueSize controls the buffered channel capacity (default: 100).
-func NewPipeline(vector *VectorStore, queueSize int) *Pipeline {
+func NewPipeline(vector *VectorStore, store Store, modelName string, queueSize int) *Pipeline {
 	if queueSize <= 0 {
 		queueSize = 100
 	}
 	return &Pipeline{
-		vector: vector,
-		jobs:   make(chan EmbedJob, queueSize),
+		vector:    vector,
+		store:     store,
+		modelName: modelName,
+		jobs:      make(chan EmbedJob, queueSize),
 	}
 }
 
@@ -74,6 +81,24 @@ func (p *Pipeline) processJob(ctx context.Context, job EmbedJob) {
 
 	if err := p.vector.Upsert(ctx, job.ID, job.Content, job.Meta); err != nil {
 		slog.Warn("embedding pipeline: upsert failed", "id", job.ID, "error", err)
+		return
+	}
+
+	// Mark entry as indexed in the store
+	p.markIndexed(job.ID)
+}
+
+// markIndexed updates the entry metadata to record successful indexing.
+func (p *Pipeline) markIndexed(id string) {
+	entry, content, err := p.store.Get(id)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	entry.EmbeddingModel = p.modelName
+	entry.IndexedAt = &now
+	if err := p.store.Update(entry, content); err != nil {
+		slog.Warn("embedding pipeline: failed to mark indexed", "id", id, "error", err)
 	}
 }
 
