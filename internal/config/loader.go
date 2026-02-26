@@ -66,6 +66,18 @@ func applyDefaults(cfg *Config) {
 	if cfg.Agent.Coordinator.MaxValidationRounds == 0 {
 		cfg.Agent.Coordinator.MaxValidationRounds = 3
 	}
+	// Runtime environment
+	if cfg.Runtime.Environment == "" {
+		if v := os.Getenv("OZZIE_RUNTIME"); v != "" {
+			cfg.Runtime.Environment = v
+		} else {
+			cfg.Runtime.Environment = "local"
+		}
+	}
+	if cfg.Runtime.SystemToolsFile == "" {
+		cfg.Runtime.SystemToolsFile = "/etc/ozzie/system-tools.json"
+	}
+
 	// Default MaxConcurrent for providers
 	for name, p := range cfg.Models.Providers {
 		if p.MaxConcurrent <= 0 {

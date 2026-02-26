@@ -29,10 +29,15 @@ Do NOT just describe what you would do — actually call the tools to do it.
 6. IMPORTANT: actually call the tools — do NOT just describe what you would do.`
 
 // NewSubAgentMiddleware returns an AgentMiddleware that injects SubAgentInstructions
-// into every sub-agent via AdditionalInstruction. This is the sub-agent equivalent
-// of the context middleware that injects AgentInstructions for the main agent.
-func NewSubAgentMiddleware() adk.AgentMiddleware {
+// (and optionally the runtime instruction) into every sub-agent via AdditionalInstruction.
+// This is the sub-agent equivalent of the context middleware that injects AgentInstructions
+// for the main agent.
+func NewSubAgentMiddleware(runtimeInstruction string) adk.AgentMiddleware {
+	instruction := SubAgentInstructions
+	if runtimeInstruction != "" {
+		instruction += "\n\n" + runtimeInstruction
+	}
 	return adk.AgentMiddleware{
-		AdditionalInstruction: SubAgentInstructions,
+		AdditionalInstruction: instruction,
 	}
 }

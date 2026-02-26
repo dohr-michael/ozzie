@@ -1,16 +1,19 @@
 package commands
 
 import (
+	"fmt"
+
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
 )
 
 // NewRootCommand returns the top-level CLI command.
-func NewRootCommand() *cli.Command {
+func NewRootCommand(version, commit string) *cli.Command {
 	return &cli.Command{
-		Name:  "ozzie",
-		Usage: "Your personal AI agent operating system",
+		Name:    "ozzie",
+		Usage:   "Your personal AI agent operating system",
+		Version: fmt.Sprintf("%s (%s)", version, commit),
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "config",

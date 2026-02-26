@@ -13,6 +13,13 @@ type Config struct {
 	Skills  SkillsConfig  `json:"skills"`
 	Tools   ToolsConfig   `json:"tools"`
 	Sandbox SandboxConfig `json:"sandbox"`
+	Runtime RuntimeConfig `json:"runtime"`
+}
+
+// RuntimeConfig configures the runtime environment awareness.
+type RuntimeConfig struct {
+	Environment     string `json:"environment,omitempty"`        // "local" | "container"
+	SystemToolsFile string `json:"system_tools_file,omitempty"` // path to auto-generated tools JSON
 }
 
 // SandboxConfig configures the sandbox guard for autonomous sub-agents.

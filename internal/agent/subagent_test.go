@@ -43,8 +43,19 @@ func TestAgentInstructions_ContainsMemoryProtocol(t *testing.T) {
 }
 
 func TestNewSubAgentMiddleware_InjectsInstructions(t *testing.T) {
-	mw := NewSubAgentMiddleware()
+	mw := NewSubAgentMiddleware("")
 	if mw.AdditionalInstruction != SubAgentInstructions {
 		t.Errorf("middleware AdditionalInstruction = %q, want SubAgentInstructions", mw.AdditionalInstruction)
+	}
+}
+
+func TestNewSubAgentMiddleware_WithRuntimeInstruction(t *testing.T) {
+	runtime := "## Runtime Environment\n\nYou are running in **container** mode."
+	mw := NewSubAgentMiddleware(runtime)
+	if !strings.Contains(mw.AdditionalInstruction, SubAgentInstructions) {
+		t.Error("middleware should contain SubAgentInstructions")
+	}
+	if !strings.Contains(mw.AdditionalInstruction, runtime) {
+		t.Error("middleware should contain runtime instruction")
 	}
 }

@@ -24,6 +24,7 @@ type MemoryRetriever interface {
 // ContextMiddlewareConfig configures the dynamic context middleware.
 type ContextMiddlewareConfig struct {
 	CustomInstructions  string            // Layer 2: from config.Agent.SystemPrompt
+	RuntimeInstruction  string            // Layer 1c: runtime environment (container/local + system tools)
 	AllToolDescriptions map[string]string // Layer 3: full catalog (name → desc)
 	SkillDescriptions   map[string]string // Layer 3b: skill name → description
 	Store               sessions.Store    // Session store for metadata
@@ -43,6 +44,12 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 	// Layer 1b: Agent operating instructions (not overridable)
 	instruction.WriteString(AgentInstructions)
 	instruction.WriteString("\n\n")
+
+	// Layer 1c: Runtime environment (container/local + system tools)
+	if cfg.RuntimeInstruction != "" {
+		instruction.WriteString(cfg.RuntimeInstruction)
+		instruction.WriteString("\n\n")
+	}
 
 	// Layer 2: Custom instructions
 	if cfg.CustomInstructions != "" {

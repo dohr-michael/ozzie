@@ -1,0 +1,11 @@
+build/
+dist/
+.git/
+.github/
+.claude/
+*.md
+*.test
+.env
+.env.*
+configs/
+tests/

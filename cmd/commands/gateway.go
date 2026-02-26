@@ -207,8 +207,12 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("init reduction middleware: %w", err)
 	}
 
-	// SubAgent middleware — injects SubAgentInstructions (tool reference + workflow)
-	subAgentMw := agent.NewSubAgentMiddleware()
+	// Build runtime instruction (system tools + environment awareness)
+	systemTools := agent.LoadSystemTools(cfg.Runtime.SystemToolsFile)
+	runtimeInstruction := agent.BuildRuntimeInstruction(cfg.Runtime.Environment, systemTools)
+
+	// SubAgent middleware — injects SubAgentInstructions + runtime (tool reference + workflow)
+	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction)
 
 	// Task middlewares — subagent instructions + filesystem + reduction for sub-agents (no context middleware)
 	taskMiddlewares := []adk.AgentMiddleware{subAgentMw, fsMw, reductionMw}
@@ -405,6 +409,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Context middleware — injects dynamic context (instructions, tools, session, memories)
 	contextMw := agent.NewContextMiddleware(agent.ContextMiddlewareConfig{
 		CustomInstructions:  cfg.Agent.SystemPrompt,
+		RuntimeInstruction:  runtimeInstruction,
 		AllToolDescriptions: allToolDescs,
 		SkillDescriptions:   skillDescs,
 		Store:               sessionStore,
