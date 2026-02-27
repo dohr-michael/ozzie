@@ -9,7 +9,8 @@ const (
 	PromptTypeText    PromptType = "text"
 	PromptTypeSelect  PromptType = "select"
 	PromptTypeMulti   PromptType = "multi"
-	PromptTypeConfirm PromptType = "confirm"
+	PromptTypeConfirm  PromptType = "confirm"
+	PromptTypePassword PromptType = "password"
 )
 
 // PromptOption represents a selectable option.
@@ -83,6 +84,15 @@ func (c *PromptConfig) WithOptions(options []PromptOption) *PromptConfig {
 func (c *PromptConfig) WithHelpText(text string) *PromptConfig {
 	c.HelpText = text
 	return c
+}
+
+func NewPasswordPromptConfig(field, label string) *PromptConfig {
+	return &PromptConfig{
+		Type:     PromptTypePassword,
+		Field:    field,
+		Label:    label,
+		Required: true,
+	}
 }
 
 func NewSelectPromptConfig(field, label string, options []PromptOption, required bool) *PromptConfig {

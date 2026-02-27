@@ -8,8 +8,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"filippo.io/age"
 	"github.com/cloudwego/eino/adk"
 	einoCallbacks "github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
@@ -29,6 +31,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/memory"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/skills"
@@ -83,8 +86,30 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		cfg.Gateway.Port = cmd.Int("port")
 	}
 
+	// Age identity (optional — skip if ozzie wake not run)
+	var ageIdentity *age.X25519Identity
+	if id, err := secrets.LoadIdentity(secrets.KeyPath()); err == nil {
+		ageIdentity = id
+	} else {
+		slog.Warn("age key not found, secret encryption disabled", "error", err)
+	}
+
+	// Config reloader
+	reloader := config.NewReloader(configPath, config.DotenvPath(), cfg)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// SIGHUP handler for config hot reload
+	sighupCh := make(chan os.Signal, 1)
+	signal.Notify(sighupCh, syscall.SIGHUP)
+	go func() {
+		for range sighupCh {
+			if err := reloader.Reload(); err != nil {
+				slog.Error("config reload failed", "error", err)
+			}
+		}
+	}()
 
 	// Event bus
 	bus := events.NewBus(cfg.Events.BufferSize)
@@ -101,6 +126,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 
 	// Model registry
 	registry := models.NewRegistry(cfg.Models)
+
+	// Wire reloader → model registry for hot config reload
+	reloader.OnReload(func(newCfg *config.Config) {
+		registry.UpdateProviders(newCfg.Models)
+	})
 
 	// Get default model
 	chatModel, err := registry.Default(ctx)
@@ -395,6 +425,14 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register reply_task tool", "error", err)
 	}
 
+	// Register set_secret tool (only if age identity is available)
+	if ageIdentity != nil {
+		setSecretTool := plugins.NewSetSecretTool(ageIdentity, reloader)
+		if err := toolRegistry.RegisterNative("set_secret", setSecretTool, plugins.SetSecretManifest()); err != nil {
+			slog.Warn("failed to register set_secret tool", "error", err)
+		}
+	}
+
 	// ToolSet: all native/built-in tools are always active,
 	// only WASM plugin tools require dynamic activation.
 	// Must be computed AFTER all native tools are registered.
@@ -451,6 +489,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 
 	// Gateway server
 	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port, toolPerms)
+
+	// Enable secret encryption on the WS hub
+	if ageIdentity != nil {
+		server.SetSecretEncryptor(ageIdentity.Recipient())
+	}
 
 	// Connect task handler to gateway (WS + HTTP task operations)
 	taskHandler := gateway.NewWSTaskHandler(pool)

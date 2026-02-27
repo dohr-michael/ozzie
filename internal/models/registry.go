@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -124,6 +125,25 @@ func (r *Registry) ProviderTier(name string) agent.ModelTier {
 // DefaultTier returns the ModelTier for the default provider.
 func (r *Registry) DefaultTier() agent.ModelTier {
 	return r.ProviderTier(r.defaultName)
+}
+
+// UpdateProviders replaces the provider map for hot config reload.
+// Unchanged providers keep their cached model instance (preserving sync.Once),
+// while changed or new providers get a fresh entry (resetting lazy init).
+func (r *Registry) UpdateProviders(cfg config.ModelsConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.defaultName = cfg.Default
+	newProviders := make(map[string]*ProviderEntry, len(cfg.Providers))
+	for name, provCfg := range cfg.Providers {
+		if existing, ok := r.providers[name]; ok && reflect.DeepEqual(existing.Config, provCfg) {
+			newProviders[name] = existing // unchanged — keep cached model
+		} else {
+			newProviders[name] = &ProviderEntry{Config: provCfg}
+		}
+	}
+	r.providers = newProviders
 }
 
 // resolveContextWindow determines context window: explicit config > model prefix > driver default > fallback.

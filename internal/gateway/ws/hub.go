@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"sync"
 
+	"filippo.io/age"
 	"github.com/coder/websocket"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -33,13 +35,15 @@ type TaskHandler interface {
 
 // Hub manages WebSocket clients and bridges them to the event bus.
 type Hub struct {
-	mu          sync.RWMutex
-	clients     map[*Client]struct{}
-	bus         *events.Bus
-	store       sessions.Store
-	tasks       TaskHandler
-	perms       *plugins.ToolPermissions
-	unsubscribe func()
+	mu             sync.RWMutex
+	clients        map[*Client]struct{}
+	bus            *events.Bus
+	store          sessions.Store
+	tasks          TaskHandler
+	perms          *plugins.ToolPermissions
+	unsubscribe    func()
+	recipient      *age.X25519Recipient // nil = encryption disabled
+	passwordTokens sync.Map             // token → bool
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
@@ -50,6 +54,13 @@ func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermission
 		store:   store,
 		perms:   perms,
 	}
+
+	// Track password prompt tokens for encryption
+	bus.Subscribe(func(e events.Event) {
+		if p, ok := events.GetPromptRequestPayload(e); ok && p.Type == events.PromptTypePassword {
+			h.passwordTokens.Store(p.Token, true)
+		}
+	}, events.EventPromptRequest)
 
 	// Subscribe to all events and bridge to WS clients
 	h.unsubscribe = bus.Subscribe(func(e events.Event) {
@@ -77,6 +88,11 @@ func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermission
 // SetTaskHandler sets the optional task handler for WS task methods.
 func (h *Hub) SetTaskHandler(th TaskHandler) {
 	h.tasks = th
+}
+
+// SetSecretEncryptor enables encryption for password prompt responses.
+func (h *Hub) SetSecretEncryptor(r *age.X25519Recipient) {
+	h.recipient = r
 }
 
 // broadcast sends data to all connected clients.
@@ -331,6 +347,18 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 		if err := json.Unmarshal(frame.Params, &params); err != nil {
 			c.sendError(ctx, frame.ID, "invalid params")
 			return
+		}
+
+		// Encrypt password responses before they reach the event bus / LLM
+		if _, ok := c.hub.passwordTokens.LoadAndDelete(params.Token); ok && c.hub.recipient != nil {
+			if strVal, ok := params.Value.(string); ok {
+				encrypted, err := secrets.Encrypt(strVal, c.hub.recipient)
+				if err != nil {
+					c.sendError(ctx, frame.ID, "encrypt secret: "+err.Error())
+					return
+				}
+				params.Value = encrypted
+			}
 		}
 
 		c.hub.bus.Publish(events.NewTypedEventWithSession(events.SourceWS, params, c.sessionID))

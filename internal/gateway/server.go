@@ -12,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"filippo.io/age"
+
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
 	"github.com/dohr-michael/ozzie/internal/plugins"
@@ -151,4 +153,9 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 func (s *Server) SetTaskHandler(th *WSTaskHandler) {
 	s.taskHandler = th
 	s.hub.SetTaskHandler(th)
+}
+
+// SetSecretEncryptor enables encryption for password prompt responses.
+func (s *Server) SetSecretEncryptor(r *age.X25519Recipient) {
+	s.hub.SetSecretEncryptor(r)
 }

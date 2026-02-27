@@ -9,6 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
 // NewWakeCommand returns the onboarding subcommand.
@@ -39,6 +40,16 @@ func runWake(_ context.Context, _ *cli.Command) error {
 			fmt.Printf("  Created %s\n", d)
 			created = true
 		}
+	}
+
+	// Generate age key for secret encryption (idempotent).
+	ageKeyPath := filepath.Join(root, ".age-key")
+	if _, err := os.Stat(ageKeyPath); err != nil {
+		if err := secrets.GenerateIdentity(ageKeyPath); err != nil {
+			return fmt.Errorf("generate age identity: %w", err)
+		}
+		fmt.Printf("  Created %s\n", ageKeyPath)
+		created = true
 	}
 
 	// Write default config if missing.

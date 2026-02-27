@@ -42,6 +42,39 @@ func LoadDotenv(path string) error {
 	return scanner.Err()
 }
 
+// ReloadDotenv reads a .env file and sets all environment variables unconditionally,
+// overriding any existing values. Used for hot-reload after secret injection.
+func ReloadDotenv(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = unquote(value)
+
+		os.Setenv(key, value)
+	}
+	return scanner.Err()
+}
+
 // unquote strips matching surrounding quotes (single or double).
 func unquote(s string) string {
 	if len(s) >= 2 {

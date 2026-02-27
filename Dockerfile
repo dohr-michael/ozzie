@@ -2,7 +2,7 @@ FROM alpine:3.21
 
 RUN apk add --no-cache \
     git curl jq bash openssh-client \
-    docker-cli ca-certificates
+    docker-cli ca-certificates age
 
 COPY ozzie /usr/local/bin/ozzie
 
