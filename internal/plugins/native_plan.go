@@ -139,6 +139,104 @@ func (t *PlanTaskTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 
 	sessionID := events.SessionIDFromContext(ctx)
 
+	// Inline execution: when the pool has a single actor, execute steps
+	// sequentially in the caller's goroutine to avoid deadlock.
+	if inliner, ok := t.pool.(tasks.InlineExecutor); ok && inliner.ShouldInline() {
+		return t.runInline(ctx, inliner, input, sessionID)
+	}
+
+	// Async path: submit all steps, let the scheduler handle execution.
+	return t.runAsync(ctx, input, sessionID)
+}
+
+// inlinePlanResult is the JSON shape returned by inline plan execution.
+type inlinePlanResult struct {
+	PlanID string             `json:"plan_id"`
+	Title  string             `json:"title"`
+	Status string             `json:"status"` // "completed" or "failed"
+	Tasks  []inlinePlanEntry  `json:"tasks"`
+}
+
+type inlinePlanEntry struct {
+	Step   int    `json:"step"`
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func (t *PlanTaskTool) runInline(ctx context.Context, inliner tasks.InlineExecutor, input planTaskInput, sessionID string) (string, error) {
+	taskIDs := make([]string, len(input.Steps))
+	results := make([]inlinePlanEntry, len(input.Steps))
+	overallStatus := "completed"
+
+	for i, step := range input.Steps {
+		// Convert step index dependencies to task ID dependencies
+		var deps []string
+		for _, dep := range step.DependsOn {
+			deps = append(deps, taskIDs[dep])
+		}
+
+		tools := step.Tools
+		if len(tools) == 0 {
+			tools = []string{"run_command", "git", "query_memories"}
+		}
+
+		task := &tasks.Task{
+			SessionID:   sessionID,
+			Title:       step.Title,
+			Description: step.Description,
+			DependsOn:   deps,
+			Config: tasks.TaskConfig{
+				Tools:   tools,
+				WorkDir: input.WorkDir,
+				Env:     input.Env,
+			},
+		}
+
+		output, err := inliner.ExecuteInline(ctx, task)
+		taskIDs[i] = task.ID
+
+		entry := inlinePlanEntry{
+			Step:   i,
+			TaskID: task.ID,
+			Title:  step.Title,
+		}
+
+		if err != nil {
+			entry.Status = "failed"
+			entry.Error = err.Error()
+			overallStatus = "failed"
+			results[i] = entry
+			// Short-circuit on failure: return partial results
+			results = results[:i+1]
+			break
+		}
+
+		if len(output) > 2000 {
+			output = output[:2000] + "..."
+		}
+		entry.Status = "completed"
+		entry.Output = output
+		results[i] = entry
+	}
+
+	planID := "plan_" + taskIDs[0][5:] // strip "task_" prefix
+
+	result, err := json.Marshal(inlinePlanResult{
+		PlanID: planID,
+		Title:  input.Title,
+		Status: overallStatus,
+		Tasks:  results,
+	})
+	if err != nil {
+		return "", fmt.Errorf("plan_task: marshal inline result: %w", err)
+	}
+	return string(result), nil
+}
+
+func (t *PlanTaskTool) runAsync(_ context.Context, input planTaskInput, sessionID string) (string, error) {
 	// Create tasks sequentially, mapping step indices to task IDs
 	taskIDs := make([]string, len(input.Steps))
 	entries := make([]planTaskEntry, len(input.Steps))

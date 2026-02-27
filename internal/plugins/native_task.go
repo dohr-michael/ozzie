@@ -154,6 +154,29 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		},
 	}
 
+	// Inline execution: when the pool has a single actor, async submission
+	// would deadlock. Execute synchronously instead.
+	if inliner, ok := t.pool.(tasks.InlineExecutor); ok && inliner.ShouldInline() {
+		output, err := inliner.ExecuteInline(ctx, task)
+		if err != nil {
+			result, _ := json.Marshal(map[string]any{
+				"task_id": task.ID,
+				"status":  "failed",
+				"error":   err.Error(),
+			})
+			return string(result), nil
+		}
+		if len(output) > 2000 {
+			output = output[:2000] + "..."
+		}
+		result, _ := json.Marshal(map[string]any{
+			"task_id": task.ID,
+			"status":  "completed",
+			"output":  output,
+		})
+		return string(result), nil
+	}
+
 	if err := t.pool.Submit(task); err != nil {
 		return "", fmt.Errorf("submit_task: %w", err)
 	}

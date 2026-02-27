@@ -343,3 +343,87 @@ func TestPriorityRank(t *testing.T) {
 		t.Error("normal should rank below high")
 	}
 }
+
+// --- Inline execution tests ---
+
+func TestShouldInline_SingleActor(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+	if !pool.ShouldInline() {
+		t.Error("ShouldInline: got false, want true for single actor")
+	}
+}
+
+func TestShouldInline_MultiActor(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 2},
+	})
+	if pool.ShouldInline() {
+		t.Error("ShouldInline: got true, want false for 2 actors")
+	}
+}
+
+func TestShouldInline_MultiProvider(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+		"ollama": {MaxConcurrent: 1},
+	})
+	if pool.ShouldInline() {
+		t.Error("ShouldInline: got true, want false for 2 providers (2 actors total)")
+	}
+}
+
+func TestExecuteInline_NoModelRegistry(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+	// pool.models is nil (no registry configured)
+
+	task := &tasks.Task{
+		Title:       "inline-no-registry",
+		Description: "Should fail but still create in store",
+	}
+	_, err := pool.ExecuteInline(t.Context(), task)
+	if err == nil {
+		t.Fatal("expected error when model registry is nil")
+	}
+
+	// Task should still be in store
+	got, storeErr := pool.Store().Get(task.ID)
+	if storeErr != nil {
+		t.Fatalf("task not in store: %v", storeErr)
+	}
+	if got.Status != tasks.TaskFailed {
+		t.Errorf("status: got %s, want failed", got.Status)
+	}
+}
+
+func TestExecuteInline_ForcesDisabledAutonomy(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	task := &tasks.Task{
+		Title:       "inline-autonomy",
+		Description: "Should have autonomy forced to disabled",
+		Config: tasks.TaskConfig{
+			AutonomyLevel: tasks.AutonomySupervised,
+		},
+	}
+	// This will fail (no model registry) but we can check the task config
+	_, _ = pool.ExecuteInline(t.Context(), task)
+
+	if task.Config.AutonomyLevel != tasks.AutonomyDisabled {
+		t.Errorf("autonomy: got %q, want %q", task.Config.AutonomyLevel, tasks.AutonomyDisabled)
+	}
+
+	// Also verify the task in store has disabled autonomy
+	got, err := pool.Store().Get(task.ID)
+	if err != nil {
+		t.Fatalf("task not in store: %v", err)
+	}
+	if got.Config.AutonomyLevel != tasks.AutonomyDisabled {
+		t.Errorf("store autonomy: got %q, want %q", got.Config.AutonomyLevel, tasks.AutonomyDisabled)
+	}
+}

@@ -586,6 +586,85 @@ func (p *ActorPool) ResumeTask(taskID string) error {
 	return nil
 }
 
+// ShouldInline returns true when the pool has exactly one actor, meaning async
+// submission would deadlock (the single actor is occupied by the caller).
+func (p *ActorPool) ShouldInline() bool {
+	return len(p.actors) == 1
+}
+
+// ExecuteInline runs a task synchronously in the caller's goroutine.
+// It applies the same defaults as Submit, forces AutonomyLevel to "disabled"
+// (supervised/autonomous require resume cycles impossible inline), creates the
+// task in the store, and delegates to a TaskRunner.
+func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, error) {
+	// Apply defaults (same as Submit)
+	if t.ID == "" {
+		t.ID = tasks.GenerateTaskID()
+	}
+	if t.Status == "" {
+		t.Status = tasks.TaskPending
+	}
+	if t.Priority == "" {
+		t.Priority = tasks.PriorityNormal
+	}
+	if t.MaxRetries == 0 {
+		t.MaxRetries = defaultMaxRetries
+	}
+
+	// Force disabled autonomy — supervised/autonomous need resume cycles
+	t.Config.AutonomyLevel = tasks.AutonomyDisabled
+
+	// Persist to store (needed for dependency reads)
+	if err := p.store.Create(t); err != nil {
+		return "", fmt.Errorf("inline create: %w", err)
+	}
+
+	p.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskCreatedPayload{
+		TaskID:      t.ID,
+		Title:       t.Title,
+		Description: t.Description,
+		ParentID:    t.ParentTaskID,
+	}, t.SessionID))
+
+	// Resolve model from the first (only) actor's provider
+	if p.models == nil {
+		_ = p.failTaskDirect(t, fmt.Errorf("no model registry configured"))
+		return "", fmt.Errorf("inline: no model registry configured")
+	}
+
+	actor := p.actors[0]
+	chatModel, err := p.models.Get(ctx, actor.ProviderName)
+	if err != nil {
+		_ = p.failTaskDirect(t, fmt.Errorf("get model: %w", err))
+		return "", fmt.Errorf("inline get model: %w", err)
+	}
+
+	tier := p.models.ProviderTier(actor.ProviderName)
+
+	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
+		Store:               p.store,
+		Bus:                 p.bus,
+		ChatModel:           chatModel,
+		ToolRegistry:        p.toolRegistry,
+		SkillRunner:         p.skillRunner,
+		PreemptionCheck:     func() bool { return false },
+		MaxValidationRounds: p.maxValidationRounds,
+		Middlewares:         p.taskMiddlewares,
+		Retriever:           p.retriever,
+		Tier:                tier,
+	})
+
+	if err := runner.Run(ctx); err != nil {
+		// Task is already marked failed in store by the runner
+		return "", fmt.Errorf("inline run: %w", err)
+	}
+
+	output, _ := p.store.ReadOutput(t.ID)
+	return output, nil
+}
+
+var _ tasks.InlineExecutor = (*ActorPool)(nil)
+
 // priorityRank maps task priority to a numeric rank (lower = less important).
 func priorityRank(p tasks.TaskPriority) int {
 	switch p {
