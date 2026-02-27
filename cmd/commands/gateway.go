@@ -260,6 +260,9 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
+	defer memoryRetriever.Close()
+
 	// Cross-task learning: extract reusable lessons from completed tasks
 	if pipeline != nil {
 		extractor := memory.NewExtractor(memory.ExtractorConfig{
@@ -268,12 +271,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 			TaskReader: taskStore,
 			Summarizer: &extractorLLMAdapter{chatModel: chatModel},
 			Bus:        bus,
+			Retriever:  memoryRetriever,
 		})
 		extractor.Start()
 		defer extractor.Stop()
 	}
-
-	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
 
 	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
 	pool := actors.NewActorPool(actors.ActorPoolConfig{

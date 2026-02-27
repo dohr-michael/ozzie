@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -21,6 +22,11 @@ type LLMSummarizer interface {
 	Summarize(ctx context.Context, prompt string) (string, error)
 }
 
+// DedupRetriever checks for existing similar memories before storing.
+type DedupRetriever interface {
+	Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error)
+}
+
 // ExtractorConfig configures the cross-task learning extractor.
 type ExtractorConfig struct {
 	Store      Store
@@ -28,6 +34,7 @@ type ExtractorConfig struct {
 	TaskReader TaskOutputReader
 	Summarizer LLMSummarizer
 	Bus        *events.Bus
+	Retriever  DedupRetriever // optional: dedup check before storing (nil = no dedup)
 }
 
 // Extractor listens for task.completed events and extracts reusable lessons
@@ -38,6 +45,7 @@ type Extractor struct {
 	taskReader  TaskOutputReader
 	summarizer  LLMSummarizer
 	bus         *events.Bus
+	retriever   DedupRetriever
 	ctx         context.Context
 	cancel      context.CancelFunc
 	unsubscribe func()
@@ -51,6 +59,7 @@ func NewExtractor(cfg ExtractorConfig) *Extractor {
 		taskReader: cfg.TaskReader,
 		summarizer: cfg.Summarizer,
 		bus:        cfg.Bus,
+		retriever:  cfg.Retriever,
 	}
 }
 
@@ -102,10 +111,7 @@ func (e *Extractor) extractLessons(taskID, title string) {
 		output = output[:maxOutputLen]
 	}
 
-	prompt := strings.Replace(
-		strings.Replace(extractionPrompt, "%s", title, 1),
-		"%s", output, 1,
-	)
+	prompt := fmt.Sprintf(extractionPrompt, title, output)
 
 	resp, err := e.summarizer.Summarize(e.ctx, prompt)
 	if err != nil {
@@ -120,6 +126,9 @@ func (e *Extractor) extractLessons(taskID, title string) {
 
 	now := time.Now()
 	for _, lesson := range lessons {
+		if e.isDuplicate(lesson.Title, lesson.Content) {
+			continue
+		}
 		entry := &MemoryEntry{
 			ID:         generateMemoryID(),
 			Title:      lesson.Title,
@@ -144,6 +153,31 @@ func (e *Extractor) extractLessons(taskID, title string) {
 		}
 		slog.Info("memory extractor: stored lesson", "task_id", taskID, "title", lesson.Title)
 	}
+}
+
+const dedupScoreThreshold = 0.65
+
+func (e *Extractor) isDuplicate(title, content string) bool {
+	if e.retriever == nil {
+		return false
+	}
+	query := title + " " + content
+	if runes := []rune(query); len(runes) > 300 {
+		query = string(runes[:300])
+	}
+	results, err := e.retriever.Retrieve(query, nil, 1)
+	if err != nil || len(results) == 0 {
+		return false
+	}
+	if results[0].Score >= dedupScoreThreshold {
+		slog.Debug("memory extractor: skipping duplicate",
+			"title", title,
+			"existing", results[0].Entry.Title,
+			"score", results[0].Score,
+		)
+		return true
+	}
+	return false
 }
 
 type extractedLesson struct {

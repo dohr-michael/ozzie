@@ -458,8 +458,7 @@ func TestHybridRetriever_Reinforcement(t *testing.T) {
 		t.Fatal("expected at least 1 result")
 	}
 
-	// Wait for async reinforcement goroutine
-	time.Sleep(200 * time.Millisecond)
+	hr.Wait() // wait for reinforcement goroutine
 
 	updated, _, err := store.Get("mem1")
 	if err != nil {
@@ -488,5 +487,77 @@ func TestBuildEmbedText_NoTags(t *testing.T) {
 	expected := "Simple Memory\nSome content"
 	if text != expected {
 		t.Errorf("expected %q, got %q", expected, text)
+	}
+}
+
+func TestFilterByThreshold(t *testing.T) {
+	results := []RetrievedMemory{
+		{Entry: &MemoryEntry{ID: "a"}, Score: 0.8},
+		{Entry: &MemoryEntry{ID: "b"}, Score: 0.1},
+		{Entry: &MemoryEntry{ID: "c"}, Score: 0.25},
+		{Entry: &MemoryEntry{ID: "d"}, Score: 0.24},
+	}
+	filtered := filterByThreshold(results)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 results above threshold, got %d", len(filtered))
+	}
+	if filtered[0].Entry.ID != "a" || filtered[1].Entry.ID != "c" {
+		t.Errorf("unexpected filtered IDs: %s, %s", filtered[0].Entry.ID, filtered[1].Entry.ID)
+	}
+}
+
+func TestFilterByThreshold_AllBelow(t *testing.T) {
+	results := []RetrievedMemory{
+		{Entry: &MemoryEntry{ID: "a"}, Score: 0.1},
+		{Entry: &MemoryEntry{ID: "b"}, Score: 0.2},
+	}
+	filtered := filterByThreshold(results)
+	if len(filtered) != 0 {
+		t.Fatalf("expected 0 results, got %d", len(filtered))
+	}
+}
+
+func TestHybridRetriever_DecayInReinforcement(t *testing.T) {
+	store := newMemoryStoreStub()
+	// Entry last used 30 days ago — past grace period
+	lastUsed := time.Now().Add(-30 * 24 * time.Hour)
+	entry := &MemoryEntry{
+		ID:         "mem1",
+		Title:      "Go programming",
+		Type:       MemoryFact,
+		Source:     "test",
+		Tags:       []string{"go", "programming"},
+		CreatedAt:  lastUsed,
+		UpdatedAt:  lastUsed,
+		LastUsedAt: lastUsed,
+		Confidence: 0.8,
+	}
+	_ = store.Create(entry, "Go is a great language for concurrency")
+
+	hr := NewHybridRetriever(store, nil)
+	results, err := hr.Retrieve("go programming", nil, 5)
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least 1 result")
+	}
+
+	hr.Wait() // wait for reinforcement goroutine
+
+	updated, _, err := store.Get("mem1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	// After 30 days: ~23 days past grace = ~3.28 weeks → decay = 0.8 - 0.01*3.28 ≈ 0.767
+	// Then +0.05 reinforcement → ~0.817
+	// Should be less than 0.85 (no-decay: 0.8+0.05)
+	if updated.Confidence >= 0.85 {
+		t.Errorf("expected decayed+reinforced confidence < 0.85, got %f", updated.Confidence)
+	}
+	// Should be greater than 0.8 (decay alone would lower, but reinforce brings it up)
+	if updated.Confidence <= 0.8 {
+		t.Errorf("expected confidence > 0.8 after reinforce, got %f", updated.Confidence)
 	}
 }

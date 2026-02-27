@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 )
 
 const (
-	keywordWeight  = 0.3
-	semanticWeight = 0.7
+	keywordWeight     = 0.3
+	semanticWeight    = 0.7
+	minRetrievalScore = 0.25
 )
 
 // HybridRetriever combines keyword and semantic search for memory retrieval.
@@ -18,16 +20,34 @@ type HybridRetriever struct {
 	store   Store
 	keyword *Retriever
 	vector  *VectorStore
+	mu      sync.Mutex     // serializes reinforcement updates
+	wg      sync.WaitGroup // tracks in-flight reinforcement goroutines
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // NewHybridRetriever creates a hybrid retriever.
 // vector may be nil, in which case only keyword retrieval is used.
 func NewHybridRetriever(store Store, vector *VectorStore) *HybridRetriever {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &HybridRetriever{
 		store:   store,
 		keyword: NewRetriever(store),
 		vector:  vector,
+		ctx:     ctx,
+		cancel:  cancel,
 	}
+}
+
+// Close cancels pending reinforcement goroutines and waits for completion.
+func (hr *HybridRetriever) Close() {
+	hr.cancel()
+	hr.wg.Wait()
+}
+
+// Wait blocks until all pending reinforcement goroutines complete.
+func (hr *HybridRetriever) Wait() {
+	hr.wg.Wait()
 }
 
 // Retrieve finds the most relevant memories using hybrid scoring.
@@ -40,10 +60,15 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 	// Keyword-only fallback when vector store is not available
 	if hr.vector == nil {
 		results, err := hr.keyword.Retrieve(query, tags, limit)
-		if err == nil && len(results) > 0 {
+		if err != nil {
+			return nil, err
+		}
+		results = filterByThreshold(results)
+		if len(results) > 0 {
+			hr.wg.Add(1)
 			go hr.reinforceResults(results)
 		}
-		return results, err
+		return results, nil
 	}
 
 	// Fetch expanded result sets from both sources
@@ -56,16 +81,25 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 
 	semanticResults, err := hr.vector.Query(context.Background(), query, fetchLimit)
 	if err != nil {
-		// Graceful degradation: fall back to keyword-only on vector error
-		results, kwErr := hr.keyword.Retrieve(query, tags, limit)
-		if kwErr == nil && len(results) > 0 {
+		// Graceful degradation: reuse keyword results already fetched
+		results := keywordResults
+		if len(results) > limit {
+			results = results[:limit]
+		}
+		results = filterByThreshold(results)
+		if len(results) > 0 {
+			hr.wg.Add(1)
 			go hr.reinforceResults(results)
 		}
-		return results, kwErr
+		return results, nil
 	}
 
 	merged := hr.mergeResults(keywordResults, semanticResults, limit)
-	go hr.reinforceResults(merged)
+	merged = filterByThreshold(merged)
+	if len(merged) > 0 {
+		hr.wg.Add(1)
+		go hr.reinforceResults(merged)
+	}
 	return merged, nil
 }
 
@@ -141,18 +175,40 @@ func (hr *HybridRetriever) mergeResults(keywordResults []RetrievedMemory, semant
 }
 
 // reinforceResults updates LastUsedAt and Confidence for retrieved memories.
+// Applies decay before reinforcement so stale memories lose confidence over time.
 // Fire-and-forget: errors are logged but do not affect retrieval.
 func (hr *HybridRetriever) reinforceResults(results []RetrievedMemory) {
+	defer hr.wg.Done()
 	now := time.Now()
 	for _, r := range results {
+		if hr.ctx.Err() != nil {
+			return
+		}
+		hr.mu.Lock()
 		entry, content, err := hr.store.Get(r.Entry.ID)
 		if err != nil || entry == nil {
+			hr.mu.Unlock()
 			continue
 		}
-		entry.LastUsedAt = now
+		// Apply decay before reinforcement
+		entry.Confidence = ApplyDecay(entry.Confidence, entry.LastUsedAt, now)
+		// Then reinforce
 		entry.Confidence = min(entry.Confidence+0.05, 1.0)
+		entry.LastUsedAt = now
 		if err := hr.store.Update(entry, content); err != nil {
 			slog.Debug("reinforce memory failed", "id", r.Entry.ID, "error", err)
 		}
+		hr.mu.Unlock()
 	}
+}
+
+// filterByThreshold removes results below the minimum retrieval score.
+func filterByThreshold(results []RetrievedMemory) []RetrievedMemory {
+	var filtered []RetrievedMemory
+	for _, r := range results {
+		if r.Score >= minRetrievalScore {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }

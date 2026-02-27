@@ -2,11 +2,30 @@
 package memory
 
 import (
+	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+const (
+	decayGracePeriod = 7 * 24 * time.Hour // no decay for 7 days after last use
+	decayRate        = 0.01               // per week after grace period
+	decayFloor       = 0.1                // never below 0.1
+)
+
+// ApplyDecay reduces confidence based on time since last use.
+// Grace period of 7 days, then -0.01 per week. Floor at 0.1.
+func ApplyDecay(confidence float64, lastUsedAt time.Time, now time.Time) float64 {
+	idle := now.Sub(lastUsedAt)
+	if idle <= decayGracePeriod {
+		return confidence
+	}
+	weeksIdle := (idle - decayGracePeriod).Hours() / (7 * 24)
+	decayed := confidence - decayRate*weeksIdle
+	return math.Max(decayed, decayFloor)
+}
 
 // MemoryType categorizes a memory entry.
 type MemoryType string

@@ -2,11 +2,25 @@ package memory
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 )
+
+// waitFor polls condition until it returns true or timeout expires.
+func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
+}
 
 func TestParseLessons_ValidJSON(t *testing.T) {
 	input := `[{"title":"Use go test -race","content":"Always run race detector for concurrent code","tags":["go","testing"]}]`
@@ -72,6 +86,142 @@ func TestParseLessons_SkipsEmptyEntries(t *testing.T) {
 	}
 }
 
+// --- Dedup tests ---
+
+// mockDedupRetriever returns a fixed score for any query.
+type mockDedupRetriever struct {
+	score float64
+	title string
+}
+
+func (m *mockDedupRetriever) Retrieve(_ string, _ []string, _ int) ([]RetrievedMemory, error) {
+	if m.score == 0 {
+		return nil, nil
+	}
+	return []RetrievedMemory{
+		{Entry: &MemoryEntry{ID: "existing", Title: m.title}, Score: m.score},
+	}, nil
+}
+
+func TestExtractor_DedupSkipsDuplicate(t *testing.T) {
+	store := newMemoryStoreStub()
+	bus := events.NewBus(16)
+	defer bus.Close()
+
+	taskReader := &mockTaskReader{
+		outputs: map[string]string{
+			"task-1": "Some task output",
+		},
+	}
+	summarizer := &mockSummarizer{
+		response: `[{"title":"Use bcrypt","content":"Always use bcrypt for hashing","tags":["security"]}]`,
+	}
+
+	extractor := NewExtractor(ExtractorConfig{
+		Store:      store,
+		TaskReader: taskReader,
+		Summarizer: summarizer,
+		Bus:        bus,
+		Retriever:  &mockDedupRetriever{score: 0.8, title: "Use bcrypt"},
+	})
+	extractor.Start()
+	defer extractor.Stop()
+
+	bus.Publish(events.NewTypedEvent(
+		events.SourceTask,
+		events.TaskCompletedPayload{TaskID: "task-1", Title: "Auth task"},
+	))
+
+	// Wait for extraction to run (summarizer called proves extractLessons executed)
+	waitFor(t, 5*time.Second, func() bool { return summarizer.calls.Load() > 0 })
+	time.Sleep(50 * time.Millisecond) // allow post-summarize code to complete
+
+	entries, _ := store.List()
+	if len(entries) != 0 {
+		t.Errorf("expected 0 stored memories (duplicate skipped), got %d", len(entries))
+	}
+}
+
+func TestExtractor_DedupAllowsNew(t *testing.T) {
+	store := newMemoryStoreStub()
+	bus := events.NewBus(16)
+	defer bus.Close()
+
+	taskReader := &mockTaskReader{
+		outputs: map[string]string{
+			"task-2": "Some other output",
+		},
+	}
+	summarizer := &mockSummarizer{
+		response: `[{"title":"New lesson","content":"Something new","tags":["misc"]}]`,
+	}
+
+	extractor := NewExtractor(ExtractorConfig{
+		Store:      store,
+		TaskReader: taskReader,
+		Summarizer: summarizer,
+		Bus:        bus,
+		Retriever:  &mockDedupRetriever{score: 0.3, title: "Unrelated"},
+	})
+	extractor.Start()
+	defer extractor.Stop()
+
+	bus.Publish(events.NewTypedEvent(
+		events.SourceTask,
+		events.TaskCompletedPayload{TaskID: "task-2", Title: "New task"},
+	))
+
+	waitFor(t, 5*time.Second, func() bool {
+		entries, _ := store.List()
+		return len(entries) >= 1
+	})
+
+	entries, _ := store.List()
+	if len(entries) != 1 {
+		t.Errorf("expected 1 stored memory (not a duplicate), got %d", len(entries))
+	}
+}
+
+func TestExtractor_DedupNilRetriever(t *testing.T) {
+	store := newMemoryStoreStub()
+	bus := events.NewBus(16)
+	defer bus.Close()
+
+	taskReader := &mockTaskReader{
+		outputs: map[string]string{
+			"task-3": "Output",
+		},
+	}
+	summarizer := &mockSummarizer{
+		response: `[{"title":"Lesson","content":"Content","tags":[]}]`,
+	}
+
+	extractor := NewExtractor(ExtractorConfig{
+		Store:      store,
+		TaskReader: taskReader,
+		Summarizer: summarizer,
+		Bus:        bus,
+		Retriever:  nil, // no dedup
+	})
+	extractor.Start()
+	defer extractor.Stop()
+
+	bus.Publish(events.NewTypedEvent(
+		events.SourceTask,
+		events.TaskCompletedPayload{TaskID: "task-3", Title: "Task"},
+	))
+
+	waitFor(t, 5*time.Second, func() bool {
+		entries, _ := store.List()
+		return len(entries) >= 1
+	})
+
+	entries, _ := store.List()
+	if len(entries) != 1 {
+		t.Errorf("expected 1 stored memory (nil retriever = no dedup), got %d", len(entries))
+	}
+}
+
 // --- Integration test with mocks ---
 
 type mockTaskReader struct {
@@ -84,9 +234,11 @@ func (m *mockTaskReader) ReadOutput(taskID string) (string, error) {
 
 type mockSummarizer struct {
 	response string
+	calls    atomic.Int32
 }
 
 func (m *mockSummarizer) Summarize(_ context.Context, _ string) (string, error) {
+	m.calls.Add(1)
 	return m.response, nil
 }
 
@@ -124,8 +276,10 @@ func TestExtractor_ExtractsAndStoresLessons(t *testing.T) {
 		},
 	))
 
-	// Wait for async extraction
-	time.Sleep(300 * time.Millisecond)
+	waitFor(t, 5*time.Second, func() bool {
+		entries, _ := store.List()
+		return len(entries) >= 1
+	})
 
 	entries, err := store.List()
 	if err != nil {
