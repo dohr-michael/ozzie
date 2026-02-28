@@ -82,6 +82,9 @@ type PromptRequestPayload struct {
 	Default     any            `json:"default,omitempty"`
 	Validation  string         `json:"validation,omitempty"`
 	Placeholder string         `json:"placeholder,omitempty"`
+	HelpText    string         `json:"help_text,omitempty"`
+	MinSelect   int            `json:"min_select,omitempty"`
+	MaxSelect   int            `json:"max_select,omitempty"`
 	Token       string         `json:"token"`
 	Context     map[string]any `json:"context,omitempty"`
 }

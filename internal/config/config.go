@@ -14,6 +14,48 @@ type Config struct {
 	Tools   ToolsConfig   `json:"tools"`
 	Sandbox SandboxConfig `json:"sandbox"`
 	Runtime RuntimeConfig `json:"runtime"`
+	Web     WebConfig     `json:"web"`
+}
+
+// WebConfig configures web search and fetch capabilities.
+type WebConfig struct {
+	Search WebSearchConfig `json:"search"`
+	Fetch  WebFetchConfig  `json:"fetch"`
+}
+
+// WebSearchConfig configures the web search tool.
+type WebSearchConfig struct {
+	Enabled      *bool  `json:"enabled"`                // default: true
+	Provider     string `json:"provider"`               // "duckduckgo" (default) | "google" | "bing"
+	Timeout      string `json:"timeout,omitempty"`      // default: "30s"
+	MaxResults   int    `json:"max_results"`            // default: 10
+	GoogleAPIKey string `json:"google_api_key,omitempty"`
+	GoogleCX     string `json:"google_cx,omitempty"`
+	BingAPIKey   string `json:"bing_api_key,omitempty"`
+}
+
+// IsSearchEnabled returns true if web search is enabled (default: true).
+func (c WebSearchConfig) IsSearchEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
+}
+
+// WebFetchConfig configures the web fetch tool.
+type WebFetchConfig struct {
+	Enabled   *bool  `json:"enabled"`           // default: true
+	Timeout   string `json:"timeout,omitempty"`  // default: "30s"
+	MaxBodyKB int    `json:"max_body_kb"`        // default: 512
+	UserAgent string `json:"user_agent,omitempty"`
+}
+
+// IsFetchEnabled returns true if web fetch is enabled (default: true).
+func (c WebFetchConfig) IsFetchEnabled() bool {
+	if c.Enabled == nil {
+		return true
+	}
+	return *c.Enabled
 }
 
 // RuntimeConfig configures the runtime environment awareness.

@@ -60,7 +60,11 @@ func NewAnthropic(ctx context.Context, cfg config.ProviderConfig, auth ResolvedA
 	if cfg.Timeout.Duration() > 0 {
 		opts = append(opts, option.WithRequestTimeout(cfg.Timeout.Duration()))
 	} else {
-		opts = append(opts, option.WithRequestTimeout(60*time.Second))
+		// 5 minutes: streaming responses need a generous timeout because
+		// the HTTP timeout covers the entire request+response lifecycle,
+		// including SSE stream reading which can take minutes for complex
+		// tool-augmented conversations.
+		opts = append(opts, option.WithRequestTimeout(5*time.Minute))
 	}
 
 	return &AnthropicChatModel{

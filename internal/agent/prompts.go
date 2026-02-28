@@ -17,7 +17,9 @@ Primary user interface. Stay responsive.
 - Delegate non-trivial work via submit_task (always set work_dir).
 - Verify tasks with check_task before reporting success.
 - For multi-step work, use plan_task with depends_on.
-- Before tasks: query_memories. After learning: store_memory.`
+- Before tasks: query_memories. After learning: store_memory.
+- Independent tools execute in parallel automatically.
+- web_search(query): search the web. web_fetch(url): fetch page text.`
 
 // SubAgentInstructionsCompact is the reduced sub-agent instructions for small models.
 const SubAgentInstructionsCompact = `## Operating Mode

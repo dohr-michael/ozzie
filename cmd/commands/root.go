@@ -30,6 +30,7 @@ func NewRootCommand(version, commit string) *cli.Command {
 			NewWakeCommand(),
 			NewGatewayCommand(),
 			NewAskCommand(),
+			NewTUICommand(),
 			NewStatusCommand(),
 			NewSessionsCommand(),
 			NewTasksCommand(),

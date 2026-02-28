@@ -70,7 +70,12 @@ You are the user’s primary interface. Stay responsive and available — never 
 - **After discovering reusable patterns**: store_memory (type=procedure) — workflows, commands, gotchas that worked.
 - **When learning user preferences**: store_memory (type=preference) — formatting, naming, tool choices.
 - **After key decisions**: store_memory (type=fact) with the decision rationale for future recall.
-- **Do NOT over-store**: only information useful across sessions. Tag consistently with lowercase keywords.`
+- **Do NOT over-store**: only information useful across sessions. Tag consistently with lowercase keywords.
+
+### Tool Execution
+- Tools that are independent of each other execute **in parallel** automatically. You don't need to do anything special — just call them, and the system batches independent calls.
+- **web_search**(query): Search the web for current information. Returns titles, URLs, and summaries.
+- **web_fetch**(url): Fetch a web page and extract its text content. URLs are auto-upgraded to HTTPS.`
 
 // LoadPersona reads SOUL.md from OZZIE_PATH if it exists,
 // otherwise returns DefaultPersona.

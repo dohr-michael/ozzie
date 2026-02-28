@@ -159,6 +159,30 @@ func (c *Client) RespondToPromptWithValue(token string, value string) error {
 	return c.conn.Write(c.ctx, websocket.MessageText, data)
 }
 
+// RespondToPromptWithValues sends a prompt_response with multiple values (for multi-select prompts).
+func (c *Client) RespondToPromptWithValues(token string, values []string) error {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	params, _ := json.Marshal(map[string]any{
+		"token":  token,
+		"values": values,
+	})
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: string(wsprotocol.MethodPromptResponse),
+		Params: params,
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return fmt.Errorf("marshal prompt_response: %w", err)
+	}
+
+	return c.conn.Write(c.ctx, websocket.MessageText, data)
+}
+
 // AcceptAllTools sends an accept_all_tools request to enable auto-approval
 // of all dangerous tools for the current session.
 func (c *Client) AcceptAllTools() error {

@@ -199,3 +199,28 @@ func TestOzzieBackend_Edit_MultipleOccurrences(t *testing.T) {
 		t.Errorf("expected 'bar bar bar', got %q", string(data))
 	}
 }
+
+func TestOzzieBackend_GlobInfo_Recursive(t *testing.T) {
+	dir := t.TempDir()
+	// Create nested structure
+	os.MkdirAll(filepath.Join(dir, "a", "b"), 0o755)
+	os.WriteFile(filepath.Join(dir, "top.go"), []byte("package top"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a", "mid.go"), []byte("package mid"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a", "b", "deep.go"), []byte("package deep"), 0o644)
+	os.WriteFile(filepath.Join(dir, "a", "b", "deep.txt"), []byte("not go"), 0o644)
+
+	b := NewOzzieBackend()
+	files, err := b.GlobInfo(ctxWithWorkDir(dir), &filesystem.GlobInfoRequest{
+		Pattern: "**/*.go",
+		Path:    dir,
+	})
+	if err != nil {
+		t.Fatalf("GlobInfo recursive: %v", err)
+	}
+	if len(files) != 3 {
+		t.Errorf("expected 3 .go files across all levels, got %d", len(files))
+		for _, f := range files {
+			t.Logf("  %s", f.Path)
+		}
+	}
+}

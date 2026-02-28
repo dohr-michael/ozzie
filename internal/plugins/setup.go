@@ -33,7 +33,31 @@ func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus *events.Bus)
 		slog.Warn("failed to register git tool", "error", err)
 	}
 
+	// Register web tools (search + fetch)
+	RegisterWebTools(ctx, cfg, registry)
+
 	return registry, nil
+}
+
+// RegisterWebTools registers web_search and web_fetch native tools.
+func RegisterWebTools(ctx context.Context, cfg *config.Config, registry *ToolRegistry) {
+	if cfg.Web.Search.IsSearchEnabled() {
+		searchTool, err := NewWebSearchTool(ctx, cfg.Web.Search)
+		if err != nil {
+			slog.Warn("failed to create web_search tool", "error", err)
+		} else {
+			if err := registry.RegisterNative("web_search", searchTool, WebSearchManifest()); err != nil {
+				slog.Warn("failed to register web_search tool", "error", err)
+			}
+		}
+	}
+
+	if cfg.Web.Fetch.IsFetchEnabled() {
+		fetchTool := NewWebFetchTool(cfg.Web.Fetch)
+		if err := registry.RegisterNative("web_fetch", fetchTool, WebFetchManifest()); err != nil {
+			slog.Warn("failed to register web_fetch tool", "error", err)
+		}
+	}
 }
 
 // WrapRegistrySandbox wraps exec and filesystem tools with sandbox validation.

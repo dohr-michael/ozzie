@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cloudwego/eino/adk/filesystem"
 
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -201,6 +202,7 @@ func (b *OzzieBackend) GrepRaw(ctx context.Context, req *filesystem.GrepRequest)
 }
 
 // GlobInfo returns file information matching the glob pattern.
+// Uses doublestar for recursive ** glob support (e.g. "**/*.go").
 func (b *OzzieBackend) GlobInfo(ctx context.Context, req *filesystem.GlobInfoRequest) ([]filesystem.FileInfo, error) {
 	basePath := b.resolvePath(ctx, req.Path)
 	if basePath == "" {
@@ -208,7 +210,7 @@ func (b *OzzieBackend) GlobInfo(ctx context.Context, req *filesystem.GlobInfoReq
 	}
 
 	pattern := filepath.Join(basePath, req.Pattern)
-	matches, err := filepath.Glob(pattern)
+	matches, err := doublestar.FilepathGlob(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("glob: %w", err)
 	}

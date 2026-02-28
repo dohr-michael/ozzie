@@ -29,7 +29,7 @@ func NewOpenAI(ctx context.Context, cfg config.ProviderConfig, auth ResolvedAuth
 	if cfg.Timeout.Duration() > 0 {
 		modelConfig.Timeout = cfg.Timeout.Duration()
 	} else {
-		modelConfig.Timeout = 60 * time.Second
+		modelConfig.Timeout = 5 * time.Minute
 	}
 
 	if cfg.Options != nil {
