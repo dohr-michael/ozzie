@@ -302,12 +302,28 @@ func (z *InputZone) View() string {
 	return ""
 }
 
+// separator returns a full-width ─── line.
+func (z *InputZone) separator() string {
+	w := z.width
+	if w <= 0 {
+		w = 80
+	}
+	return InputSeparatorStyle.Render(strings.Repeat("─", w))
+}
+
+// wrapWithSeparators wraps content between two separator lines.
+func (z *InputZone) wrapWithSeparators(content string) string {
+	sep := z.separator()
+	return sep + "\n" + content + "\n" + sep
+}
+
 func (z *InputZone) renderDisabled() string {
-	return DisabledStyle.Render("  Waiting for response...")
+	return z.wrapWithSeparators(DisabledStyle.Render("  Waiting for response..."))
 }
 
 func (z *InputZone) renderChat() string {
-	return z.textInput.View()
+	sep := z.separator()
+	return sep + "\n" + InputPromptCharStyle.Render("❯ ") + z.textInput.View() + "\n" + sep
 }
 
 // renderCompletedFields renders the completed workflow fields inline.
@@ -353,7 +369,7 @@ func (z *InputZone) renderText() string {
 	b.WriteString(z.renderQuestionHeader())
 
 	// Input with prompt
-	b.WriteString("> ")
+	b.WriteString(InputPromptCharStyle.Render("❯ "))
 	b.WriteString(z.textInput.View())
 
 	// Error
@@ -365,7 +381,7 @@ func (z *InputZone) renderText() string {
 	b.WriteString("\n")
 	b.WriteString(z.renderHint("enter=submit • esc=cancel"))
 
-	return b.String()
+	return z.wrapWithSeparators(b.String())
 }
 
 func (z *InputZone) renderSelect() string {
@@ -389,7 +405,7 @@ func (z *InputZone) renderSelect() string {
 
 	b.WriteString(z.renderHint("↑↓=navigate • enter=select • esc=cancel"))
 
-	return b.String()
+	return z.wrapWithSeparators(b.String())
 }
 
 func (z *InputZone) renderMulti() string {
@@ -418,7 +434,7 @@ func (z *InputZone) renderMulti() string {
 
 	b.WriteString(z.renderHint("↑↓=navigate • space=toggle • enter=submit • esc=cancel"))
 
-	return b.String()
+	return z.wrapWithSeparators(b.String())
 }
 
 func (z *InputZone) renderConfirm() string {
@@ -443,7 +459,7 @@ func (z *InputZone) renderConfirm() string {
 
 	b.WriteString(z.renderHint("y/n or ↑↓ + enter • esc=cancel"))
 
-	return b.String()
+	return z.wrapWithSeparators(b.String())
 }
 
 // Reset returns to chat mode.

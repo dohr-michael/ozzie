@@ -6,12 +6,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Header displays LLM context and token usage.
+// Header displays LLM context and token usage as a compact footer.
 type Header struct {
 	width      int
 	provider   string // e.g., "ollama", "anthropic", "openai"
 	model      string // e.g., "llama3.1", "claude-sonnet"
-	endpoint   string // e.g., "localhost:11434" (for ollama)
+	endpoint   string // kept for API compat but not rendered
 	tokensUsed int
 	streaming  bool
 }
@@ -61,40 +61,32 @@ func (h *Header) Update(msg tea.Msg) (*Header, tea.Cmd) {
 	return h, nil
 }
 
-// View renders the header.
+// View renders the footer as a compact single-line bar.
+// Format: model │ 12 345 tokens │ ● streaming
 func (h *Header) View() string {
-	// Build left side: provider | model | endpoint
-	var left strings.Builder
-	left.WriteString(HeaderProviderStyle.Render(h.provider))
-	if h.model != "" {
-		left.WriteString(" | ")
-		left.WriteString(HeaderModelStyle.Render(h.model))
+	sep := FooterSeparatorStyle.Render(" │ ")
+
+	var segments []string
+
+	// Model name (or provider as fallback)
+	name := h.model
+	if name == "" {
+		name = h.provider
 	}
-	if h.endpoint != "" {
-		left.WriteString(" | ")
-		left.WriteString(HeaderEndpointStyle.Render(h.endpoint))
+	if name != "" {
+		segments = append(segments, HeaderModelStyle.Render(name))
 	}
 
-	// Build right side: streaming indicator + tokens
-	var right strings.Builder
-	if h.streaming {
-		right.WriteString(HeaderStreamStyle.Render("● "))
-	}
+	// Token count
 	if h.tokensUsed > 0 {
-		right.WriteString(HeaderTokenStyle.Render(FormatTokenCount(h.tokensUsed)))
+		segments = append(segments, HeaderTokenStyle.Render(FormatTokenCount(h.tokensUsed)+" tokens"))
 	}
 
-	leftStr := left.String()
-	rightStr := right.String()
-
-	// Calculate padding
-	leftWidth := len(h.provider) + len(h.model) + len(h.endpoint) + 6 // rough estimate
-	rightWidth := len(rightStr)
-	padding := h.width - leftWidth - rightWidth - 2 // -2 for padding
-	if padding < 1 {
-		padding = 1
+	// Streaming indicator
+	if h.streaming {
+		segments = append(segments, HeaderStreamStyle.Render("● streaming"))
 	}
 
-	content := leftStr + strings.Repeat(" ", padding) + rightStr
+	content := strings.Join(segments, sep)
 	return HeaderStyle.Width(h.width).Render(content)
 }

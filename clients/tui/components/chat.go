@@ -570,20 +570,13 @@ func (c *Chat) renderGroupWithRegion(g MessageGroup, groupIdx, startLine int) st
 	return b.String()
 }
 
-// renderWelcome renders the welcome message.
+// renderWelcome renders the welcome message (clean, no box).
 func (c *Chat) renderWelcome() string {
 	var b strings.Builder
-	b.WriteString(WelcomeTitleStyle.Render("╭─────────────────────────────────────────╮"))
-	b.WriteString("\n")
-	b.WriteString(WelcomeTitleStyle.Render("│") + "  " + WelcomeTitleStyle.Render("Ozzie") + "                                   " + WelcomeTitleStyle.Render("│"))
-	b.WriteString("\n")
-	b.WriteString(WelcomeTitleStyle.Render("╰─────────────────────────────────────────╯"))
+	b.WriteString(WelcomeTitleStyle.Render("Ozzie"))
+	b.WriteString(WelcomeSubtitleStyle.Render(" — Your personal AI agent operating system."))
 	b.WriteString("\n\n")
-	b.WriteString(WelcomeSubtitleStyle.Render("  Your personal AI agent operating system."))
-	b.WriteString("\n")
-	b.WriteString(WelcomeSubtitleStyle.Render("  Ask me anything, I'm here to help."))
-	b.WriteString("\n\n")
-	b.WriteString(HelpTextStyle.Render("  Tips: Ctrl+C to quit • Ctrl+L to clear • Click tools to expand/collapse"))
+	b.WriteString(HelpTextStyle.Render("  Tips: Ctrl+C to quit • Ctrl+L to clear"))
 
 	return b.String()
 }
@@ -598,9 +591,8 @@ func (c *Chat) renderCurrentInteraction() string {
 		b.WriteString("\n\n")
 	}
 
-	// Streaming content
+	// Streaming content (no prefix — markdown flows naturally)
 	if c.streaming != "" {
-		b.WriteString(RolePrefix("assistant"))
 		b.WriteString(c.streaming)
 		b.WriteString(SpinnerStyle.Render("▌"))
 		b.WriteString("\n")
@@ -615,9 +607,9 @@ func (c *Chat) renderCurrentInteraction() string {
 	return b.String()
 }
 
-// renderUserMessage renders a user message.
+// renderUserMessage renders a user message with ❯ prefix.
 func (c *Chat) renderUserMessage(content string) string {
-	prefix := UserStyle.Render("› ")
+	prefix := InputPromptCharStyle.Render("❯ ")
 	wrapped := c.wrapText(content, c.width-4)
 	lines := strings.Split(wrapped, "\n")
 
@@ -667,55 +659,32 @@ func (c *Chat) renderInterimMessages(messages []InterimMessage) string {
 
 // renderCollapsedTools renders collapsed tool summary.
 func (c *Chat) renderCollapsedTools(tools []ToolCall) string {
-	successCount := 0
 	failCount := 0
-	confirmedCount := 0
-	deniedCount := 0
-
 	for _, t := range tools {
 		switch t.Status {
-		case ToolStatusConfirmed:
-			confirmedCount++
-		case ToolStatusDenied:
-			deniedCount++
 		case ToolStatusFailed:
 			failCount++
-		case ToolStatusCompleted:
-			successCount++
 		default:
 			if t.Error != nil {
 				failCount++
-			} else if t.Completed {
-				successCount++
 			}
 		}
 	}
 
-	_ = successCount // used for summary if needed later
-
-	icon := "▶"
-	summary := fmt.Sprintf(" %d tool(s)", len(tools))
-
-	var details []string
-	if confirmedCount > 0 {
-		details = append(details, fmt.Sprintf("%d confirmed", confirmedCount))
-	}
-	if deniedCount > 0 {
-		details = append(details, fmt.Sprintf("%d denied", deniedCount))
-	}
+	summary := fmt.Sprintf("▸ %d tool calls", len(tools))
 	if failCount > 0 {
-		details = append(details, fmt.Sprintf("%d failed", failCount))
+		summary += fmt.Sprintf(" (%d failed)", failCount)
 	}
 
-	if len(details) > 0 {
-		summary += " (" + strings.Join(details, ", ") + ")"
-	}
-	summary += " [click to expand]"
-
-	return ToolCollapsedStyle.Render(icon + summary)
+	return ToolCollapsedStyle.Render(summary)
 }
 
-// renderExpandedTools renders expanded tool calls.
+// renderExpandedTools renders expanded tool calls in Claude Code style.
+// Format:
+//
+//	⏺ ToolName(args)
+//	  ⎿  result line 1
+//	  ⎿  result line 2
 func (c *Chat) renderExpandedTools(tools []ToolCall) string {
 	var b strings.Builder
 
@@ -724,55 +693,75 @@ func (c *Chat) renderExpandedTools(tools []ToolCall) string {
 			b.WriteString("\n")
 		}
 
-		// Render based on status
+		// Bullet color depends on status
+		var bullet string
 		switch tool.Status {
 		case ToolStatusAwaitingConfirmation:
-			b.WriteString(ConfirmWaitStyle.Render("⏳ " + tool.Name + " (awaiting confirmation)"))
-
+			bullet = ConfirmWaitStyle.Render("⏺ ")
 		case ToolStatusConfirmed:
-			b.WriteString(ConfirmApprovedStyle.Render("✓ " + tool.Name + " (confirmed)"))
-
+			bullet = ConfirmApprovedStyle.Render("⏺ ")
 		case ToolStatusDenied:
-			b.WriteString(ConfirmDeniedStyle.Render("⊘ " + tool.Name + " (denied by user)"))
-
+			bullet = ConfirmDeniedStyle.Render("⏺ ")
 		case ToolStatusFailed:
-			b.WriteString(ToolErrorStyle.Render("✗ " + tool.Name))
-
+			bullet = ToolErrorStyle.Render("⏺ ")
 		case ToolStatusCompleted:
-			b.WriteString(ToolSuccessStyle.Render("✓ " + tool.Name))
-
-		default: // Running or Pending
-			if tool.Completed {
-				if tool.Error != nil {
-					b.WriteString(ToolErrorStyle.Render("✗ " + tool.Name))
-				} else {
-					b.WriteString(ToolSuccessStyle.Render("✓ " + tool.Name))
-				}
+			bullet = ToolBulletStyle.Render("⏺ ")
+		default:
+			if tool.Completed && tool.Error != nil {
+				bullet = ToolErrorStyle.Render("⏺ ")
+			} else if !tool.Completed {
+				bullet = ToolBulletStyle.Render("⏺ ")
 			} else {
-				b.WriteString(ToolSpinnerStyle.Render("◐ " + tool.Name + " ..."))
+				bullet = ToolBulletStyle.Render("⏺ ")
 			}
 		}
 
-		// Arguments (truncated)
+		// Name(args) or Name ...
+		name := ToolNameStyle.Render(tool.Name)
 		if tool.Arguments != "" {
 			args := TruncateString(tool.Arguments, 60)
-			b.WriteString(ToolResultStyle.Render(" (" + args + ")"))
+			b.WriteString(bullet + name + ToolArgsStyle.Render("("+args+")"))
+		} else {
+			b.WriteString(bullet + name)
 		}
 
-		// Result (if completed and has result)
-		if tool.Completed && tool.Result != "" {
-			b.WriteString("\n")
-			result := c.wrapText(tool.Result, c.width-4)
-			lines := strings.Split(result, "\n")
-			for _, line := range lines {
-				b.WriteString("  " + ToolResultStyle.Render(line) + "\n")
+		// Running indicator
+		if !tool.Completed && tool.Status != ToolStatusAwaitingConfirmation &&
+			tool.Status != ToolStatusConfirmed && tool.Status != ToolStatusDenied {
+			b.WriteString(ToolArgsStyle.Render(" ..."))
+		}
+
+		// Status suffix for special states
+		switch tool.Status {
+		case ToolStatusAwaitingConfirmation:
+			b.WriteString(ConfirmWaitStyle.Render(" (awaiting confirmation)"))
+		case ToolStatusDenied:
+			b.WriteString(ConfirmDeniedStyle.Render(" (denied)"))
+		}
+
+		// Result lines with ⎿ prefix
+		if tool.Completed && tool.Error == nil {
+			resultPrefix := ToolResultPrefixStyle.Render("  ⎿  ")
+			if tool.Result == "" {
+				b.WriteString("\n" + resultPrefix + ToolResultStyle.Render("(No output)"))
+			} else {
+				result := c.wrapText(tool.Result, c.width-6)
+				lines := strings.Split(result, "\n")
+				maxLines := 10
+				for j, line := range lines {
+					if j >= maxLines {
+						b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(fmt.Sprintf("... (%d more lines)", len(lines)-maxLines)))
+						break
+					}
+					b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(line))
+				}
 			}
 		}
 
-		// Error
+		// Error with ⎿ prefix
 		if tool.Error != nil {
-			b.WriteString("\n")
-			b.WriteString("  " + ToolErrorStyle.Render("Error: "+tool.Error.Error()))
+			resultPrefix := ToolResultPrefixStyle.Render("  ⎿  ")
+			b.WriteString("\n" + resultPrefix + ToolErrorStyle.Render(tool.Error.Error()))
 		}
 	}
 
@@ -781,7 +770,7 @@ func (c *Chat) renderExpandedTools(tools []ToolCall) string {
 
 // renderThinking renders the thinking indicator.
 func (c *Chat) renderThinking() string {
-	return ThinkingStyle.Render("● Thinking...")
+	return ToolBulletStyle.Render("⏺ ") + ThinkingStyle.Render("Thinking...")
 }
 
 // wrapText wraps text to the specified width.

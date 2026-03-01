@@ -96,6 +96,12 @@ var (
 				Foreground(Muted).
 				Italic(true)
 
+	// Tool rendering - Claude Code style
+	ToolBulletStyle       = lipgloss.NewStyle().Foreground(Warning)
+	ToolNameStyle         = lipgloss.NewStyle().Bold(true).Foreground(Text)
+	ToolArgsStyle         = lipgloss.NewStyle().Foreground(Muted)
+	ToolResultPrefixStyle = lipgloss.NewStyle().Foreground(Muted)
+
 	// Confirmation status styles
 	ConfirmWaitStyle = lipgloss.NewStyle().
 				Foreground(Warning)
@@ -117,6 +123,10 @@ var (
 	PromptStyle = lipgloss.NewStyle().
 			Foreground(Primary).
 			Bold(true)
+
+	// Input - Claude Code style
+	InputSeparatorStyle  = lipgloss.NewStyle().Foreground(Border)
+	InputPromptCharStyle = lipgloss.NewStyle().Foreground(Primary).Bold(true)
 
 	// LabelStyle for field labels
 	LabelStyle = lipgloss.NewStyle().
@@ -169,24 +179,15 @@ var (
 // =============================================================================
 
 var (
-	// HeaderStyle for header background
+	// HeaderStyle for header background (now used as footer)
 	HeaderStyle = lipgloss.NewStyle().
 			Background(Surface).
 			Foreground(Text).
 			Padding(0, 1)
 
-	// HeaderProviderStyle for provider name
-	HeaderProviderStyle = lipgloss.NewStyle().
-				Foreground(Accent).
-				Bold(true)
-
 	// HeaderModelStyle for model name
 	HeaderModelStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color(ColorTextIndigo))
-
-	// HeaderEndpointStyle for endpoint
-	HeaderEndpointStyle = lipgloss.NewStyle().
-				Foreground(Muted)
 
 	// HeaderTokenStyle for token count
 	HeaderTokenStyle = lipgloss.NewStyle().
@@ -195,6 +196,10 @@ var (
 	// HeaderStreamStyle for streaming indicator
 	HeaderStreamStyle = lipgloss.NewStyle().
 				Foreground(Warning)
+
+	// Footer styles
+	FooterSeparatorStyle = lipgloss.NewStyle().Foreground(Muted)
+	FooterLabelStyle     = lipgloss.NewStyle().Foreground(Muted)
 )
 
 // =============================================================================
@@ -278,13 +283,13 @@ var (
 func RolePrefix(role string) string {
 	switch role {
 	case "user":
-		return UserStyle.Render("You: ")
+		return InputPromptCharStyle.Render("❯ ")
 	case "assistant":
-		return AssistantStyle.Render("Agent: ")
+		return "" // No prefix — markdown content is enough
 	case "system":
 		return SystemStyle.Render("System: ")
 	case "tool":
-		return ToolCallStyle.Render("Tool: ")
+		return ToolBulletStyle.Render("⏺ ")
 	default:
 		return role + ": "
 	}

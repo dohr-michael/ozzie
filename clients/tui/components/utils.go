@@ -85,6 +85,20 @@ func FormatArguments(args map[string]any) string {
 	return strings.Join(parts, ", ")
 }
 
+// FormatArgumentsCompact formats tool arguments in Claude Code style.
+// If there is exactly one string argument, it returns the raw value (e.g. "go build ./...").
+// Otherwise it falls back to FormatArguments (key=value pairs).
+func FormatArgumentsCompact(args map[string]any) string {
+	if len(args) == 1 {
+		for _, v := range args {
+			if s, ok := v.(string); ok {
+				return TruncateString(s, 80)
+			}
+		}
+	}
+	return FormatArguments(args)
+}
+
 // FormatJSON formats a value as indented JSON.
 func FormatJSON(v any) string {
 	data, err := json.MarshalIndent(v, "", "  ")

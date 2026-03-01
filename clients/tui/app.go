@@ -13,7 +13,7 @@ import (
 )
 
 // App is the main TUI application model.
-// Architecture: HEADER | CHAT | INPUT_ZONE
+// Architecture: CHAT | INPUT_ZONE | FOOTER
 type App struct {
 	// Components
 	header    *components.Header
@@ -65,6 +65,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// Drop unparsed SGR mouse escape sequence fragments.
+		if msg.Type == tea.KeyRunes && isMouseEscapeFragment(string(msg.Runes)) {
+			return a, nil
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			a.quitting = true
@@ -162,24 +167,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// View renders the application.
+// View renders the application: CHAT | INPUT | FOOTER.
 func (a *App) View() string {
 	if a.quitting {
 		return "Goodbye!\n"
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
-		a.header.View(),
 		a.chat.View(),
 		a.inputZone.View(),
+		a.header.View(),
 	)
 }
 
 func (a *App) updateSizes() {
-	headerHeight := 1
-	inputHeight := 6
+	footerHeight := 1
 
-	chatHeight := a.height - headerHeight - inputHeight
+	// Dynamic input height based on current mode
+	inputHeight := a.inputHeightForMode(a.inputZone.Mode())
+
+	chatHeight := a.height - footerHeight - inputHeight
 	if chatHeight < 5 {
 		chatHeight = 5
 	}
@@ -189,6 +196,22 @@ func (a *App) updateSizes() {
 	a.inputZone.SetSize(a.width, inputHeight)
 }
 
+// inputHeightForMode returns the appropriate input zone height for a given mode.
+func (a *App) inputHeightForMode(mode components.InputMode) int {
+	switch mode {
+	case components.ModeChat:
+		return 3 // sep + input + sep
+	case components.ModeConfirm:
+		return 7 // sep + question + yes + no + hint + sep + margin
+	case components.ModeText:
+		return 7 // sep + question + input + error + hint + sep + margin
+	case components.ModeSelect, components.ModeMulti:
+		return 10 // sep + question + ~5 options + hint + sep + margin
+	default:
+		return 3
+	}
+}
+
 // handleInputResult processes input from InputZone and bridges to WS.
 func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 	if result.Cancelled {
@@ -196,9 +219,11 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 			token := a.currentPromptToken
 			a.currentPromptToken = ""
 			a.inputZone.Reset()
+			a.updateSizes()
 			return tea.Batch(a.inputZone.Focus(), a.sendPromptCancel(token))
 		}
 		a.inputZone.Reset()
+		a.updateSizes()
 		return a.inputZone.Focus()
 	}
 
@@ -230,6 +255,7 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 			token = result.ResumeToken
 		}
 		a.currentPromptToken = ""
+		a.updateSizes()
 
 		if result.Confirmed {
 			a.chat.SetThinking(true)
@@ -250,6 +276,7 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		token := a.currentPromptToken
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
+		a.updateSizes()
 		a.chat.SetThinking(true)
 		a.streaming = true
 		a.header.SetStreaming(true)
@@ -267,6 +294,7 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		token := a.currentPromptToken
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
+		a.updateSizes()
 		a.chat.SetThinking(true)
 		a.streaming = true
 		a.header.SetStreaming(true)
@@ -284,6 +312,7 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		token := a.currentPromptToken
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
+		a.updateSizes()
 		a.chat.SetThinking(true)
 		a.streaming = true
 		a.header.SetStreaming(true)
@@ -355,6 +384,9 @@ func (a *App) handlePromptRequest(msg PromptRequestMsg) {
 		}
 		a.inputZone.PromptMulti(msg.Label, "", msg.Token, options)
 	}
+
+	// Resize for the new input mode
+	a.updateSizes()
 }
 
 // sendPromptCancel sends a cancellation response to the gateway.
@@ -384,4 +416,22 @@ func (a *App) handleSlashCommand(cmd string) tea.Cmd {
 	}
 
 	return nil
+}
+
+// isMouseEscapeFragment returns true if s looks like one or more unparsed
+// SGR mouse escape sequence fragments (e.g. "[<65;80;14M" or concatenated
+// "[<65;80;14M[<64;80;14M").
+func isMouseEscapeFragment(s string) bool {
+	if len(s) < 5 || s[0] != '[' || s[1] != '<' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+		case r == '[', r == '<', r == ';', r == 'M', r == 'm':
+		default:
+			return false
+		}
+	}
+	return true
 }
