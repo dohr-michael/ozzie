@@ -55,8 +55,8 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("open session: %w", err)
 	}
 
-	model := tui.NewMainModel(client, sid)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	model := tui.NewApp(client, sid)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Goroutine: read WS frames with reconnection.
 	go readLoop(ctx, p, client, gatewayURL, sid, cwd)

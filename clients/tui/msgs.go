@@ -95,3 +95,8 @@ type LLMTelemetryMsg struct {
 	TokensIn  int
 	TokensOut int
 }
+
+// sendErrorMsg carries an error from an async WS send.
+type sendErrorMsg struct {
+	err error
+}
