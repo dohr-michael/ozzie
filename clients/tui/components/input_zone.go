@@ -90,6 +90,7 @@ type InputZone struct {
 // NewInputZone creates a new input zone.
 func NewInputZone() *InputZone {
 	ti := textinput.New()
+	ti.Prompt = "" // We render our own ❯ prompt
 	ti.Placeholder = "Type a message..."
 	ti.CharLimit = 2000
 	ti.Width = 80
@@ -114,6 +115,14 @@ func (z *InputZone) Update(msg tea.Msg) (*InputZone, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Drop unparsed SGR mouse escape fragments (e.g. "[<64;75;23M")
+		if msg.Type == tea.KeyRunes {
+			s := string(msg.Runes)
+			if len(s) >= 3 && s[0] == '[' && s[1] == '<' {
+				return z, nil
+			}
+		}
+
 		switch msg.String() {
 		case "enter":
 			return z.submit()
