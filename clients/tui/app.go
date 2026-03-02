@@ -13,18 +13,22 @@ import (
 )
 
 // App is the main TUI application model.
-// Architecture: CHAT | INPUT_ZONE | FOOTER
+// Architecture: terminal-streaming with tea.Println for flushed history
+// and a small active zone rendered in View().
 type App struct {
-	// Components
+	// Components (sticky footer)
 	header    *components.Header
-	chat      *components.Chat
 	inputZone *components.InputZone
+
+	// Active interaction state (rendered in View)
+	activeTools []components.ToolCall
+	streaming   string
+	showThinking bool
 
 	// State
 	width            int
 	height           int
-	streaming        bool
-	streamingContent string
+	isStreaming       bool
 	quitting         bool
 
 	// Current prompt state (token for response)
@@ -39,7 +43,6 @@ type App struct {
 func NewApp(client *wsclient.Client, sessionID string) *App {
 	return &App{
 		header:    components.NewHeader(),
-		chat:      components.NewChat(),
 		inputZone: components.NewInputZone(),
 		client:    client,
 		sessionID: sessionID,
@@ -48,7 +51,12 @@ func NewApp(client *wsclient.Client, sessionID string) *App {
 
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(a.inputZone.Init(), a.inputZone.Focus())
+	return tea.Batch(
+		tea.ClearScreen,
+		a.inputZone.Init(),
+		a.inputZone.Focus(),
+		tea.Println(components.RenderWelcome()),
+	)
 }
 
 // Update handles messages and updates state.
@@ -60,7 +68,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.updateSizes()
-		if a.inputZone.Mode() == components.ModeChat && !a.streaming {
+		if a.inputZone.Mode() == components.ModeChat && !a.isStreaming {
 			cmds = append(cmds, a.inputZone.Focus())
 		}
 
@@ -74,14 +82,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			a.quitting = true
 			return a, tea.Quit
-		case "ctrl+l":
-			a.chat.Clear()
-			return a, nil
-		case "pgup", "pgdown":
-			var chatCmd tea.Cmd
-			a.chat, chatCmd = a.chat.Update(msg)
-			cmds = append(cmds, chatCmd)
-			return a, tea.Batch(cmds...)
 		}
 
 		// Update input zone
@@ -89,58 +89,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.inputZone, cmd = a.inputZone.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// Guard: don't pass up/down to chat when in navigation mode
-		mode := a.inputZone.Mode()
-		isNavigationMode := mode == components.ModeSelect || mode == components.ModeMulti || mode == components.ModeConfirm
-		isNavigationKey := msg.String() == "up" || msg.String() == "down"
-		if isNavigationMode && isNavigationKey {
-			return a, tea.Batch(cmds...)
-		}
-
-	case tea.MouseMsg:
-		var chatCmd tea.Cmd
-		a.chat, chatCmd = a.chat.Update(msg)
-		cmds = append(cmds, chatCmd)
-
 	case components.InputResult:
 		cmds = append(cmds, a.handleInputResult(msg))
 
 	// --- Ozzie WS messages ---
 
 	case StreamStartMsg:
-		a.streaming = true
-		a.streamingContent = ""
+		a.isStreaming = true
+		a.streaming = ""
+		a.showThinking = true
 		a.header.SetStreaming(true)
-		a.chat.SetThinking(true)
 		a.inputZone.SetDisabled(true)
 
 	case StreamDeltaMsg:
-		a.streamingContent += msg.Content
-		a.chat.SetStreaming(a.streamingContent)
+		a.showThinking = false
+		a.streaming += msg.Content
 
 	case StreamEndMsg:
 		// No-op: content finalized by AssistantMessageMsg
 
 	case AssistantMessageMsg:
-		a.streaming = false
+		// Flush any remaining active tools
+		cmds = append(cmds, a.flushActiveTools()...)
+
+		a.isStreaming = false
+		a.showThinking = false
 		a.header.SetStreaming(false)
 		a.inputZone.SetDisabled(false)
-		a.chat.SetThinking(false)
+		a.streaming = ""
 
 		if msg.Error != "" {
-			a.chat.CompleteInteractionWithError(msg.Error)
-		} else {
-			a.chat.CompleteInteraction(msg.Content)
+			cmds = append(cmds, tea.Println("\n"+components.RenderError(msg.Error, a.width)))
+		} else if msg.Content != "" {
+			cmds = append(cmds, tea.Println("\n"+components.RenderAssistantMessage(msg.Content, a.width)))
 		}
-		a.streamingContent = ""
 		cmds = append(cmds, a.inputZone.Focus())
 		return a, tea.Batch(cmds...)
 
 	case ToolCallMsg:
-		a.handleToolCall(msg)
+		cmds = append(cmds, a.handleToolCall(msg)...)
 
 	case PromptRequestMsg:
-		a.handlePromptRequest(msg)
+		cmds = append(cmds, a.handlePromptRequest(msg)...)
 
 	case LLMTelemetryMsg:
 		a.header.AddTokens(msg.TokensOut)
@@ -155,61 +145,87 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Phase 2
 
 	case sendErrorMsg:
-		a.chat.AddMessage("system", fmt.Sprintf("Send error: %v", msg.err))
-		return a, nil
+		cmds = append(cmds, tea.Println(components.RenderError(fmt.Sprintf("Send error: %v", msg.err), a.width)))
+		return a, tea.Batch(cmds...)
 	}
-
-	// Fallthrough: always update chat to handle viewport/framework messages
-	var chatCmd tea.Cmd
-	a.chat, chatCmd = a.chat.Update(msg)
-	cmds = append(cmds, chatCmd)
 
 	return a, tea.Batch(cmds...)
 }
 
-// View renders the application: CHAT | INPUT | FOOTER.
+// View renders only the active zone (small, constant cost).
 func (a *App) View() string {
 	if a.quitting {
-		return "Goodbye!\n"
+		return ""
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		a.chat.View(),
-		a.inputZone.View(),
-		a.header.View(),
-	)
+	var parts []string
+
+	// Active zone: in-progress tools + streaming text
+	if active := a.renderActive(); active != "" {
+		parts = append(parts, active)
+	}
+
+	parts = append(parts, a.inputZone.View(), a.header.View())
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// renderActive renders only in-progress elements (tools + streaming + thinking).
+func (a *App) renderActive() string {
+	var parts []string
+
+	// In-progress tool calls
+	if len(a.activeTools) > 0 {
+		parts = append(parts, components.RenderExpandedTools(a.activeTools, a.width))
+	}
+
+	// Thinking indicator (before any stream content arrives)
+	if a.showThinking && a.streaming == "" {
+		parts = append(parts, components.RenderThinking())
+	}
+
+	// Streaming text (raw, no glamour)
+	if a.streaming != "" {
+		parts = append(parts, components.RenderStreamingText(a.streaming))
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return "\n" + strings.Join(parts, "\n")
 }
 
 func (a *App) updateSizes() {
-	footerHeight := 1
-
-	// Dynamic input height based on current mode
-	inputHeight := a.inputHeightForMode(a.inputZone.Mode())
-
-	chatHeight := a.height - footerHeight - inputHeight
-	if chatHeight < 5 {
-		chatHeight = 5
-	}
-
 	a.header.SetWidth(a.width)
-	a.chat.SetSize(a.width, chatHeight)
-	a.inputZone.SetSize(a.width, inputHeight)
+	a.inputZone.SetSize(a.width, a.inputHeightForMode(a.inputZone.Mode()))
 }
 
 // inputHeightForMode returns the appropriate input zone height for a given mode.
 func (a *App) inputHeightForMode(mode components.InputMode) int {
 	switch mode {
 	case components.ModeChat:
-		return 3 // sep + input + sep
+		return 3
 	case components.ModeConfirm:
-		return 7 // sep + question + yes + no + hint + sep + margin
+		return 7
 	case components.ModeText:
-		return 7 // sep + question + input + error + hint + sep + margin
+		return 7
 	case components.ModeSelect, components.ModeMulti:
-		return 10 // sep + question + ~5 options + hint + sep + margin
+		return 10
 	default:
 		return 3
 	}
+}
+
+// flushActiveTools flushes all completed active tools via tea.Println and clears the list.
+func (a *App) flushActiveTools() []tea.Cmd {
+	if len(a.activeTools) == 0 {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, tool := range a.activeTools {
+		cmds = append(cmds, tea.Println(components.RenderToolResult(tool, a.width)))
+	}
+	a.activeTools = nil
+	return cmds
 }
 
 // handleInputResult processes input from InputZone and bridges to WS.
@@ -234,20 +250,24 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 			return a.handleSlashCommand(text)
 		}
 
-		a.chat.StartInteraction(text)
+		// Flush user message to scrollback (with breathing room)
+		printCmd := tea.Println("\n" + components.RenderUserMessage(text, a.width))
+
 		a.inputZone.SetDisabled(true)
-		a.chat.SetThinking(true)
-		a.streaming = true
-		a.streamingContent = ""
+		a.showThinking = true
+		a.isStreaming = true
+		a.streaming = ""
 		a.header.SetStreaming(true)
 
 		client := a.client
-		return func() tea.Msg {
+		sendCmd := func() tea.Msg {
 			if err := client.SendMessage(text); err != nil {
 				return sendErrorMsg{err: err}
 			}
 			return nil
 		}
+
+		return tea.Batch(printCmd, sendCmd)
 
 	case components.ModeConfirm:
 		token := a.currentPromptToken
@@ -258,8 +278,8 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		a.updateSizes()
 
 		if result.Confirmed {
-			a.chat.SetThinking(true)
-			a.streaming = true
+			a.showThinking = true
+			a.isStreaming = true
 			a.header.SetStreaming(true)
 		}
 
@@ -277,8 +297,8 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
 		a.updateSizes()
-		a.chat.SetThinking(true)
-		a.streaming = true
+		a.showThinking = true
+		a.isStreaming = true
 		a.header.SetStreaming(true)
 
 		client := a.client
@@ -295,8 +315,8 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
 		a.updateSizes()
-		a.chat.SetThinking(true)
-		a.streaming = true
+		a.showThinking = true
+		a.isStreaming = true
 		a.header.SetStreaming(true)
 
 		client := a.client
@@ -313,8 +333,8 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 		a.currentPromptToken = ""
 		a.inputZone.Reset()
 		a.updateSizes()
-		a.chat.SetThinking(true)
-		a.streaming = true
+		a.showThinking = true
+		a.isStreaming = true
 		a.header.SetStreaming(true)
 
 		client := a.client
@@ -330,24 +350,64 @@ func (a *App) handleInputResult(result components.InputResult) tea.Cmd {
 	return nil
 }
 
-// handleToolCall dispatches tool call events to the chat component.
-func (a *App) handleToolCall(msg ToolCallMsg) {
+// handleToolCall dispatches tool call events.
+func (a *App) handleToolCall(msg ToolCallMsg) []tea.Cmd {
 	switch msg.Status {
 	case string(events.ToolStatusStarted):
 		args := components.FormatArguments(msg.Arguments)
-		a.chat.AddToolCall(msg.Name, args)
+		a.showThinking = false
+		a.activeTools = append(a.activeTools, components.ToolCall{
+			Name:      msg.Name,
+			Arguments: args,
+		})
+
 	case string(events.ToolStatusCompleted):
-		a.chat.AddToolResult(msg.Name, msg.Result, nil)
+		// Find matching active tool, mark completed, flush it
+		for i := len(a.activeTools) - 1; i >= 0; i-- {
+			if a.activeTools[i].Name == msg.Name && !a.activeTools[i].Completed {
+				a.activeTools[i].Result = msg.Result
+				a.activeTools[i].Status = components.ToolStatusCompleted
+				a.activeTools[i].Completed = true
+
+				// Flush this tool to scrollback
+				printCmd := tea.Println(components.RenderToolResult(a.activeTools[i], a.width))
+				// Remove from active list
+				a.activeTools = append(a.activeTools[:i], a.activeTools[i+1:]...)
+				return []tea.Cmd{printCmd}
+			}
+		}
+
 	case string(events.ToolStatusFailed):
-		a.chat.AddToolResult(msg.Name, "", fmt.Errorf("%s", msg.Error))
+		for i := len(a.activeTools) - 1; i >= 0; i-- {
+			if a.activeTools[i].Name == msg.Name && !a.activeTools[i].Completed {
+				a.activeTools[i].Error = fmt.Errorf("%s", msg.Error)
+				a.activeTools[i].Status = components.ToolStatusFailed
+				a.activeTools[i].Completed = true
+
+				printCmd := tea.Println(components.RenderToolResult(a.activeTools[i], a.width))
+				a.activeTools = append(a.activeTools[:i], a.activeTools[i+1:]...)
+				return []tea.Cmd{printCmd}
+			}
+		}
 	}
+
+	return nil
 }
 
 // handlePromptRequest bridges PromptRequestMsg to InputZone prompts.
-func (a *App) handlePromptRequest(msg PromptRequestMsg) {
-	a.streaming = false
+func (a *App) handlePromptRequest(msg PromptRequestMsg) []tea.Cmd {
+	// Flush active tools before showing prompt
+	cmds := a.flushActiveTools()
+
+	// Flush any streaming content
+	if a.streaming != "" {
+		cmds = append(cmds, tea.Println(components.RenderAssistantMessage(a.streaming, a.width)))
+		a.streaming = ""
+	}
+
+	a.isStreaming = false
+	a.showThinking = false
 	a.header.SetStreaming(false)
-	a.chat.SetThinking(false)
 	a.inputZone.SetDisabled(false)
 	a.currentPromptToken = msg.Token
 
@@ -387,6 +447,7 @@ func (a *App) handlePromptRequest(msg PromptRequestMsg) {
 
 	// Resize for the new input mode
 	a.updateSizes()
+	return cmds
 }
 
 // sendPromptCancel sends a cancellation response to the gateway.
@@ -409,13 +470,9 @@ func (a *App) handleSlashCommand(cmd string) tea.Cmd {
 	case "/quit":
 		a.quitting = true
 		return tea.Quit
-	case "/clear":
-		a.chat.Clear()
 	default:
-		a.chat.AddMessage("system", fmt.Sprintf("Unknown command: %s", command))
+		return tea.Println(components.RenderError(fmt.Sprintf("Unknown command: %s", command), a.width))
 	}
-
-	return nil
 }
 
 // isMouseEscapeFragment returns true if s looks like one or more unparsed

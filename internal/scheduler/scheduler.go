@@ -414,8 +414,27 @@ func (s *Scheduler) handleEvent(e events.Event) {
 	}
 }
 
+// TriggerEntry manually triggers a schedule entry by ID, bypassing cooldown and
+// cron/interval checks. Returns the created task ID.
+func (s *Scheduler) TriggerEntry(id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	re, ok := s.entries[id]
+	if !ok {
+		return "", fmt.Errorf("schedule entry not found: %s", id)
+	}
+	if !re.enabled {
+		return "", fmt.Errorf("schedule entry is disabled: %s", id)
+	}
+
+	taskID := s.triggerEntry(re, "manual")
+	return taskID, nil
+}
+
 // triggerEntry submits a task for the given entry. Caller must hold s.mu.
-func (s *Scheduler) triggerEntry(re *runtimeEntry, trigger string) {
+// Returns the created task ID.
+func (s *Scheduler) triggerEntry(re *runtimeEntry, trigger string) string {
 	re.lastRun = time.Now()
 	re.runCount++
 
@@ -446,7 +465,7 @@ func (s *Scheduler) triggerEntry(re *runtimeEntry, trigger string) {
 
 	if err := s.pool.Submit(task); err != nil {
 		slog.Error("scheduler: submit task", "id", re.id, "error", err)
-		return
+		return ""
 	}
 
 	// Update persistent store
@@ -472,6 +491,7 @@ func (s *Scheduler) triggerEntry(re *runtimeEntry, trigger string) {
 	}))
 
 	slog.Info("scheduler: triggered", "id", re.id, "trigger", trigger, "task_id", task.ID)
+	return task.ID
 }
 
 // updateStoredEntry persists runtime state back to store. Caller must hold s.mu.

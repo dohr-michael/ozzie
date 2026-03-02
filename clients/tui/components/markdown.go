@@ -307,23 +307,38 @@ func RenderMarkdown(content string, width int) string {
 	return strings.TrimRight(rendered, "\n")
 }
 
-// RenderMarkdownWithWidth creates a new renderer with specific width.
-// Use this when width changes dynamically.
+// Cached renderer for RenderMarkdownWithWidth — avoids re-creating a
+// glamour.TermRenderer on every call when the width hasn't changed.
+var (
+	cachedRenderer      *glamour.TermRenderer
+	cachedRendererWidth int
+	rendererMu          sync.Mutex
+)
+
+// RenderMarkdownWithWidth renders markdown content with the given width.
+// The renderer is cached and re-created only when width changes.
 func RenderMarkdownWithWidth(content string, width int) string {
 	if content == "" {
 		return ""
 	}
 
-	renderer, err := glamour.NewTermRenderer(
-		glamour.WithStyles(customStyleConfig()),
-		glamour.WithWordWrap(width),
-		glamour.WithEmoji(),
-	)
-	if err != nil {
-		return content
+	rendererMu.Lock()
+	defer rendererMu.Unlock()
+
+	if cachedRenderer == nil || cachedRendererWidth != width {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithStyles(customStyleConfig()),
+			glamour.WithWordWrap(width),
+			glamour.WithEmoji(),
+		)
+		if err != nil {
+			return content
+		}
+		cachedRenderer = r
+		cachedRendererWidth = width
 	}
 
-	rendered, err := renderer.Render(content)
+	rendered, err := cachedRenderer.Render(content)
 	if err != nil {
 		return content
 	}

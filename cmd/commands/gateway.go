@@ -415,6 +415,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register list_schedules tool", "error", err)
 	}
 
+	triggerScheduleTool := plugins.NewTriggerScheduleTool(sched)
+	if err := toolRegistry.RegisterNative("trigger_schedule", triggerScheduleTool, plugins.TriggerScheduleManifest()); err != nil {
+		slog.Warn("failed to register trigger_schedule tool", "error", err)
+	}
+
 	// Register validation tools (coordinator pattern)
 	requestValidationTool := plugins.NewRequestValidationTool()
 	if err := toolRegistry.RegisterNative("request_validation", requestValidationTool, plugins.RequestValidationManifest()); err != nil {

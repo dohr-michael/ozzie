@@ -394,3 +394,75 @@ func (t *ListSchedulesTool) InvokableRun(_ context.Context, argumentsInJSON stri
 }
 
 var _ tool.InvokableTool = (*ListSchedulesTool)(nil)
+
+// =============================================================================
+// trigger_schedule
+// =============================================================================
+
+// TriggerScheduleTool manually triggers an existing schedule entry.
+type TriggerScheduleTool struct {
+	sched *scheduler.Scheduler
+}
+
+// NewTriggerScheduleTool creates a new trigger_schedule tool.
+func NewTriggerScheduleTool(sched *scheduler.Scheduler) *TriggerScheduleTool {
+	return &TriggerScheduleTool{sched: sched}
+}
+
+// TriggerScheduleManifest returns the plugin manifest for the trigger_schedule tool.
+func TriggerScheduleManifest() *PluginManifest {
+	return &PluginManifest{
+		Name:        "trigger_schedule",
+		Description: "Manually trigger an existing scheduled task",
+		Level:       "tool",
+		Provider:    "native",
+		Dangerous:   false,
+		Tools: []ToolSpec{
+			{
+				Name:        "trigger_schedule",
+				Description: "Manually trigger an existing schedule entry, bypassing its cron/interval/event trigger and cooldown. Use list_schedules to find available entry IDs.",
+				Parameters: map[string]ParamSpec{
+					"entry_id": {
+						Type:        "string",
+						Description: "The schedule entry ID to trigger (sched_... or skill_... prefix)",
+						Required:    true,
+					},
+				},
+			},
+		},
+	}
+}
+
+type triggerScheduleInput struct {
+	EntryID string `json:"entry_id"`
+}
+
+// Info returns the tool info for Eino registration.
+func (t *TriggerScheduleTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return toolSpecToToolInfo(&TriggerScheduleManifest().Tools[0]), nil
+}
+
+// InvokableRun triggers a schedule entry and returns the created task ID.
+func (t *TriggerScheduleTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	var input triggerScheduleInput
+	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
+		return "", fmt.Errorf("trigger_schedule: parse input: %w", err)
+	}
+	if input.EntryID == "" {
+		return "", fmt.Errorf("trigger_schedule: entry_id is required")
+	}
+
+	taskID, err := t.sched.TriggerEntry(input.EntryID)
+	if err != nil {
+		return "", fmt.Errorf("trigger_schedule: %w", err)
+	}
+
+	result, _ := json.Marshal(map[string]string{
+		"entry_id": input.EntryID,
+		"task_id":  taskID,
+		"status":   "triggered",
+	})
+	return string(result), nil
+}
+
+var _ tool.InvokableTool = (*TriggerScheduleTool)(nil)
