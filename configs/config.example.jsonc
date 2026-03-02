@@ -102,5 +102,17 @@
     // Useful for async tasks where no interactive user is present.
     // Example: ["cmd", "git"]
     "allowed_dangerous": []
+  },
+  // Layered context: three-tier progressive compression (L0/L1/L2).
+  // Replaces monolithic summarization with BM25-based relevance retrieval.
+  // Disabled by default — enable to reduce token usage by 80-90% on long conversations.
+  "layered_context": {
+    "enabled": false,
+    // Maximum archived conversation chunks to keep per session.
+    "max_archives": 12,
+    // Number of most recent messages to always include (no compression).
+    "max_recent_messages": 24,
+    // Messages per archive chunk.
+    "archive_chunk_size": 8
   }
 }

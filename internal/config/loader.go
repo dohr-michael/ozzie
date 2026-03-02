@@ -78,6 +78,17 @@ func applyDefaults(cfg *Config) {
 		cfg.Runtime.SystemToolsFile = "/etc/ozzie/system-tools.json"
 	}
 
+	// Layered context defaults
+	if cfg.LayeredContext.MaxArchives == 0 {
+		cfg.LayeredContext.MaxArchives = 12
+	}
+	if cfg.LayeredContext.MaxRecentMessages == 0 {
+		cfg.LayeredContext.MaxRecentMessages = 24
+	}
+	if cfg.LayeredContext.ArchiveChunkSize == 0 {
+		cfg.LayeredContext.ArchiveChunkSize = 8
+	}
+
 	// Default MaxConcurrent for providers
 	for name, p := range cfg.Models.Providers {
 		if p.MaxConcurrent <= 0 {

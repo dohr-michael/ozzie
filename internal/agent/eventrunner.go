@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/layered"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -55,6 +56,7 @@ type EventRunner struct {
 	store      sessions.Store
 	taskStore  TaskStore
 	compressor *Compressor
+	layered    *layered.Manager
 
 	pool            CapacityPool // actor pool for capacity management (optional)
 	defaultProvider string       // default provider name for AcquireInteractive
@@ -80,6 +82,7 @@ type EventRunnerConfig struct {
 	DefaultProvider string       // default provider name for AcquireInteractive
 	ContextWindow   int          // total context window in tokens (for compression)
 	Tier            ModelTier    // model tier for adaptive compression
+	Layered         *layered.Manager // layered context manager (optional)
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -100,6 +103,7 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		store:           cfg.Store,
 		taskStore:       cfg.TaskStore,
 		compressor:      NewCompressor(compCfg),
+		layered:         cfg.Layered,
 		pool:            cfg.Pool,
 		defaultProvider: cfg.DefaultProvider,
 		running:         make(map[string]bool),
@@ -184,23 +188,33 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		messages = append(messages, msg)
 	}
 
-	// Context compression — estimate system prompt as persona only;
-	// dynamic context (tools, session, memories) is injected by middlewares.
-	if session, err := er.store.Get(sessionID); err == nil {
-		sysEstimate := er.compressor.EstimateTokens([]*schema.Message{{
-			Role:    schema.System,
-			Content: er.factory.Persona(),
-		}})
-
-		result, compErr := er.compressor.Compress(er.ctx, session, messages, sysEstimate, er.summarize)
-		if compErr != nil {
-			slog.Error("context compression", "error", compErr)
+	// Context compression — layered context takes priority, compressor is fallback.
+	compressed := false
+	if er.layered != nil {
+		if lmsgs, layeredErr := er.layered.Apply(er.ctx, sessionID, messages, history); layeredErr == nil {
+			messages = lmsgs
+			compressed = true
 		} else {
-			messages = result.Messages
-			if result.Compressed {
-				session.Summary = result.NewSummary
-				session.SummaryUpTo = result.NewSummaryUpTo
-				_ = er.store.UpdateMeta(session)
+			slog.Warn("layered context failed, falling back to compressor", "error", layeredErr)
+		}
+	}
+	if !compressed {
+		if session, err := er.store.Get(sessionID); err == nil {
+			sysEstimate := er.compressor.EstimateTokens([]*schema.Message{{
+				Role:    schema.System,
+				Content: er.factory.Persona(),
+			}})
+
+			result, compErr := er.compressor.Compress(er.ctx, session, messages, sysEstimate, er.summarize)
+			if compErr != nil {
+				slog.Error("context compression", "error", compErr)
+			} else {
+				messages = result.Messages
+				if result.Compressed {
+					session.Summary = result.NewSummary
+					session.SummaryUpTo = result.NewSummaryUpTo
+					_ = er.store.UpdateMeta(session)
+				}
 			}
 		}
 	}

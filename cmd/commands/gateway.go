@@ -23,6 +23,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/layered"
 	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -472,6 +473,31 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	costTracker := storage.NewCostTracker(bus, sessionStore)
 	defer costTracker.Close()
 
+	// Layered context manager (optional)
+	var layeredManager *layered.Manager
+	if cfg.LayeredContext.IsEnabled() {
+		layeredStore := layered.NewStore(sessionsDir)
+		layeredCfg := layered.DefaultConfig()
+		layeredCfg.Enabled = true
+		layeredCfg.MaxArchives = cfg.LayeredContext.MaxArchives
+		layeredCfg.MaxRecentMessages = cfg.LayeredContext.MaxRecentMessages
+		layeredCfg.ArchiveChunkSize = cfg.LayeredContext.ArchiveChunkSize
+		layeredCfg.MaxPromptTokens = registry.DefaultContextWindow()
+		layeredManager = layered.NewManager(layeredStore, layeredCfg,
+			func(ctx context.Context, prompt string) (string, error) {
+				resp, err := chatModel.Generate(ctx, []*schema.Message{{Role: schema.User, Content: prompt}})
+				if err != nil {
+					return "", err
+				}
+				return resp.Content, nil
+			},
+		)
+		slog.Info("layered context enabled",
+			"max_archives", layeredCfg.MaxArchives,
+			"max_recent", layeredCfg.MaxRecentMessages,
+		)
+	}
+
 	// Event runner with dynamic tool selection and actor pool integration
 	eventRunner := agent.NewEventRunner(agent.EventRunnerConfig{
 		Factory:         factory,
@@ -484,6 +510,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		DefaultProvider: registry.DefaultName(),
 		ContextWindow:   registry.DefaultContextWindow(),
 		Tier:            defaultTier,
+		Layered:         layeredManager,
 	})
 	defer eventRunner.Close()
 

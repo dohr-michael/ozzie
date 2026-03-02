@@ -15,6 +15,20 @@ type Config struct {
 	Sandbox SandboxConfig `json:"sandbox"`
 	Runtime RuntimeConfig `json:"runtime"`
 	Web     WebConfig     `json:"web"`
+	LayeredContext LayeredContextConfig `json:"layered_context"`
+}
+
+// LayeredContextConfig configures the layered context compression system.
+type LayeredContextConfig struct {
+	Enabled           *bool `json:"enabled"`              // default: false
+	MaxArchives       int   `json:"max_archives"`         // default: 12
+	MaxRecentMessages int   `json:"max_recent_messages"`  // default: 24
+	ArchiveChunkSize  int   `json:"archive_chunk_size"`   // default: 8
+}
+
+// IsEnabled returns true if layered context is enabled (default: false).
+func (c LayeredContextConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // WebConfig configures web search and fetch capabilities.

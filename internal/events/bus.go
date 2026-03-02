@@ -55,6 +55,9 @@ const (
 	EventSkillStepStarted   EventType = "skill.step.started"
 	EventSkillStepCompleted EventType = "skill.step.completed"
 
+	// Context
+	EventContextLayered EventType = "context.layered"
+
 	// Tasks
 	EventTaskCreated      EventType = "task.created"
 	EventTaskStarted      EventType = "task.started"

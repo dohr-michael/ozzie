@@ -117,6 +117,23 @@ type LLMCallPayload struct {
 func (LLMCallPayload) EventType() EventType { return EventLLMCall }
 
 // =============================================================================
+// CONTEXT EVENTS
+// =============================================================================
+
+type ContextLayeredPayload struct {
+	Escalation   string  `json:"escalation"`
+	Nodes        int     `json:"nodes"`
+	Tokens       int     `json:"tokens"`
+	SavingsRatio float64 `json:"savings_ratio"`
+}
+
+func (ContextLayeredPayload) EventType() EventType { return EventContextLayered }
+
+func GetContextLayeredPayload(e Event) (ContextLayeredPayload, bool) {
+	return ExtractPayload[ContextLayeredPayload](e)
+}
+
+// =============================================================================
 // TYPED EVENT CONSTRUCTORS
 // =============================================================================
 
