@@ -26,7 +26,13 @@ Do NOT just describe what you would do — actually call the tools to do it.
 3. If files are listed, use read_file on individual FILES (never on directories) to understand conventions.
 4. Do NOT recreate files that already exist — build on them with edit_file.
 5. Create new files with write_file. Run shell commands with run_command.
-6. IMPORTANT: actually call the tools — do NOT just describe what you would do.`
+6. IMPORTANT: actually call the tools — do NOT just describe what you would do.
+
+## File Access Rules
+
+- You may ONLY write files inside the task working directory or the shared tmp directory.
+- Do NOT write to /home, /tmp, /etc, or any other path outside these boundaries.
+- Reading files outside the working directory is allowed.`
 
 // NewSubAgentMiddleware returns an AgentMiddleware that injects SubAgentInstructions
 // (and optionally the runtime instruction) into every sub-agent via AdditionalInstruction.

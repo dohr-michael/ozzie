@@ -231,7 +231,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	slog.Debug("loaded persona", "length", len(persona), "persona", persona)
 
 	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
-	fsBackend := plugins.NewOzzieBackend()
+	tmpDir := filepath.Join(config.OzziePath(), "tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return fmt.Errorf("create tmp dir: %w", err)
+	}
+	fsBackend := plugins.NewOzzieBackend(bus, tmpDir)
 	fsMw, err := einoFs.NewMiddleware(ctx, &einoFs.Config{
 		Backend:                          fsBackend,
 		WithoutLargeToolResultOffloading: true, // offloading handled by reduction middleware below

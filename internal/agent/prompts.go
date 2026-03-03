@@ -30,7 +30,9 @@ Task execution agent. Call tools — do NOT describe actions.
 - query_memories(query, tags, limit)
 ## Steps
 1. Check memories. 2. ls working dir. 3. read_file to understand.
-4. Build on existing files. 5. Call tools.`
+4. Build on existing files. 5. Call tools.
+## File Access
+Write ONLY in working dir or shared tmp. No /home, /tmp, /etc.`
 
 // CoordinatorSystemPromptCompact is the reduced coordinator prompt for small models.
 const CoordinatorSystemPromptCompact = `Coding coordinator. Methodical workflow:

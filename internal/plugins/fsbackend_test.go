@@ -21,7 +21,7 @@ func TestOzzieBackend_LsInfo(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	files, err := b.LsInfo(ctxWithWorkDir(dir), &filesystem.LsInfoRequest{Path: dir})
 	if err != nil {
 		t.Fatalf("LsInfo: %v", err)
@@ -36,7 +36,7 @@ func TestOzzieBackend_Read(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	content, err := b.Read(ctxWithWorkDir(dir), &filesystem.ReadRequest{
 		FilePath: path,
 	})
@@ -53,7 +53,7 @@ func TestOzzieBackend_Read_OffsetLimit(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	content, err := b.Read(ctxWithWorkDir(dir), &filesystem.ReadRequest{
 		FilePath: path,
 		Offset:   1,
@@ -72,7 +72,7 @@ func TestOzzieBackend_GrepRaw(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\nfoo bar\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\nfunc hello() {}\n"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	matches, err := b.GrepRaw(ctxWithWorkDir(dir), &filesystem.GrepRequest{
 		Pattern: "hello",
 		Path:    dir,
@@ -90,7 +90,7 @@ func TestOzzieBackend_GrepRaw_WithGlob(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("match here\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("match here too\n"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	matches, err := b.GrepRaw(ctxWithWorkDir(dir), &filesystem.GrepRequest{
 		Pattern: "match",
 		Path:    dir,
@@ -109,7 +109,7 @@ func TestOzzieBackend_GlobInfo(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("b"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	files, err := b.GlobInfo(ctxWithWorkDir(dir), &filesystem.GlobInfoRequest{
 		Pattern: "*.go",
 		Path:    dir,
@@ -126,7 +126,7 @@ func TestOzzieBackend_Write(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new", "file.txt")
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	err := b.Write(ctxWithWorkDir(dir), &filesystem.WriteRequest{
 		FilePath: path,
 		Content:  "hello",
@@ -149,7 +149,7 @@ func TestOzzieBackend_Edit(t *testing.T) {
 	path := filepath.Join(dir, "edit.txt")
 	os.WriteFile(path, []byte("foo bar baz"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	err := b.Edit(ctxWithWorkDir(dir), &filesystem.EditRequest{
 		FilePath:  path,
 		OldString: "bar",
@@ -173,7 +173,7 @@ func TestOzzieBackend_Edit_MultipleOccurrences(t *testing.T) {
 	path := filepath.Join(dir, "edit.txt")
 	os.WriteFile(path, []byte("foo foo foo"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	err := b.Edit(ctxWithWorkDir(dir), &filesystem.EditRequest{
 		FilePath:  path,
 		OldString: "foo",
@@ -200,6 +200,158 @@ func TestOzzieBackend_Edit_MultipleOccurrences(t *testing.T) {
 	}
 }
 
+// --- Write guard tests ---
+
+func TestWriteGuard_AutonomousBlocked(t *testing.T) {
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	b := NewOzzieBackend(nil)
+	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
+		FilePath: filepath.Join(outsideDir, "evil.txt"),
+		Content:  "should be blocked",
+	})
+	if err == nil {
+		t.Fatal("expected write outside workDir to be blocked in autonomous mode")
+	}
+	if !strings.Contains(err.Error(), "write blocked") {
+		t.Errorf("expected 'write blocked' error, got: %v", err)
+	}
+}
+
+func TestWriteGuard_AutonomousAllowedWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+
+	b := NewOzzieBackend(nil)
+	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
+		FilePath: filepath.Join(workDir, "ok.txt"),
+		Content:  "allowed",
+	})
+	if err != nil {
+		t.Fatalf("write inside workDir should be allowed: %v", err)
+	}
+}
+
+func TestWriteGuard_AutonomousAllowedTmpDir(t *testing.T) {
+	workDir := t.TempDir()
+	tmpDir := t.TempDir()
+
+	b := NewOzzieBackend(nil, tmpDir)
+	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
+		FilePath: filepath.Join(tmpDir, "scratch.txt"),
+		Content:  "tmp write",
+	})
+	if err != nil {
+		t.Fatalf("write inside tmpDir should be allowed: %v", err)
+	}
+}
+
+func TestWriteGuard_InteractiveInsideSandbox(t *testing.T) {
+	workDir := t.TempDir()
+	ctx := ctxWithWorkDir(workDir)
+
+	b := NewOzzieBackend(nil)
+	err := b.Write(ctx, &filesystem.WriteRequest{
+		FilePath: filepath.Join(workDir, "ok.txt"),
+		Content:  "inside sandbox — always allowed",
+	})
+	if err != nil {
+		t.Fatalf("interactive write inside sandbox should be allowed: %v", err)
+	}
+}
+
+func TestWriteGuard_InteractiveOutsideSandboxConfirmed(t *testing.T) {
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+	ctx := ctxWithWorkDir(workDir)
+
+	bus := events.NewBus(16)
+	defer bus.Close()
+
+	b := NewOzzieBackend(bus)
+
+	// Simulate user approval in background
+	ch, unsub := bus.SubscribeChan(1, events.EventPromptRequest)
+	go func() {
+		defer unsub()
+		evt := <-ch
+		payload, ok := events.GetPromptRequestPayload(evt)
+		if !ok {
+			return
+		}
+		bus.Publish(events.NewTypedEvent(events.SourceWS, events.PromptResponsePayload{
+			Token: payload.Token,
+		}))
+	}()
+
+	err := b.Write(ctx, &filesystem.WriteRequest{
+		FilePath: filepath.Join(outsideDir, "ok.txt"),
+		Content:  "user approved",
+	})
+	if err != nil {
+		t.Fatalf("interactive write outside sandbox should succeed after confirmation: %v", err)
+	}
+}
+
+func TestWriteGuard_InteractiveOutsideSandboxDenied(t *testing.T) {
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+	ctx := ctxWithWorkDir(workDir)
+
+	bus := events.NewBus(16)
+	defer bus.Close()
+
+	b := NewOzzieBackend(bus)
+
+	// Simulate user denial in background
+	ch, unsub := bus.SubscribeChan(1, events.EventPromptRequest)
+	go func() {
+		defer unsub()
+		evt := <-ch
+		payload, ok := events.GetPromptRequestPayload(evt)
+		if !ok {
+			return
+		}
+		bus.Publish(events.NewTypedEvent(events.SourceWS, events.PromptResponsePayload{
+			Token:     payload.Token,
+			Cancelled: true,
+		}))
+	}()
+
+	err := b.Write(ctx, &filesystem.WriteRequest{
+		FilePath: filepath.Join(outsideDir, "denied.txt"),
+		Content:  "should be denied",
+	})
+	if err == nil {
+		t.Fatal("expected write to be denied by user")
+	}
+	if !strings.Contains(err.Error(), "write denied") {
+		t.Errorf("expected 'write denied' error, got: %v", err)
+	}
+}
+
+func TestEditGuard_AutonomousBlocked(t *testing.T) {
+	workDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create the file outside workDir
+	target := filepath.Join(outsideDir, "target.txt")
+	os.WriteFile(target, []byte("old content"), 0o644)
+
+	b := NewOzzieBackend(nil)
+	err := b.Edit(autonomousCtx(workDir), &filesystem.EditRequest{
+		FilePath:  target,
+		OldString: "old",
+		NewString: "new",
+	})
+	if err == nil {
+		t.Fatal("expected edit outside workDir to be blocked in autonomous mode")
+	}
+	if !strings.Contains(err.Error(), "write blocked") {
+		t.Errorf("expected 'write blocked' error, got: %v", err)
+	}
+}
+
 func TestOzzieBackend_GlobInfo_Recursive(t *testing.T) {
 	dir := t.TempDir()
 	// Create nested structure
@@ -209,7 +361,7 @@ func TestOzzieBackend_GlobInfo_Recursive(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a", "b", "deep.go"), []byte("package deep"), 0o644)
 	os.WriteFile(filepath.Join(dir, "a", "b", "deep.txt"), []byte("not go"), 0o644)
 
-	b := NewOzzieBackend()
+	b := NewOzzieBackend(nil)
 	files, err := b.GlobInfo(ctxWithWorkDir(dir), &filesystem.GlobInfoRequest{
 		Pattern: "**/*.go",
 		Path:    dir,

@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cloudwego/eino/adk/filesystem"
+	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 )
@@ -46,13 +48,112 @@ func isBinary(path string) bool {
 	return false
 }
 
+// writeConfirmTimeout is how long the backend waits for user confirmation
+// before denying an out-of-sandbox write in interactive mode.
+const writeConfirmTimeout = 60 * time.Second
+
 // OzzieBackend implements filesystem.Backend using the local filesystem.
 // It resolves paths relative to the WorkDir from the context.
-type OzzieBackend struct{}
+// writeAllowedPaths lists additional directories (e.g. $OZZIE_HOME/tmp)
+// where writes are permitted without confirmation.
+type OzzieBackend struct {
+	writeAllowedPaths []string
+	bus               *events.Bus // nil = no interactive confirmation (tests)
+}
 
 // NewOzzieBackend creates a new filesystem backend.
-func NewOzzieBackend() *OzzieBackend {
-	return &OzzieBackend{}
+// Any extra paths are added to the write allow-list.
+func NewOzzieBackend(bus *events.Bus, writeAllowedPaths ...string) *OzzieBackend {
+	return &OzzieBackend{writeAllowedPaths: writeAllowedPaths, bus: bus}
+}
+
+// isInsideSandbox checks whether absPath falls inside the working directory
+// or any of the allowed paths.
+func (b *OzzieBackend) isInsideSandbox(ctx context.Context, absPath string) bool {
+	if wd := events.WorkDirFromContext(ctx); wd != "" {
+		cleanWD := filepath.Clean(wd)
+		if real, err := filepath.EvalSymlinks(cleanWD); err == nil {
+			cleanWD = real
+		}
+		if isUnder(absPath, cleanWD) {
+			return true
+		}
+	}
+	for _, ap := range b.writeAllowedPaths {
+		clean := filepath.Clean(ap)
+		if real, err := filepath.EvalSymlinks(clean); err == nil {
+			clean = real
+		}
+		if isUnder(absPath, clean) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateWritePath enforces write-path restrictions:
+//   - Inside sandbox (workDir + allowed paths): always allowed.
+//   - Outside sandbox + autonomous mode: hard block (error).
+//   - Outside sandbox + interactive mode: prompt user for confirmation.
+func (b *OzzieBackend) validateWritePath(ctx context.Context, path string) error {
+	absPath, err := filepath.Abs(b.resolvePath(ctx, path))
+	if err != nil {
+		return fmt.Errorf("write guard: resolve path: %w", err)
+	}
+	if real, err := evalSymlinksExisting(absPath); err == nil {
+		absPath = real
+	}
+
+	if b.isInsideSandbox(ctx, absPath) {
+		return nil
+	}
+
+	// Outside sandbox — autonomous mode: hard block
+	if events.IsAutonomousContext(ctx) {
+		return fmt.Errorf("write blocked: path %q is outside allowed write directories", path)
+	}
+
+	// Outside sandbox — interactive mode: ask for confirmation
+	return b.confirmWrite(ctx, path)
+}
+
+// confirmWrite prompts the user via the event bus and blocks until they
+// approve or deny. Returns nil on approval, error on denial or timeout.
+func (b *OzzieBackend) confirmWrite(ctx context.Context, path string) error {
+	if b.bus == nil {
+		// No bus (e.g. unit tests with no bus wired) — deny by default
+		return fmt.Errorf("write blocked: path %q is outside allowed write directories (no confirmation bus)", path)
+	}
+
+	token := uuid.New().String()
+
+	b.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.PromptRequestPayload{
+		Type:  events.PromptTypeConfirm,
+		Label: fmt.Sprintf("Write outside sandbox: %q — allow?", path),
+		Token: token,
+	}))
+
+	ch, unsub := b.bus.SubscribeChan(1, events.EventPromptResponse)
+	defer unsub()
+
+	ctx, cancel := context.WithTimeout(ctx, writeConfirmTimeout)
+	defer cancel()
+
+	for {
+		select {
+		case event := <-ch:
+			payload, ok := events.GetPromptResponsePayload(event)
+			if !ok || payload.Token != token {
+				continue
+			}
+			if payload.Cancelled {
+				return fmt.Errorf("write denied by user: path %q is outside sandbox", path)
+			}
+			return nil // user approved
+		case <-ctx.Done():
+			return fmt.Errorf("write confirmation timed out for path %q", path)
+		}
+	}
 }
 
 func (b *OzzieBackend) resolvePath(ctx context.Context, path string) string {
@@ -224,6 +325,10 @@ func (b *OzzieBackend) GlobInfo(ctx context.Context, req *filesystem.GlobInfoReq
 
 // Write creates or updates file content.
 func (b *OzzieBackend) Write(ctx context.Context, req *filesystem.WriteRequest) error {
+	if err := b.validateWritePath(ctx, req.FilePath); err != nil {
+		return err
+	}
+
 	path := b.resolvePath(ctx, req.FilePath)
 
 	absPath, err := filepath.Abs(path)
@@ -244,6 +349,10 @@ func (b *OzzieBackend) Write(ctx context.Context, req *filesystem.WriteRequest) 
 
 // Edit replaces string occurrences in a file.
 func (b *OzzieBackend) Edit(ctx context.Context, req *filesystem.EditRequest) error {
+	if err := b.validateWritePath(ctx, req.FilePath); err != nil {
+		return err
+	}
+
 	path := b.resolvePath(ctx, req.FilePath)
 
 	data, err := os.ReadFile(path)
