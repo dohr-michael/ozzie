@@ -33,6 +33,7 @@ type Entry struct {
 // runtimeEntry is the unified internal representation for all schedule entries.
 type runtimeEntry struct {
 	id          string
+	name        string
 	source      string // "skill" or "dynamic"
 	sessionID   string
 	title       string
@@ -91,6 +92,7 @@ func New(cfg Config) *Scheduler {
 func (s *Scheduler) Start() {
 	s.loadSkillEntries()
 	s.loadPersistedEntries()
+	s.checkMissedRuns(time.Now())
 
 	slog.Info("scheduler started", "entries", len(s.entries))
 
@@ -136,6 +138,7 @@ func (s *Scheduler) AddEntry(se *ScheduleEntry) error {
 
 	re := &runtimeEntry{
 		id:          se.ID,
+		name:        se.Name,
 		source:      se.Source,
 		sessionID:   se.SessionID,
 		title:       se.Title,
@@ -226,6 +229,7 @@ func (s *Scheduler) ListEntries() []*ScheduleEntry {
 func runtimeToScheduleEntry(re *runtimeEntry) *ScheduleEntry {
 	se := &ScheduleEntry{
 		ID:           re.id,
+		Name:         re.name,
 		Source:       re.source,
 		SessionID:    re.sessionID,
 		Title:        re.title,
@@ -298,6 +302,7 @@ func (s *Scheduler) loadPersistedEntries() {
 
 		re := &runtimeEntry{
 			id:          se.ID,
+			name:        se.Name,
 			source:      se.Source,
 			sessionID:   se.SessionID,
 			title:       se.Title,
@@ -325,8 +330,48 @@ func (s *Scheduler) loadPersistedEntries() {
 			re.cooldown = DefaultCooldown
 		}
 
+		if se.LastRunAt != nil {
+			re.lastRun = *se.LastRunAt
+		}
+
 		s.entries[se.ID] = re
 		slog.Info("scheduler: loaded persisted entry", "id", se.ID, "title", se.Title)
+	}
+}
+
+// checkMissedRuns fires a single catch-up trigger for any cron/interval entry
+// that missed one or more runs while the gateway was down.
+// Event-only entries and entries that have never run (lastRun zero) are skipped.
+func (s *Scheduler) checkMissedRuns(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, entry := range s.entries {
+		if !entry.enabled || entry.lastRun.IsZero() {
+			continue
+		}
+
+		missed := false
+
+		switch {
+		case entry.cron != nil:
+			// Next expected fire after the last run
+			nextFire := entry.cron.Next(entry.lastRun)
+			missed = nextFire.Before(now)
+
+		case entry.intervalSec > 0:
+			interval := time.Duration(entry.intervalSec) * time.Second
+			missed = now.Sub(entry.lastRun) > interval
+
+		default:
+			// Event-only: no catch-up possible
+			continue
+		}
+
+		if missed {
+			slog.Info("scheduler: catch-up trigger", "id", entry.id, "last_run", entry.lastRun)
+			s.triggerEntry(entry, "catch-up")
+		}
 	}
 }
 

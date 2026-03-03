@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dohr-michael/ozzie/internal/names"
 	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
 )
 
@@ -26,24 +27,34 @@ func (fs *FileStore) Create(t *Task) error {
 		t.ID = GenerateTaskID()
 	}
 
+	if t.Name == "" {
+		t.Name = names.GenerateUnique(fs.ds.NameExists)
+	}
+
 	now := time.Now()
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
-	if err := fs.ds.EnsureDir(t.ID); err != nil {
+	dirName := t.ID + "_" + t.Name
+	if err := fs.ds.EnsureDir(dirName); err != nil {
 		return err
 	}
 
-	return fs.ds.WriteMeta(t.ID, t)
+	return fs.ds.WriteMeta(dirName, t)
 }
 
-// Get reads task metadata by ID.
-func (fs *FileStore) Get(id string) (*Task, error) {
+// Get reads task metadata by ID or name.
+func (fs *FileStore) Get(ref string) (*Task, error) {
 	fs.ds.RLock()
 	defer fs.ds.RUnlock()
 
+	dir, err := fs.ds.Resolve(ref)
+	if err != nil {
+		return nil, err
+	}
+
 	var t Task
-	if err := fs.ds.ReadMeta(id, &t); err != nil {
+	if err := fs.ds.ReadMeta(dir, &t); err != nil {
 		return nil, err
 	}
 	return &t, nil
@@ -92,16 +103,26 @@ func (fs *FileStore) Update(t *Task) error {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
+	dir, err := fs.ds.Resolve(t.ID)
+	if err != nil {
+		return err
+	}
+
 	t.UpdatedAt = time.Now()
-	return fs.ds.WriteMeta(t.ID, t)
+	return fs.ds.WriteMeta(dir, t)
 }
 
 // Delete removes a task directory.
-func (fs *FileStore) Delete(id string) error {
+func (fs *FileStore) Delete(ref string) error {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
-	return fs.ds.RemoveDir(id)
+	dir, err := fs.ds.Resolve(ref)
+	if err != nil {
+		return err
+	}
+
+	return fs.ds.RemoveDir(dir)
 }
 
 // AppendCheckpoint appends a checkpoint entry to the JSONL file.
@@ -109,7 +130,11 @@ func (fs *FileStore) AppendCheckpoint(taskID string, cp Checkpoint) error {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
-	return fs.ds.AppendJSONL(taskID, "checkpoints.jsonl", cp)
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return err
+	}
+	return fs.ds.AppendJSONL(dir, "checkpoints.jsonl", cp)
 }
 
 // LoadCheckpoints reads all checkpoints from the JSONL file.
@@ -117,7 +142,11 @@ func (fs *FileStore) LoadCheckpoints(taskID string) ([]Checkpoint, error) {
 	fs.ds.RLock()
 	defer fs.ds.RUnlock()
 
-	return dirstore.LoadJSONL[Checkpoint](fs.ds, taskID, "checkpoints.jsonl")
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return dirstore.LoadJSONL[Checkpoint](fs.ds, dir, "checkpoints.jsonl")
 }
 
 // WriteOutput writes the task output file.
@@ -125,7 +154,11 @@ func (fs *FileStore) WriteOutput(taskID string, content string) error {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
-	return fs.ds.WriteFileAtomic(taskID, "output.md", []byte(content))
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return err
+	}
+	return fs.ds.WriteFileAtomic(dir, "output.md", []byte(content))
 }
 
 // ReadOutput reads the task output file.
@@ -133,7 +166,11 @@ func (fs *FileStore) ReadOutput(taskID string) (string, error) {
 	fs.ds.RLock()
 	defer fs.ds.RUnlock()
 
-	data, err := fs.ds.ReadFileContent(taskID, "output.md")
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return "", err
+	}
+	data, err := fs.ds.ReadFileContent(dir, "output.md")
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +185,11 @@ func (fs *FileStore) AppendMailbox(taskID string, msg MailboxMessage) error {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
-	return fs.ds.AppendJSONL(taskID, "mailbox.jsonl", msg)
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return err
+	}
+	return fs.ds.AppendJSONL(dir, "mailbox.jsonl", msg)
 }
 
 // LoadMailbox reads all mailbox messages from the JSONL file.
@@ -156,5 +197,9 @@ func (fs *FileStore) LoadMailbox(taskID string) ([]MailboxMessage, error) {
 	fs.ds.RLock()
 	defer fs.ds.RUnlock()
 
-	return dirstore.LoadJSONL[MailboxMessage](fs.ds, taskID, "mailbox.jsonl")
+	dir, err := fs.ds.Resolve(taskID)
+	if err != nil {
+		return nil, err
+	}
+	return dirstore.LoadJSONL[MailboxMessage](fs.ds, dir, "mailbox.jsonl")
 }

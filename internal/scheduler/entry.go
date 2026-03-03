@@ -17,6 +17,7 @@ type EventTrigger struct {
 // ScheduleEntry represents a persistent schedule entry (skill-based or dynamic).
 type ScheduleEntry struct {
 	ID           string        `json:"id"`
+	Name         string        `json:"name,omitempty"`
 	Source       string        `json:"source"` // "skill" or "dynamic"
 	SessionID    string        `json:"session_id,omitempty"`
 	Title        string        `json:"title"`

@@ -179,25 +179,19 @@ func TestFileStoreOutput(t *testing.T) {
 		t.Errorf("ReadOutput: got %q, want %q", got, content)
 	}
 
-	// Read output of non-existent task
-	empty, err := store.ReadOutput("nonexistent")
-	if err != nil {
-		t.Fatalf("ReadOutput nonexistent: %v", err)
-	}
-	if empty != "" {
-		t.Errorf("ReadOutput nonexistent: got %q, want empty", empty)
+	// Read output of non-existent task — should return an error
+	_, err = store.ReadOutput("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for ReadOutput of nonexistent task")
 	}
 }
 
 func TestFileStoreLoadCheckpointsEmpty(t *testing.T) {
 	store := NewFileStore(t.TempDir())
 
-	// No file exists
-	cps, err := store.LoadCheckpoints("nonexistent")
-	if err != nil {
-		t.Fatalf("LoadCheckpoints nonexistent: %v", err)
-	}
-	if cps != nil {
-		t.Errorf("expected nil, got %v", cps)
+	// Non-existent task should return an error
+	_, err := store.LoadCheckpoints("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for LoadCheckpoints of nonexistent task")
 	}
 }

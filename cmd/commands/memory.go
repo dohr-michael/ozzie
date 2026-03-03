@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,21 +22,30 @@ func NewMemoryCommand() *cli.Command {
 		Usage: "Manage Ozzie's long-term memory",
 		Commands: []*cli.Command{
 			{
-				Name:   "list",
-				Usage:  "List all memories",
+				Name:  "list",
+				Usage: "List all memories",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
 				Action: runMemoryList,
 			},
 			{
 				Name:      "search",
 				Usage:     "Search memories",
 				ArgsUsage: "<query>",
-				Action:    runMemorySearch,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
+				Action: runMemorySearch,
 			},
 			{
 				Name:      "show",
 				Usage:     "Show a memory entry",
 				ArgsUsage: "<id>",
-				Action:    runMemoryShow,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
+				Action: runMemoryShow,
 			},
 			{
 				Name:      "forget",
@@ -57,12 +67,16 @@ func newMemoryStore() *memory.FileStore {
 	return memory.NewFileStore(filepath.Join(config.OzziePath(), "memory"))
 }
 
-func runMemoryList(_ context.Context, _ *cli.Command) error {
+func runMemoryList(_ context.Context, cmd *cli.Command) error {
 	store := newMemoryStore()
 
 	entries, err := store.List()
 	if err != nil {
 		return fmt.Errorf("list memories: %w", err)
+	}
+
+	if cmd.Bool("json") {
+		return json.NewEncoder(os.Stdout).Encode(entries)
 	}
 
 	if len(entries) == 0 {
@@ -116,6 +130,10 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("search: %w", err)
 	}
 
+	if cmd.Bool("json") {
+		return json.NewEncoder(os.Stdout).Encode(results)
+	}
+
 	if len(results) == 0 {
 		fmt.Println("No matching memories found.")
 		return nil
@@ -147,6 +165,13 @@ func runMemoryShow(_ context.Context, cmd *cli.Command) error {
 	entry, content, err := store.Get(id)
 	if err != nil {
 		return fmt.Errorf("get memory: %w", err)
+	}
+
+	if cmd.Bool("json") {
+		return json.NewEncoder(os.Stdout).Encode(struct {
+			Entry   *memory.MemoryEntry `json:"entry"`
+			Content string              `json:"content"`
+		}{Entry: entry, Content: content})
 	}
 
 	fmt.Printf("ID:         %s\n", entry.ID)

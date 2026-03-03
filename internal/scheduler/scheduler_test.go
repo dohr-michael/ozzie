@@ -387,6 +387,210 @@ func TestScheduler_LoadPersistedEntries(t *testing.T) {
 	}
 }
 
+func TestCheckMissedRuns_CronCatchUp(t *testing.T) {
+	bus := newTestBus()
+	defer bus.Close()
+
+	pool := newTestPool(t, bus)
+	pool.Start()
+	defer pool.Stop()
+
+	triggerCh, unsub := bus.SubscribeChan(4, events.EventScheduleTrigger)
+	defer unsub()
+
+	s := New(Config{Pool: pool, Bus: bus})
+
+	// Manually inject a cron entry with lastRun = yesterday noon
+	expr, err := ParseCron("0 12 * * *")
+	if err != nil {
+		t.Fatalf("parse cron: %v", err)
+	}
+
+	yesterday := time.Now().Add(-24 * time.Hour).Truncate(time.Hour)
+	s.entries["cron_catchup"] = &runtimeEntry{
+		id:       "cron_catchup",
+		source:   "dynamic",
+		title:    "daily noon",
+		cron:     expr,
+		cooldown: DefaultCooldown,
+		enabled:  true,
+		lastRun:  yesterday,
+		tmpl:     &TaskTemplate{Title: "catch-up task", Description: "test"},
+	}
+
+	// Now = today 14h — the noon fire was missed
+	now := time.Now()
+	s.checkMissedRuns(now)
+
+	select {
+	case e := <-triggerCh:
+		payload, ok := events.GetScheduleTriggerPayload(e)
+		if !ok {
+			t.Fatal("failed to extract payload")
+		}
+		if payload.EntryID != "cron_catchup" {
+			t.Fatalf("expected entry ID %q, got %q", "cron_catchup", payload.EntryID)
+		}
+		if payload.Trigger != "catch-up" {
+			t.Fatalf("expected trigger %q, got %q", "catch-up", payload.Trigger)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for catch-up trigger")
+	}
+}
+
+func TestCheckMissedRuns_IntervalCatchUp(t *testing.T) {
+	bus := newTestBus()
+	defer bus.Close()
+
+	pool := newTestPool(t, bus)
+	pool.Start()
+	defer pool.Stop()
+
+	triggerCh, unsub := bus.SubscribeChan(4, events.EventScheduleTrigger)
+	defer unsub()
+
+	s := New(Config{Pool: pool, Bus: bus})
+
+	// Interval entry: 5 min, last run 10 min ago
+	s.entries["interval_catchup"] = &runtimeEntry{
+		id:          "interval_catchup",
+		source:      "dynamic",
+		title:       "every 5m",
+		intervalSec: 300,
+		cooldown:    DefaultCooldown,
+		enabled:     true,
+		lastRun:     time.Now().Add(-10 * time.Minute),
+		tmpl:        &TaskTemplate{Title: "interval catch-up", Description: "test"},
+	}
+
+	s.checkMissedRuns(time.Now())
+
+	select {
+	case e := <-triggerCh:
+		payload, ok := events.GetScheduleTriggerPayload(e)
+		if !ok {
+			t.Fatal("failed to extract payload")
+		}
+		if payload.EntryID != "interval_catchup" {
+			t.Fatalf("expected entry ID %q, got %q", "interval_catchup", payload.EntryID)
+		}
+		if payload.Trigger != "catch-up" {
+			t.Fatalf("expected trigger %q, got %q", "catch-up", payload.Trigger)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for interval catch-up trigger")
+	}
+}
+
+func TestCheckMissedRuns_NoCatchUp(t *testing.T) {
+	bus := newTestBus()
+	defer bus.Close()
+
+	pool := newTestPool(t, bus)
+	pool.Start()
+	defer pool.Stop()
+
+	triggerCh, unsub := bus.SubscribeChan(4, events.EventScheduleTrigger)
+	defer unsub()
+
+	s := New(Config{Pool: pool, Bus: bus})
+
+	// Cron entry whose next fire is in the future — no catch-up needed
+	expr, err := ParseCron("0 12 * * *")
+	if err != nil {
+		t.Fatalf("parse cron: %v", err)
+	}
+
+	// lastRun = just now → next fire is tomorrow noon (in the future)
+	s.entries["cron_no_catchup"] = &runtimeEntry{
+		id:       "cron_no_catchup",
+		source:   "dynamic",
+		title:    "daily noon",
+		cron:     expr,
+		cooldown: DefaultCooldown,
+		enabled:  true,
+		lastRun:  time.Now(),
+		tmpl:     &TaskTemplate{Title: "no catch-up", Description: "test"},
+	}
+
+	// Also add an event-only entry (should always be skipped)
+	s.entries["event_only"] = &runtimeEntry{
+		id:      "event_only",
+		source:  "dynamic",
+		title:   "event",
+		onEvent: &EventTrigger{Event: "task.completed"},
+		enabled: true,
+		lastRun: time.Now().Add(-24 * time.Hour),
+		tmpl:    &TaskTemplate{Title: "event task", Description: "test"},
+	}
+
+	// Also add an entry with zero lastRun (never ran — should be skipped)
+	s.entries["never_ran"] = &runtimeEntry{
+		id:          "never_ran",
+		source:      "dynamic",
+		title:       "never",
+		intervalSec: 60,
+		enabled:     true,
+		tmpl:        &TaskTemplate{Title: "never ran", Description: "test"},
+	}
+
+	s.checkMissedRuns(time.Now())
+
+	select {
+	case <-triggerCh:
+		t.Fatal("expected no catch-up trigger")
+	case <-time.After(200 * time.Millisecond):
+		// Good — no trigger
+	}
+}
+
+func TestScheduler_LoadPersistedEntries_RestoresLastRun(t *testing.T) {
+	bus := newTestBus()
+	defer bus.Close()
+
+	pool := newTestPool(t, bus)
+	storeDir := t.TempDir()
+	store := NewScheduleStore(storeDir)
+
+	// Pre-persist an entry with a LastRunAt value
+	lastRun := time.Now().Add(-1 * time.Hour).Truncate(time.Second)
+	entry := &ScheduleEntry{
+		ID:          "sched_lr1",
+		Source:      "dynamic",
+		Title:       "with-lastrun",
+		Description: "has a last run time",
+		IntervalSec: 60,
+		CooldownSec: 60,
+		Enabled:     true,
+		LastRunAt:   &lastRun,
+		TaskTemplate: &TaskTemplate{
+			Title:       "persisted",
+			Description: "test",
+		},
+	}
+	if err := store.Create(entry); err != nil {
+		t.Fatalf("pre-persist: %v", err)
+	}
+
+	s := New(Config{Pool: pool, Bus: bus, Store: store})
+	s.loadPersistedEntries()
+
+	s.mu.Lock()
+	re, ok := s.entries["sched_lr1"]
+	s.mu.Unlock()
+
+	if !ok {
+		t.Fatal("expected entry to be loaded")
+	}
+	if re.lastRun.IsZero() {
+		t.Fatal("expected lastRun to be restored from LastRunAt")
+	}
+	if !re.lastRun.Equal(lastRun) {
+		t.Fatalf("expected lastRun %v, got %v", lastRun, re.lastRun)
+	}
+}
+
 func TestScheduler_NoStoreBackwardsCompat(t *testing.T) {
 	bus := newTestBus()
 	defer bus.Close()

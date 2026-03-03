@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,20 +21,26 @@ func NewTasksCommand() *cli.Command {
 		Usage: "Manage async tasks",
 		Commands: []*cli.Command{
 			{
-				Name:   "list",
-				Usage:  "List all tasks",
+				Name:  "list",
+				Usage: "List all tasks",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
 				Action: runTasksList,
 			},
 			{
 				Name:      "show",
 				Usage:     "Show task details",
-				ArgsUsage: "<task_id>",
-				Action:    runTasksShow,
+				ArgsUsage: "<name|id>",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{Name: "json", Usage: "Output raw JSON"},
+				},
+				Action: runTasksShow,
 			},
 			{
 				Name:      "cancel",
 				Usage:     "Cancel a task",
-				ArgsUsage: "<task_id>",
+				ArgsUsage: "<name|id>",
 				Action:    runTasksCancel,
 			},
 		},
@@ -45,12 +52,16 @@ func newTaskStore() *tasks.FileStore {
 	return tasks.NewFileStore(filepath.Join(config.OzziePath(), "tasks"))
 }
 
-func runTasksList(_ context.Context, _ *cli.Command) error {
+func runTasksList(_ context.Context, cmd *cli.Command) error {
 	store := newTaskStore()
 
 	list, err := store.List(tasks.ListFilter{})
 	if err != nil {
 		return fmt.Errorf("list tasks: %w", err)
+	}
+
+	if cmd.Bool("json") {
+		return json.NewEncoder(os.Stdout).Encode(list)
 	}
 
 	if len(list) == 0 {
@@ -59,7 +70,7 @@ func runTasksList(_ context.Context, _ *cli.Command) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tPROGRESS\tTITLE")
+	fmt.Fprintln(w, "NAME\tSTATUS\tPROGRESS\tTITLE")
 	for _, t := range list {
 		progress := "-"
 		if t.Progress.TotalSteps > 0 {
@@ -67,8 +78,12 @@ func runTasksList(_ context.Context, _ *cli.Command) error {
 		} else if t.Status == tasks.TaskCompleted {
 			progress = "100%"
 		}
+		displayName := t.Name
+		if displayName == "" {
+			displayName = t.ID
+		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			t.ID,
+			displayName,
 			t.Status,
 			progress,
 			t.Title,
@@ -78,19 +93,26 @@ func runTasksList(_ context.Context, _ *cli.Command) error {
 }
 
 func runTasksShow(_ context.Context, cmd *cli.Command) error {
-	taskID := cmd.Args().First()
-	if taskID == "" {
-		return fmt.Errorf("usage: ozzie tasks show <task_id>")
+	ref := cmd.Args().First()
+	if ref == "" {
+		return fmt.Errorf("usage: ozzie tasks show <name|id>")
 	}
 
 	store := newTaskStore()
 
-	t, err := store.Get(taskID)
+	t, err := store.Get(ref)
 	if err != nil {
 		return fmt.Errorf("get task: %w", err)
 	}
 
+	if cmd.Bool("json") {
+		return json.NewEncoder(os.Stdout).Encode(t)
+	}
+
 	fmt.Printf("ID:          %s\n", t.ID)
+	if t.Name != "" {
+		fmt.Printf("Name:        %s\n", t.Name)
+	}
 	fmt.Printf("Title:       %s\n", t.Title)
 	fmt.Printf("Status:      %s\n", t.Status)
 	fmt.Printf("Priority:    %s\n", t.Priority)
@@ -122,7 +144,7 @@ func runTasksShow(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Checkpoints
-	cps, _ := store.LoadCheckpoints(taskID)
+	cps, _ := store.LoadCheckpoints(t.ID)
 	if len(cps) > 0 {
 		fmt.Println("\nCheckpoints:")
 		for _, cp := range cps {
@@ -136,7 +158,7 @@ func runTasksShow(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Output
-	output, _ := store.ReadOutput(taskID)
+	output, _ := store.ReadOutput(t.ID)
 	if output != "" {
 		fmt.Printf("\nOutput:\n%s\n", output)
 	}
@@ -145,20 +167,25 @@ func runTasksShow(_ context.Context, cmd *cli.Command) error {
 }
 
 func runTasksCancel(_ context.Context, cmd *cli.Command) error {
-	taskID := cmd.Args().First()
-	if taskID == "" {
-		return fmt.Errorf("usage: ozzie tasks cancel <task_id>")
+	ref := cmd.Args().First()
+	if ref == "" {
+		return fmt.Errorf("usage: ozzie tasks cancel <name|id>")
 	}
 
 	store := newTaskStore()
 
-	t, err := store.Get(taskID)
+	t, err := store.Get(ref)
 	if err != nil {
 		return fmt.Errorf("get task: %w", err)
 	}
 
+	displayName := t.Name
+	if displayName == "" {
+		displayName = t.ID
+	}
+
 	if t.Status == tasks.TaskCompleted || t.Status == tasks.TaskCancelled {
-		fmt.Printf("Task %s is already %s.\n", taskID, t.Status)
+		fmt.Printf("Task %s is already %s.\n", displayName, t.Status)
 		return nil
 	}
 
@@ -168,6 +195,6 @@ func runTasksCancel(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("cancel task: %w", err)
 	}
 
-	fmt.Printf("Task %s cancelled.\n", taskID)
+	fmt.Printf("Task %s cancelled.\n", displayName)
 	return nil
 }

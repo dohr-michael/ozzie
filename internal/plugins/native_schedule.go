@@ -135,7 +135,7 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		triggerCount++
 	}
 	if triggerCount == 0 {
-		return "", fmt.Errorf("schedule_task: one of cron, interval, or on_event is required")
+		return "", fmt.Errorf("schedule_task: one of cron, interval, or on_event is required. Example: {\"cron\": \"0 12 * * *\"} for daily at noon, {\"interval\": \"1h\"} for every hour, {\"on_event\": \"task.completed\"} for event-driven")
 	}
 	if triggerCount > 1 {
 		return "", fmt.Errorf("schedule_task: cron, interval, and on_event are mutually exclusive")

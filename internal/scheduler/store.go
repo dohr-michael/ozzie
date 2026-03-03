@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dohr-michael/ozzie/internal/names"
 	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
 )
 
@@ -27,22 +28,32 @@ func (s *ScheduleStore) Create(entry *ScheduleEntry) error {
 		entry.ID = GenerateScheduleID()
 	}
 
+	if entry.Name == "" {
+		entry.Name = names.GenerateUnique(s.ds.NameExists)
+	}
+
 	entry.CreatedAt = time.Now()
 
-	if err := s.ds.EnsureDir(entry.ID); err != nil {
+	dirName := entry.ID + "_" + entry.Name
+	if err := s.ds.EnsureDir(dirName); err != nil {
 		return err
 	}
 
-	return s.ds.WriteMeta(entry.ID, entry)
+	return s.ds.WriteMeta(dirName, entry)
 }
 
-// Get reads a schedule entry by ID.
-func (s *ScheduleStore) Get(id string) (*ScheduleEntry, error) {
+// Get reads a schedule entry by ID or name.
+func (s *ScheduleStore) Get(ref string) (*ScheduleEntry, error) {
 	s.ds.RLock()
 	defer s.ds.RUnlock()
 
+	dir, err := s.ds.Resolve(ref)
+	if err != nil {
+		return nil, err
+	}
+
 	var entry ScheduleEntry
-	if err := s.ds.ReadMeta(id, &entry); err != nil {
+	if err := s.ds.ReadMeta(dir, &entry); err != nil {
 		return nil, err
 	}
 	return &entry, nil
@@ -53,15 +64,25 @@ func (s *ScheduleStore) Update(entry *ScheduleEntry) error {
 	s.ds.Lock()
 	defer s.ds.Unlock()
 
-	return s.ds.WriteMeta(entry.ID, entry)
+	dir, err := s.ds.Resolve(entry.ID)
+	if err != nil {
+		return err
+	}
+
+	return s.ds.WriteMeta(dir, entry)
 }
 
 // Delete removes a schedule entry directory.
-func (s *ScheduleStore) Delete(id string) error {
+func (s *ScheduleStore) Delete(ref string) error {
 	s.ds.Lock()
 	defer s.ds.Unlock()
 
-	return s.ds.RemoveDir(id)
+	dir, err := s.ds.Resolve(ref)
+	if err != nil {
+		return err
+	}
+
+	return s.ds.RemoveDir(dir)
 }
 
 // List returns all schedule entries, sorted by CreatedAt descending.
