@@ -14,6 +14,8 @@ type Actor struct {
 	ID           string      `json:"id"`
 	ProviderName string      `json:"provider_name"`
 	Tags         []string    `json:"tags,omitempty"`
+	Capabilities []string    `json:"capabilities,omitempty"`
+	PromptPrefix string      `json:"prompt_prefix,omitempty"`
 	Status       ActorStatus `json:"status"`
 	CurrentTask  string      `json:"current_task,omitempty"`
 }
@@ -30,6 +32,24 @@ func (a *Actor) MatchesTags(requested []string) bool {
 	}
 	for _, t := range requested {
 		if !have[t] {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchesCapabilities returns true if the actor supports all required capabilities.
+// An empty request matches any actor.
+func (a *Actor) MatchesCapabilities(required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	have := make(map[string]bool, len(a.Capabilities))
+	for _, c := range a.Capabilities {
+		have[c] = true
+	}
+	for _, c := range required {
+		if !have[c] {
 			return false
 		}
 	}

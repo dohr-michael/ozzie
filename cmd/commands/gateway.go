@@ -125,6 +125,15 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	eventLogger := storage.NewEventLogger(logsDir, bus)
 	defer eventLogger.Close()
 
+	// Validate provider capabilities (warning only — allows future extensibility)
+	for name, prov := range cfg.Models.Providers {
+		if len(prov.Capabilities) > 0 {
+			if err := models.ValidateCapabilities(prov.Capabilities); err != nil {
+				slog.Warn("provider has unknown capability", "provider", name, "error", err)
+			}
+		}
+	}
+
 	// Model registry
 	registry := models.NewRegistry(cfg.Models)
 
@@ -456,6 +465,20 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Build full tool descriptions for prompt composer
 	allToolDescs := toolRegistry.AllToolDescriptions()
 
+	// Build actor descriptions for the planner prompt (non-default providers only)
+	var actorDescs []agent.ActorDescription
+	for name, prov := range cfg.Models.Providers {
+		if name == cfg.Models.Default {
+			continue // skip the default provider — it's the planner itself
+		}
+		actorDescs = append(actorDescs, agent.ActorDescription{
+			Name:         name,
+			Tags:         prov.Tags,
+			Capabilities: prov.Capabilities,
+			PromptPrefix: prov.PromptPrefix,
+		})
+	}
+
 	// Context middleware — injects dynamic context (instructions, tools, session, memories)
 	contextMw := agent.NewContextMiddleware(agent.ContextMiddlewareConfig{
 		CustomInstructions:  cfg.Agent.SystemPrompt,
@@ -466,6 +489,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		ToolSet:             toolSet,
 		Retriever:           memoryRetriever,
 		Tier:                defaultTier,
+		ActorDescriptions:   actorDescs,
 	})
 
 	var middlewares []adk.AgentMiddleware

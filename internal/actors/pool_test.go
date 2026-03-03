@@ -147,6 +147,89 @@ func TestActorMatchesTags(t *testing.T) {
 	}
 }
 
+func TestActorMatchesCapabilities(t *testing.T) {
+	actor := &Actor{
+		Capabilities: []string{"coding", "tool_use", "fast"},
+	}
+
+	tests := []struct {
+		caps []string
+		want bool
+	}{
+		{nil, true},
+		{[]string{}, true},
+		{[]string{"coding"}, true},
+		{[]string{"coding", "tool_use"}, true},
+		{[]string{"coding", "tool_use", "fast"}, true},
+		{[]string{"vision"}, false},
+		{[]string{"coding", "vision"}, false},
+	}
+
+	for _, tt := range tests {
+		got := actor.MatchesCapabilities(tt.caps)
+		if got != tt.want {
+			t.Errorf("MatchesCapabilities(%v): got %v, want %v", tt.caps, got, tt.want)
+		}
+	}
+}
+
+func TestFindIdleActorWithCapabilities(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"coder": {MaxConcurrent: 1, Tags: []string{"coder"}, Capabilities: []string{"coding", "tool_use"}},
+		"writer": {MaxConcurrent: 1, Tags: []string{"writer"}, Capabilities: []string{"fast", "writing"}},
+	})
+
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	// Find by capabilities only
+	actor := pool.findIdleActor("", nil, []string{"coding"})
+	if actor == nil {
+		t.Fatal("expected to find coder actor")
+	}
+	if actor.ProviderName != "coder" {
+		t.Errorf("provider: got %q, want %q", actor.ProviderName, "coder")
+	}
+
+	// Find by tags + capabilities
+	actor = pool.findIdleActor("", []string{"writer"}, []string{"fast"})
+	if actor == nil {
+		t.Fatal("expected to find writer actor")
+	}
+	if actor.ProviderName != "writer" {
+		t.Errorf("provider: got %q, want %q", actor.ProviderName, "writer")
+	}
+
+	// No match for non-existent capability
+	actor = pool.findIdleActor("", nil, []string{"vision"})
+	if actor != nil {
+		t.Error("expected nil for unmatched capability")
+	}
+}
+
+func TestActorPoolPropagatesCapabilities(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"overlay": {
+			MaxConcurrent: 1,
+			Tags:          []string{"coder"},
+			Capabilities:  []string{"coding", "tool_use"},
+			PromptPrefix:  "You are a code specialist.",
+		},
+	})
+
+	if len(pool.actors) != 1 {
+		t.Fatalf("actors: got %d, want 1", len(pool.actors))
+	}
+
+	actor := pool.actors[0]
+	if len(actor.Capabilities) != 2 {
+		t.Errorf("capabilities: got %d, want 2", len(actor.Capabilities))
+	}
+	if actor.PromptPrefix != "You are a code specialist." {
+		t.Errorf("prompt_prefix: got %q, want %q", actor.PromptPrefix, "You are a code specialist.")
+	}
+}
+
 func TestAcquireInteractiveIdle(t *testing.T) {
 	pool := newTestPool(t, map[string]config.ProviderConfig{
 		"claude": {MaxConcurrent: 2},
@@ -294,7 +377,7 @@ func TestProviderCooldown(t *testing.T) {
 	pool.mu.Unlock()
 
 	pool.mu.Lock()
-	actor := pool.findIdleActor("", nil)
+	actor := pool.findIdleActor("", nil, nil)
 	pool.mu.Unlock()
 
 	if actor == nil {
@@ -316,7 +399,7 @@ func TestProviderCooldownExpired(t *testing.T) {
 	pool.mu.Unlock()
 
 	pool.mu.Lock()
-	actor := pool.findIdleActor("", nil)
+	actor := pool.findIdleActor("", nil, nil)
 	pool.mu.Unlock()
 
 	if actor == nil {

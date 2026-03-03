@@ -80,6 +80,14 @@ func SubmitTaskManifest() *PluginManifest {
 						Type:        "string",
 						Description: "Name of a skill to execute directly (bypasses agent reasoning)",
 					},
+					"actor_tags": {
+						Type:        "array",
+						Description: "Tags to match actors (e.g. [\"coder\"]). The task will run on an actor that has ALL specified tags.",
+					},
+					"required_capabilities": {
+						Type:        "array",
+						Description: "Required model capabilities (e.g. [\"coding\", \"tool_use\"]). The task will run on an actor whose model supports ALL specified capabilities.",
+					},
 				},
 			},
 		},
@@ -87,15 +95,17 @@ func SubmitTaskManifest() *PluginManifest {
 }
 
 type submitTaskInput struct {
-	Title         string            `json:"title"`
-	Description   string            `json:"description"`
-	Tools         []string          `json:"tools"`
-	WorkDir       string            `json:"work_dir,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	Priority      string            `json:"priority"`
-	DependsOn     []string          `json:"depends_on"`
-	AutonomyLevel string            `json:"autonomy_level,omitempty"` // empty = use system default
-	Skill         string            `json:"skill,omitempty"`
+	Title                string            `json:"title"`
+	Description          string            `json:"description"`
+	Tools                []string          `json:"tools"`
+	WorkDir              string            `json:"work_dir,omitempty"`
+	Env                  map[string]string `json:"env,omitempty"`
+	Priority             string            `json:"priority"`
+	DependsOn            []string          `json:"depends_on"`
+	AutonomyLevel        string            `json:"autonomy_level,omitempty"` // empty = use system default
+	Skill                string            `json:"skill,omitempty"`
+	ActorTags            []string          `json:"actor_tags,omitempty"`
+	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
@@ -145,12 +155,15 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		Description: input.Description,
 		Priority:    priority,
 		DependsOn:   input.DependsOn,
+		Tags:        input.ActorTags,
 		Config: tasks.TaskConfig{
-			Tools:         tools,
-			WorkDir:       input.WorkDir,
-			Env:           input.Env,
-			Skill:         input.Skill,
-			AutonomyLevel: autonomy,
+			Tools:                tools,
+			WorkDir:              input.WorkDir,
+			Env:                  input.Env,
+			Skill:                input.Skill,
+			AutonomyLevel:        autonomy,
+			RequiredTags:         input.ActorTags,
+			RequiredCapabilities: input.RequiredCapabilities,
 		},
 	}
 

@@ -62,12 +62,14 @@ type TaskPlan struct {
 
 // TaskConfig holds execution parameters for a task.
 type TaskConfig struct {
-	Model         string            `json:"model,omitempty"`
-	Tools         []string          `json:"tools,omitempty"`
-	Skill         string            `json:"skill,omitempty"`
-	WorkDir       string            `json:"work_dir,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	AutonomyLevel string            `json:"autonomy_level,omitempty"` // "disabled" | "supervised" | "autonomous"
+	Model                string            `json:"model,omitempty"`
+	Tools                []string          `json:"tools,omitempty"`
+	Skill                string            `json:"skill,omitempty"`
+	WorkDir              string            `json:"work_dir,omitempty"`
+	Env                  map[string]string `json:"env,omitempty"`
+	AutonomyLevel        string            `json:"autonomy_level,omitempty"` // "disabled" | "supervised" | "autonomous"
+	RequiredTags         []string          `json:"required_tags,omitempty"`
+	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
 }
 
 // IsCoordinator returns true if the task uses any coordinator workflow (supervised or autonomous).
@@ -101,6 +103,7 @@ type TaskResult struct {
 // Task represents an async unit of work.
 type Task struct {
 	ID              string       `json:"id"`
+	Name            string       `json:"name,omitempty"`
 	SessionID       string       `json:"session_id,omitempty"`
 	ParentTaskID    string       `json:"parent_task_id,omitempty"`
 	DependsOn       []string     `json:"depends_on,omitempty"`

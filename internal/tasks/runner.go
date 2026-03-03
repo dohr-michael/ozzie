@@ -44,6 +44,7 @@ type TaskRunner struct {
 	middlewares         []adk.AgentMiddleware
 	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
 	tier                agent.ModelTier       // model tier for prompt adaptation
+	promptPrefix        string                // overlay-specific prompt prefix
 
 	selfSuspendCh chan events.ValidationRequest // side channel for self-suspension
 }
@@ -60,6 +61,7 @@ type TaskRunnerConfig struct {
 	Middlewares         []adk.AgentMiddleware   // middlewares for sub-agents (e.g. filesystem, reduction)
 	Retriever           agent.MemoryRetriever  // pre-task memory retrieval (optional)
 	Tier                agent.ModelTier        // model tier for prompt adaptation
+	PromptPrefix        string                 // overlay-specific prompt prefix (optional)
 }
 
 // NewTaskRunner creates a runner for a specific task.
@@ -89,6 +91,7 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 		middlewares:         mws,
 		retriever:           cfg.Retriever,
 		tier:                cfg.Tier,
+		promptPrefix:        cfg.PromptPrefix,
 		selfSuspendCh:       make(chan events.ValidationRequest, 1),
 	}
 }
@@ -210,8 +213,8 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 	depContext := buildDependencyContext(r.store, task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
+	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s%s",
+		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext))
 
 	slog.Debug("task agent instruction",
 		"task_id", task.ID,
@@ -271,7 +274,7 @@ func (r *TaskRunner) runCoordinatorPlanning(ctx context.Context, task *Task, sta
 	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := agent.CoordinatorPromptForTier(agent.LoadCoordinatorPrompt(), r.tier)
+	instruction := r.prefixedInstruction(agent.CoordinatorPromptForTier(agent.LoadCoordinatorPrompt(), r.tier))
 	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
@@ -459,7 +462,7 @@ func (r *TaskRunner) runCoordinatorAutonomous(ctx context.Context, task *Task, s
 	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
 	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := agent.AutonomousPromptForTier(agent.LoadAutonomousPrompt(), r.tier)
+	instruction := r.prefixedInstruction(agent.AutonomousPromptForTier(agent.LoadAutonomousPrompt(), r.tier))
 	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
 
@@ -604,8 +607,8 @@ func (r *TaskRunner) runPlanSteps(ctx context.Context, task *Task, startedAt tim
 			depCtx = buildDependencyContext(r.store, task.DependsOn)
 			memCtx = r.buildMemoryContext()
 		}
-		instruction := fmt.Sprintf("You are executing step %d/%d of a task.\n\nTask: %s\nStep: %s",
-			i+1, len(task.Plan.Steps), task.Title, step.Title)
+		instruction := r.prefixedInstruction(fmt.Sprintf("You are executing step %d/%d of a task.\n\nTask: %s\nStep: %s",
+			i+1, len(task.Plan.Steps), task.Title, step.Title))
 		if step.Description != "" {
 			instruction += fmt.Sprintf("\n\nStep details:\n%s", step.Description)
 		}
@@ -997,6 +1000,14 @@ func buildMailboxContext(store Store, taskID string) string {
 	}
 
 	return b.String()
+}
+
+// prefixedInstruction prepends the overlay's prompt prefix (if any) to the instruction.
+func (r *TaskRunner) prefixedInstruction(instruction string) string {
+	if r.promptPrefix == "" {
+		return instruction
+	}
+	return r.promptPrefix + "\n\n" + instruction
 }
 
 func truncate(s string, maxLen int) string {

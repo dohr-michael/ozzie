@@ -97,4 +97,5 @@ func applyDefaults(cfg *Config) {
 		}
 	}
 	// Auth resolution is deferred to models.ResolveAuth() at model init time.
+	// Capability validation is deferred to gateway startup (avoids import cycle).
 }

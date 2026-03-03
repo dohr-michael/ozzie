@@ -21,6 +21,14 @@ type MemoryRetriever interface {
 	Retrieve(query string, tags []string, limit int) ([]memory.RetrievedMemory, error)
 }
 
+// ActorDescription describes a configured actor overlay for the planner prompt.
+type ActorDescription struct {
+	Name         string
+	Tags         []string
+	Capabilities []string
+	PromptPrefix string // first 80 chars for context
+}
+
 // ContextMiddlewareConfig configures the dynamic context middleware.
 type ContextMiddlewareConfig struct {
 	CustomInstructions  string            // Layer 2: from config.Agent.SystemPrompt
@@ -31,6 +39,7 @@ type ContextMiddlewareConfig struct {
 	ToolSet             *ToolSet          // For active/inactive tool lists
 	Retriever           MemoryRetriever   // Layer 6: memory retrieval (optional)
 	Tier                ModelTier         // Model tier for prompt adaptation
+	ActorDescriptions   []ActorDescription // Layer 3c: available actors for delegation
 }
 
 // NewContextMiddleware builds an AgentMiddleware that injects dynamic context
@@ -76,6 +85,25 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		instruction.WriteString("You can delegate complex tasks to these specialized skills:\n")
 		for _, name := range names[:maxSkills] {
 			instruction.WriteString(fmt.Sprintf("- **%s**: %s\n", name, cfg.SkillDescriptions[name]))
+		}
+		instruction.WriteString("\n")
+	}
+
+	// Layer 3c: Available actors for delegation
+	if len(cfg.ActorDescriptions) > 0 {
+		instruction.WriteString("## Available Actors\n\n")
+		instruction.WriteString("You can delegate tasks to these specialized actors using submit_task or plan_task.\n")
+		instruction.WriteString("Use actor_tags to target a specific actor type.\n\n")
+		for _, a := range cfg.ActorDescriptions {
+			instruction.WriteString(fmt.Sprintf("- **%s** — tags: %v, capabilities: %v\n",
+				a.Name, a.Tags, a.Capabilities))
+			if a.PromptPrefix != "" {
+				prefix := a.PromptPrefix
+				if len(prefix) > 80 {
+					prefix = prefix[:80] + "..."
+				}
+				instruction.WriteString(fmt.Sprintf("  Role: %s\n", prefix))
+			}
 		}
 		instruction.WriteString("\n")
 	}

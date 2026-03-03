@@ -147,6 +147,8 @@ type ProviderConfig struct {
 	ContextWindow int            `json:"context_window,omitempty"` // total context window in tokens (0 = driver default)
 	MaxConcurrent int            `json:"max_concurrent,omitempty"`
 	Tags          []string       `json:"tags,omitempty"`
+	Capabilities  []string       `json:"capabilities,omitempty"`   // e.g. ["thinking", "tool_use", "coding"]
+	PromptPrefix  string         `json:"prompt_prefix,omitempty"`  // custom instruction injected for this overlay
 	Tier          string         `json:"tier,omitempty"` // "small" | "medium" | "large" (auto-detected if empty)
 	Timeout   Duration       `json:"timeout,omitempty"`
 	Options   map[string]any `json:"options,omitempty"`

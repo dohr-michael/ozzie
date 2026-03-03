@@ -85,6 +85,8 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 				ID:           fmt.Sprintf("%s-%d", name, i),
 				ProviderName: name,
 				Tags:         prov.Tags,
+				Capabilities: prov.Capabilities,
+				PromptPrefix: prov.PromptPrefix,
 				Status:       ActorIdle,
 			})
 		}
@@ -215,7 +217,7 @@ func (p *ActorPool) AcquireInteractive(providerName string) (*Actor, error) {
 	defer p.mu.Unlock()
 
 	// Try to find an idle actor for this provider
-	if actor := p.findIdleActor(providerName, nil); actor != nil {
+	if actor := p.findIdleActor(providerName, nil, nil); actor != nil {
 		actor.Status = ActorBusy
 		actor.CurrentTask = "_interactive"
 		return actor, nil
@@ -280,7 +282,7 @@ func (p *ActorPool) schedule() {
 			continue
 		}
 
-		actor := p.findIdleActor("", t.Tags)
+		actor := p.findIdleActor("", t.Tags, t.Config.RequiredCapabilities)
 		if actor == nil {
 			continue
 		}
@@ -309,10 +311,10 @@ func (p *ActorPool) schedule() {
 			continue
 		}
 
-		actor := p.findIdleActor("", t.Tags)
+		actor := p.findIdleActor("", t.Tags, t.Config.RequiredCapabilities)
 		if actor == nil {
-			if len(t.Tags) > 0 {
-				slog.Warn("no actor matches task tags", "task_id", t.ID, "tags", t.Tags)
+			if len(t.Tags) > 0 || len(t.Config.RequiredCapabilities) > 0 {
+				slog.Warn("no actor matches task requirements", "task_id", t.ID, "tags", t.Tags, "capabilities", t.Config.RequiredCapabilities)
 			}
 			continue
 		}
@@ -323,10 +325,10 @@ func (p *ActorPool) schedule() {
 	}
 }
 
-// findIdleActor returns the first idle actor matching the provider (if non-empty) and tags.
+// findIdleActor returns the first idle actor matching the provider (if non-empty), tags, and capabilities.
 // Actors whose provider is in cooldown are skipped.
 // Caller must hold p.mu.
-func (p *ActorPool) findIdleActor(providerName string, requiredTags []string) *Actor {
+func (p *ActorPool) findIdleActor(providerName string, requiredTags []string, requiredCaps []string) *Actor {
 	for _, a := range p.actors {
 		if a.Status != ActorIdle {
 			continue
@@ -335,6 +337,9 @@ func (p *ActorPool) findIdleActor(providerName string, requiredTags []string) *A
 			continue
 		}
 		if !a.MatchesTags(requiredTags) {
+			continue
+		}
+		if !a.MatchesCapabilities(requiredCaps) {
 			continue
 		}
 		// Skip providers in cooldown
@@ -497,6 +502,7 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		Middlewares:         p.taskMiddlewares,
 		Retriever:           p.retriever,
 		Tier:                tier,
+		PromptPrefix:        actor.PromptPrefix,
 	})
 
 	if err := runner.Run(ctx); err != nil {
@@ -652,6 +658,7 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 		Middlewares:         p.taskMiddlewares,
 		Retriever:           p.retriever,
 		Tier:                tier,
+		PromptPrefix:        actor.PromptPrefix,
 	})
 
 	if err := runner.Run(ctx); err != nil {

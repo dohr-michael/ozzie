@@ -75,6 +75,16 @@ func PlanTaskManifest() *PluginManifest {
 									Description: "Indices (0-based) of steps that must complete before this step can start. Example: [0, 1] means this step depends on steps 0 and 1.",
 									Items:       &ParamSpec{Type: "integer"},
 								},
+								"actor_tags": {
+									Type:        "array",
+									Description: "Tags to match actors for this step (e.g. [\"coder\"]).",
+									Items:       &ParamSpec{Type: "string"},
+								},
+								"required_capabilities": {
+									Type:        "array",
+									Description: "Required model capabilities for this step (e.g. [\"coding\", \"tool_use\"]).",
+									Items:       &ParamSpec{Type: "string"},
+								},
 							},
 						},
 					},
@@ -92,10 +102,12 @@ type planTaskInput struct {
 }
 
 type planStep struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Tools       []string `json:"tools,omitempty"`
-	DependsOn   []int    `json:"depends_on,omitempty"`
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	Tools                []string `json:"tools,omitempty"`
+	DependsOn            []int    `json:"depends_on,omitempty"`
+	ActorTags            []string `json:"actor_tags,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
 
 type planTaskResult struct {
@@ -188,10 +200,13 @@ func (t *PlanTaskTool) runInline(ctx context.Context, inliner tasks.InlineExecut
 			Title:       step.Title,
 			Description: step.Description,
 			DependsOn:   deps,
+			Tags:        step.ActorTags,
 			Config: tasks.TaskConfig{
-				Tools:   tools,
-				WorkDir: input.WorkDir,
-				Env:     input.Env,
+				Tools:                tools,
+				WorkDir:              input.WorkDir,
+				Env:                  input.Env,
+				RequiredTags:         step.ActorTags,
+				RequiredCapabilities: step.RequiredCapabilities,
 			},
 		}
 
@@ -259,10 +274,13 @@ func (t *PlanTaskTool) runAsync(_ context.Context, input planTaskInput, sessionI
 			Title:       step.Title,
 			Description: step.Description,
 			DependsOn:   deps,
+			Tags:        step.ActorTags,
 			Config: tasks.TaskConfig{
-				Tools:   tools,
-				WorkDir: input.WorkDir,
-				Env:     input.Env,
+				Tools:                tools,
+				WorkDir:              input.WorkDir,
+				Env:                  input.Env,
+				RequiredTags:         step.ActorTags,
+				RequiredCapabilities: step.RequiredCapabilities,
 			},
 		}
 
