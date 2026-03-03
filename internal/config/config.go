@@ -4,26 +4,53 @@ import "time"
 
 // Config is the root configuration for Ozzie.
 type Config struct {
-	Gateway GatewayConfig `json:"gateway"`
-	Models  ModelsConfig  `json:"models"`
-	Events  EventsConfig  `json:"events"`
-	Agent     AgentConfig     `json:"agent"`
-	Embedding EmbeddingConfig `json:"embedding"`
-	Plugins   PluginsConfig   `json:"plugins"`
-	Skills  SkillsConfig  `json:"skills"`
-	Tools   ToolsConfig   `json:"tools"`
-	Sandbox SandboxConfig `json:"sandbox"`
-	Runtime RuntimeConfig `json:"runtime"`
-	Web     WebConfig     `json:"web"`
+	Gateway        GatewayConfig        `json:"gateway"`
+	Models         ModelsConfig         `json:"models"`
+	Events         EventsConfig         `json:"events"`
+	Agent          AgentConfig          `json:"agent"`
+	Embedding      EmbeddingConfig      `json:"embedding"`
+	Plugins        PluginsConfig        `json:"plugins"`
+	Skills         SkillsConfig         `json:"skills"`
+	Tools          ToolsConfig          `json:"tools"`
+	Sandbox        SandboxConfig        `json:"sandbox"`
+	Runtime        RuntimeConfig        `json:"runtime"`
+	Web            WebConfig            `json:"web"`
+	MCP            MCPConfig            `json:"mcp"`
 	LayeredContext LayeredContextConfig `json:"layered_context"`
+}
+
+// MCPConfig configures external MCP server connections.
+type MCPConfig struct {
+	Servers map[string]*MCPServerConfig `json:"servers,omitempty"`
+}
+
+// MCPServerConfig configures a single external MCP server.
+type MCPServerConfig struct {
+	Transport    string            `json:"transport"`               // "stdio" | "sse" | "http"
+	Command      string            `json:"command,omitempty"`       // stdio: command to launch
+	Args         []string          `json:"args,omitempty"`          // stdio: command arguments
+	Env          map[string]string `json:"env,omitempty"`           // env vars passed to subprocess (supports ${{ .Env.VAR }})
+	URL          string            `json:"url,omitempty"`           // sse/http: endpoint URL
+	Dangerous    *bool             `json:"dangerous,omitempty"`     // default: true — all tools from this server
+	AllowedTools []string          `json:"allowed_tools,omitempty"` // empty = all tools allowed
+	DeniedTools  []string          `json:"denied_tools,omitempty"`  // blacklist (takes priority over allowed)
+	Timeout      int               `json:"timeout,omitempty"`       // ms per CallTool (default: 30000)
+}
+
+// IsDangerous returns true if the server's tools should be marked dangerous (default: true).
+func (c *MCPServerConfig) IsDangerous() bool {
+	if c.Dangerous == nil {
+		return true
+	}
+	return *c.Dangerous
 }
 
 // LayeredContextConfig configures the layered context compression system.
 type LayeredContextConfig struct {
-	Enabled           *bool `json:"enabled"`              // default: false
-	MaxArchives       int   `json:"max_archives"`         // default: 12
-	MaxRecentMessages int   `json:"max_recent_messages"`  // default: 24
-	ArchiveChunkSize  int   `json:"archive_chunk_size"`   // default: 8
+	Enabled           *bool `json:"enabled"`             // default: false
+	MaxArchives       int   `json:"max_archives"`        // default: 12
+	MaxRecentMessages int   `json:"max_recent_messages"` // default: 24
+	ArchiveChunkSize  int   `json:"archive_chunk_size"`  // default: 8
 }
 
 // IsEnabled returns true if layered context is enabled (default: false).
@@ -39,10 +66,10 @@ type WebConfig struct {
 
 // WebSearchConfig configures the web search tool.
 type WebSearchConfig struct {
-	Enabled      *bool  `json:"enabled"`                // default: true
-	Provider     string `json:"provider"`               // "duckduckgo" (default) | "google" | "bing"
-	Timeout      string `json:"timeout,omitempty"`      // default: "30s"
-	MaxResults   int    `json:"max_results"`            // default: 10
+	Enabled      *bool  `json:"enabled"`           // default: true
+	Provider     string `json:"provider"`          // "duckduckgo" (default) | "google" | "bing"
+	Timeout      string `json:"timeout,omitempty"` // default: "30s"
+	MaxResults   int    `json:"max_results"`       // default: 10
 	GoogleAPIKey string `json:"google_api_key,omitempty"`
 	GoogleCX     string `json:"google_cx,omitempty"`
 	BingAPIKey   string `json:"bing_api_key,omitempty"`
@@ -59,8 +86,8 @@ func (c WebSearchConfig) IsSearchEnabled() bool {
 // WebFetchConfig configures the web fetch tool.
 type WebFetchConfig struct {
 	Enabled   *bool  `json:"enabled"`           // default: true
-	Timeout   string `json:"timeout,omitempty"`  // default: "30s"
-	MaxBodyKB int    `json:"max_body_kb"`        // default: 512
+	Timeout   string `json:"timeout,omitempty"` // default: "30s"
+	MaxBodyKB int    `json:"max_body_kb"`       // default: 512
 	UserAgent string `json:"user_agent,omitempty"`
 }
 
@@ -74,7 +101,7 @@ func (c WebFetchConfig) IsFetchEnabled() bool {
 
 // RuntimeConfig configures the runtime environment awareness.
 type RuntimeConfig struct {
-	Environment     string `json:"environment,omitempty"`        // "local" | "container"
+	Environment     string `json:"environment,omitempty"`       // "local" | "container"
 	SystemToolsFile string `json:"system_tools_file,omitempty"` // path to auto-generated tools JSON
 }
 
@@ -121,8 +148,41 @@ type SkillsConfig struct {
 
 // PluginsConfig configures the plugin system.
 type PluginsConfig struct {
-	Dir     string   `json:"dir"`     // plugin directory (default: $OZZIE_PATH/plugins)
-	Enabled []string `json:"enabled"` // enabled plugin names (empty = all)
+	Dir            string                                `json:"dir"`     // plugin directory (default: $OZZIE_PATH/plugins)
+	Enabled        []string                              `json:"enabled"` // enabled plugin names (empty = all)
+	Authorizations map[string]*PluginAuthorizationConfig `json:"authorizations,omitempty"`
+}
+
+// PluginAuthorizationConfig defines what Ozzie authorizes for a specific plugin.
+// Mirror types live here to avoid import cycles (config -> plugins).
+type PluginAuthorizationConfig struct {
+	HTTP       *HTTPAuthConfig       `json:"http,omitempty"`
+	Filesystem *FSAuthConfig         `json:"filesystem,omitempty"`
+	Secrets    *SecretsAuthConfig    `json:"secrets,omitempty"`
+	Deny       []string              `json:"deny,omitempty"`
+	Resources  *ResourceLimitsConfig `json:"resources,omitempty"`
+}
+
+// HTTPAuthConfig authorizes HTTP access to specific hosts.
+type HTTPAuthConfig struct {
+	AllowedHosts []string `json:"allowed_hosts"`
+}
+
+// FSAuthConfig authorizes filesystem access to specific paths.
+type FSAuthConfig struct {
+	AllowedPaths map[string]string `json:"allowed_paths"`
+	ReadOnly     bool              `json:"read_only,omitempty"`
+}
+
+// SecretsAuthConfig authorizes access to specific secrets.
+type SecretsAuthConfig struct {
+	Allowed []string `json:"allowed"`
+}
+
+// ResourceLimitsConfig configures resource limits for a plugin.
+type ResourceLimitsConfig struct {
+	MemoryMaxPages uint32 `json:"memory_max_pages,omitempty"`
+	Timeout        int    `json:"timeout,omitempty"` // milliseconds
 }
 
 // GatewayConfig holds the gateway server settings.
@@ -139,19 +199,19 @@ type ModelsConfig struct {
 
 // ProviderConfig configures a single LLM provider.
 type ProviderConfig struct {
-	Driver    string         `json:"driver"` // "anthropic", "openai"
-	Model     string         `json:"model"`
-	BaseURL   string         `json:"base_url,omitempty"`
-	Auth      AuthConfig     `json:"auth"`
+	Driver        string         `json:"driver"` // "anthropic", "openai"
+	Model         string         `json:"model"`
+	BaseURL       string         `json:"base_url,omitempty"`
+	Auth          AuthConfig     `json:"auth"`
 	MaxTokens     int            `json:"max_tokens,omitempty"`
 	ContextWindow int            `json:"context_window,omitempty"` // total context window in tokens (0 = driver default)
 	MaxConcurrent int            `json:"max_concurrent,omitempty"`
 	Tags          []string       `json:"tags,omitempty"`
-	Capabilities  []string       `json:"capabilities,omitempty"`   // e.g. ["thinking", "tool_use", "coding"]
-	PromptPrefix  string         `json:"prompt_prefix,omitempty"`  // custom instruction injected for this overlay
-	Tier          string         `json:"tier,omitempty"` // "small" | "medium" | "large" (auto-detected if empty)
-	Timeout   Duration       `json:"timeout,omitempty"`
-	Options   map[string]any `json:"options,omitempty"`
+	Capabilities  []string       `json:"capabilities,omitempty"`  // e.g. ["thinking", "tool_use", "coding"]
+	PromptPrefix  string         `json:"prompt_prefix,omitempty"` // custom instruction injected for this overlay
+	Tier          string         `json:"tier,omitempty"`          // "small" | "medium" | "large" (auto-detected if empty)
+	Timeout       Duration       `json:"timeout,omitempty"`
+	Options       map[string]any `json:"options,omitempty"`
 }
 
 // AuthConfig configures API key resolution.

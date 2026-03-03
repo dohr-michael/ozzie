@@ -89,6 +89,14 @@ func applyDefaults(cfg *Config) {
 		cfg.LayeredContext.ArchiveChunkSize = 8
 	}
 
+	// MCP server defaults
+	for name, srv := range cfg.MCP.Servers {
+		if srv.Timeout <= 0 {
+			srv.Timeout = 30000
+			cfg.MCP.Servers[name] = srv
+		}
+	}
+
 	// Default MaxConcurrent for providers
 	for name, p := range cfg.Models.Providers {
 		if p.MaxConcurrent <= 0 {

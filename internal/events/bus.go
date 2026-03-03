@@ -81,6 +81,7 @@ const (
 	SourceSkill     EventSource = "skill"
 	SourceTask      EventSource = "task"
 	SourceScheduler EventSource = "scheduler"
+	SourceMCP       EventSource = "mcp"
 )
 
 // Event represents an event in the system.

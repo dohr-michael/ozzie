@@ -6,9 +6,8 @@
 	"wasm_path": "web-crawler.wasm",
 	"dangerous": false,
 	"capabilities": {
-		"http": {
-			"allowed_hosts": ["*"]
-		}
+		// Declares HTTP need — actual allowed hosts are set in Ozzie config authorizations
+		"http": true
 	},
 	"tools": [
 		{

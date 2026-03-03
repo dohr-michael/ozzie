@@ -6,10 +6,8 @@
 	"wasm_path": "patch.wasm",
 	"dangerous": true,
 	"capabilities": {
+		// Declares read-write filesystem need — actual allowed paths are set in Ozzie config authorizations
 		"filesystem": {
-			"allowed_paths": {
-				".": "/"
-			},
 			"read_only": false
 		},
 		"log": true

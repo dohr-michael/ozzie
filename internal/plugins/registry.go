@@ -12,7 +12,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/events"
 )
 
-// ToolRegistry is the unified registry for all tools (WASM + native).
+// ToolRegistry is the unified registry for all tools (WASM + native + MCP).
 type ToolRegistry struct {
 	tools       map[string]tool.InvokableTool
 	manifests   map[string]*PluginManifest // tool name → parent manifest
@@ -20,6 +20,7 @@ type ToolRegistry struct {
 	pluginTools map[string][]string        // plugin name → tool names
 	bus         *events.Bus
 	runtime     *ExtismRuntime
+	mcpManager  *MCPManager // external MCP server sessions (nil if none)
 }
 
 // NewToolRegistry creates a new tool registry.
@@ -35,12 +36,17 @@ func NewToolRegistry(bus *events.Bus) *ToolRegistry {
 }
 
 // LoadWasmPlugin loads a single WASM plugin from its manifest file.
+// The optional auth parameter provides user-side authorization for the plugin.
 // A multi-tool plugin registers one entry per ToolSpec.
-func (r *ToolRegistry) LoadWasmPlugin(ctx context.Context, manifestPath string) error {
+func (r *ToolRegistry) LoadWasmPlugin(ctx context.Context, manifestPath string, auth *PluginAuthorization) error {
 	manifest, err := LoadManifest(manifestPath)
 	if err != nil {
 		return err
 	}
+
+	// Resolve capabilities against authorization
+	resolved := ResolveCapabilities(manifest.Capabilities, auth, manifest.ResourceLimits)
+	manifest.Resolved = &resolved
 
 	// Resolve wasm_path relative to manifest directory
 	if manifest.WasmPath != "" && !filepath.IsAbs(manifest.WasmPath) {
@@ -160,7 +166,8 @@ func (r *ToolRegistry) AllToolDescriptions() map[string]string {
 
 // LoadPluginsDir scans a directory for plugin manifests and loads them.
 // It looks for manifest.jsonc files in immediate subdirectories.
-func (r *ToolRegistry) LoadPluginsDir(ctx context.Context, dir string, enabled []string) error {
+// The auths map provides per-plugin authorization (keyed by plugin name).
+func (r *ToolRegistry) LoadPluginsDir(ctx context.Context, dir string, enabled []string, auths map[string]*PluginAuthorization) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -191,7 +198,12 @@ func (r *ToolRegistry) LoadPluginsDir(ctx context.Context, dir string, enabled [
 			continue
 		}
 
-		if err := r.LoadWasmPlugin(ctx, manifestPath); err != nil {
+		var auth *PluginAuthorization
+		if auths != nil {
+			auth = auths[entry.Name()]
+		}
+
+		if err := r.LoadWasmPlugin(ctx, manifestPath, auth); err != nil {
 			slog.Warn("failed to load plugin", "name", entry.Name(), "error", err)
 			continue
 		}
@@ -202,5 +214,8 @@ func (r *ToolRegistry) LoadPluginsDir(ctx context.Context, dir string, enabled [
 
 // Close releases all resources.
 func (r *ToolRegistry) Close(ctx context.Context) {
+	if r.mcpManager != nil {
+		r.mcpManager.Close(ctx)
+	}
 	r.runtime.Close(ctx)
 }

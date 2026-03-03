@@ -57,7 +57,7 @@ func ExecuteManifest() *PluginManifest {
 		Level:       "tool",
 		Provider:    "native",
 		Dangerous:   true,
-		Capabilities: CapabilitySet{
+		Capabilities: PluginCapabilities{
 			Exec: true,
 		},
 		Tools: []ToolSpec{

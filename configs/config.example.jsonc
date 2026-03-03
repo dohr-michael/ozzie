@@ -90,7 +90,18 @@
     // Default: ~/.ozzie/plugins
     "dir": "",
     // List of enabled plugin names. Empty = all plugins in dir are loaded.
-    "enabled": []
+    "enabled": [],
+    // Per-plugin authorizations: what Ozzie allows each plugin to access.
+    // Plugins declare capabilities (needs), authorizations grant access.
+    // Deny-by-default: if a plugin requests HTTP but no authorization is set, hosts are empty.
+    "authorizations": {
+      // "web_crawler": {
+      //   "http": { "allowed_hosts": ["*"] }
+      // },
+      // "patch": {
+      //   "filesystem": { "allowed_paths": { ".": "/" }, "read_only": false }
+      // }
+    }
   },
   "skills": {
     // Directories containing skill JSONC definitions.
@@ -104,6 +115,23 @@
     // Useful for async tasks where no interactive user is present.
     // Example: ["cmd", "git"]
     "allowed_dangerous": []
+  },
+  // External MCP servers: connect to MCP-compatible tool servers.
+  // Tools are auto-discovered and registered with "serverName__toolName" naming.
+  // All MCP tools are marked dangerous by default (external subprocess/endpoint).
+  "mcp": {
+    "servers": {
+      // "github": {
+      //   "transport": "stdio",
+      //   "command": "npx",
+      //   "args": ["-y", "@modelcontextprotocol/server-github"],
+      //   "env": {
+      //     "GITHUB_TOKEN": "${{ .Env.GITHUB_TOKEN }}"
+      //   },
+      //   "dangerous": true,
+      //   "timeout": 30000
+      // }
+    }
   },
   // Layered context: three-tier progressive compression (L0/L1/L2).
   // Replaces monolithic summarization with BM25-based relevance retrieval.

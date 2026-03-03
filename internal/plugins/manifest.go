@@ -10,15 +10,18 @@ import (
 
 // PluginManifest describes a plugin's metadata, capabilities, and tools.
 type PluginManifest struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Level        string            `json:"level"`     // "tool" or "communication"
-	Provider     string            `json:"provider"`  // "extism" or "native"
-	WasmPath     string            `json:"wasm_path"` // path to .wasm file (extism only)
-	Dangerous    bool              `json:"dangerous"` // default for all tools
-	Capabilities CapabilitySet     `json:"capabilities"`
-	Tools        []ToolSpec        `json:"tools"` // 1..N tools per plugin
-	Config       map[string]string `json:"config"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Level          string             `json:"level"`     // "tool" or "communication"
+	Provider       string             `json:"provider"`  // "extism" or "native"
+	WasmPath       string             `json:"wasm_path"` // path to .wasm file (extism only)
+	Dangerous      bool               `json:"dangerous"` // default for all tools
+	Capabilities   PluginCapabilities `json:"capabilities"`
+	ResourceLimits ResourceLimits     `json:"resource_limits,omitempty"`
+	Tools          []ToolSpec         `json:"tools"` // 1..N tools per plugin
+	Config         map[string]string  `json:"config"`
+
+	Resolved *ResolvedCapabilities `json:"-"` // computed at load, not serialized
 }
 
 // ToolSpec describes a single tool interface exposed by a plugin.

@@ -71,8 +71,8 @@ func WebSearchManifest() *PluginManifest {
 		Description: "Search the web for information using the configured search provider",
 		Level:       "tool",
 		Provider:    "native",
-		Capabilities: CapabilitySet{
-			HTTP: &HTTPCapability{AllowedHosts: []string{"*"}},
+		Capabilities: PluginCapabilities{
+			HTTP: true,
 		},
 		Tools: []ToolSpec{
 			{
@@ -128,7 +128,7 @@ func NewWebFetchTool(cfg config.WebFetchConfig) *WebFetchTool {
 }
 
 type webFetchInput struct {
-	URL   string `json:"url"`
+	URL    string `json:"url"`
 	Prompt string `json:"prompt,omitempty"`
 }
 
@@ -208,8 +208,8 @@ func WebFetchManifest() *PluginManifest {
 		Level:       "tool",
 		Provider:    "native",
 		Dangerous:   true,
-		Capabilities: CapabilitySet{
-			HTTP: &HTTPCapability{AllowedHosts: []string{"*"}},
+		Capabilities: PluginCapabilities{
+			HTTP: true,
 		},
 		Tools: []ToolSpec{
 			{

@@ -62,6 +62,9 @@ func TestLoadManifest(t *testing.T) {
 	if !m.Capabilities.Log {
 		t.Error("Capabilities.Log = false, want true")
 	}
+	if m.Resolved != nil {
+		t.Error("Resolved should be nil after LoadManifest (resolved later)")
+	}
 	if len(m.Tools) != 1 {
 		t.Fatalf("Tools len = %d, want 1", len(m.Tools))
 	}
@@ -230,6 +233,7 @@ func TestLoadManifest_MultiToolRequiresName(t *testing.T) {
 }
 
 func TestBuildExtismManifest_DenyByDefault(t *testing.T) {
+	// No Resolved → empty manifest
 	m := &PluginManifest{
 		Name:     "test",
 		WasmPath: "/tmp/test.wasm",
@@ -246,23 +250,22 @@ func TestBuildExtismManifest_DenyByDefault(t *testing.T) {
 	}
 }
 
-func TestBuildExtismManifest_WithCapabilities(t *testing.T) {
+func TestBuildExtismManifest_WithResolved(t *testing.T) {
+	resolved := ResolvedCapabilities{
+		HTTP: &HTTPAuth{AllowedHosts: []string{"api.example.com"}},
+		Filesystem: &ResolvedFS{
+			AllowedPaths: map[string]string{"/data": "/mnt"},
+		},
+		Resources: ResourceLimits{
+			Memory:  &MemoryLimit{MaxPages: 16},
+			Timeout: 5000,
+		},
+	}
 	m := &PluginManifest{
 		Name:     "test",
 		WasmPath: "/tmp/test.wasm",
 		Tools:    []ToolSpec{{Name: "test", Func: "handle"}},
-		Capabilities: CapabilitySet{
-			HTTP: &HTTPCapability{
-				AllowedHosts: []string{"api.example.com"},
-			},
-			Filesystem: &FSCapability{
-				AllowedPaths: map[string]string{"/data": "/mnt"},
-			},
-			Memory: &MemoryLimit{
-				MaxPages: 16,
-			},
-			Timeout: 5000,
-		},
+		Resolved: &resolved,
 	}
 
 	em := BuildExtismManifest(m)
@@ -381,7 +384,7 @@ func TestToolRegistry_LoadPluginsDir_NoDir(t *testing.T) {
 	defer registry.Close(context.Background())
 
 	// Non-existent directory should not error
-	err := registry.LoadPluginsDir(context.Background(), "/nonexistent/path", nil)
+	err := registry.LoadPluginsDir(context.Background(), "/nonexistent/path", nil, nil)
 	if err != nil {
 		t.Fatalf("LoadPluginsDir non-existent: %v", err)
 	}

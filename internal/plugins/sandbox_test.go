@@ -49,7 +49,7 @@ func TestMatchDestructivePattern(t *testing.T) {
 		"cat /etc/hostname",
 		"git status",
 		"go build ./...",
-		"rm file.txt",      // no -r or -f
+		"rm file.txt",       // no -r or -f
 		"chmod 644 foo.txt", // no -R
 	}
 	for _, cmd := range allowed {
@@ -418,25 +418,31 @@ func TestWrapRegistrySandbox_SkipsReadOnly(t *testing.T) {
 	writeTool := &fakeTool{}
 
 	// read_file: Filesystem with ReadOnly=true — should NOT be wrapped
-	_ = registry.RegisterNative("read_file", readTool, &PluginManifest{
+	readManifest := &PluginManifest{
 		Name:     "read_file",
 		Provider: "native",
-		Capabilities: CapabilitySet{
-			Filesystem: &FSCapability{ReadOnly: true},
+		Capabilities: PluginCapabilities{
+			Filesystem: &FSCapabilityIntent{ReadOnly: true},
 		},
 		Tools: []ToolSpec{{Name: "read_file"}},
-	})
+	}
+	readResolved := ResolveCapabilities(readManifest.Capabilities, nil, readManifest.ResourceLimits)
+	readManifest.Resolved = &readResolved
+	_ = registry.RegisterNative("read_file", readTool, readManifest)
 
 	// write_file: Filesystem without ReadOnly — should be wrapped
-	_ = registry.RegisterNative("write_file", writeTool, &PluginManifest{
+	writeManifest := &PluginManifest{
 		Name:      "write_file",
 		Provider:  "native",
 		Dangerous: true,
-		Capabilities: CapabilitySet{
-			Filesystem: &FSCapability{},
+		Capabilities: PluginCapabilities{
+			Filesystem: &FSCapabilityIntent{},
 		},
 		Tools: []ToolSpec{{Name: "write_file", Dangerous: true}},
-	})
+	}
+	writeResolved := ResolveCapabilities(writeManifest.Capabilities, nil, writeManifest.ResourceLimits)
+	writeManifest.Resolved = &writeResolved
+	_ = registry.RegisterNative("write_file", writeTool, writeManifest)
 
 	WrapRegistrySandbox(registry, nil)
 

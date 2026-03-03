@@ -23,17 +23,17 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/layered"
 	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
+	"github.com/dohr-michael/ozzie/internal/layered"
 	"github.com/dohr-michael/ozzie/internal/memory"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
-	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/skills"
 	"github.com/dohr-michael/ozzie/internal/storage"
@@ -154,6 +154,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("setup tools: %w", err)
 	}
 	defer toolRegistry.Close(ctx)
+
+	// MCP servers — connect to external MCP tool servers
+	if err := plugins.SetupMCPServers(ctx, cfg.MCP, toolRegistry, bus); err != nil {
+		slog.Warn("failed to setup MCP servers", "error", err)
+	}
 
 	// Tool permissions — global auto-approved tools from config
 	toolPerms := plugins.NewToolPermissions(cfg.Tools.AllowedDangerous)
