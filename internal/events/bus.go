@@ -272,6 +272,11 @@ func (b *Bus) History(limit int) []Event {
 	return b.ringBuffer.Get(limit)
 }
 
+// HistoryFiltered returns up to limit events matching the given type.
+func (b *Bus) HistoryFiltered(limit int, filterType EventType) []Event {
+	return b.ringBuffer.GetFiltered(limit, filterType)
+}
+
 // Close shuts down the event bus.
 func (b *Bus) Close() {
 	b.mu.Lock()
@@ -329,6 +334,26 @@ func (r *RingBuffer) Get(n int) []Event {
 	start := (r.pos - n + r.size) % r.size
 	for i := 0; i < n; i++ {
 		result[i] = r.events[(start+i)%r.size]
+	}
+	return result
+}
+
+// GetFiltered returns up to n events matching the given type, scanning from
+// most recent to oldest. Results are returned in chronological order.
+func (r *RingBuffer) GetFiltered(n int, filterType EventType) []Event {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var result []Event
+	for i := 0; i < r.count && len(result) < n; i++ {
+		idx := (r.pos - 1 - i + r.size) % r.size
+		if r.events[idx].Type == filterType {
+			result = append(result, r.events[idx])
+		}
+	}
+	// Reverse to chronological order
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
 	}
 	return result
 }

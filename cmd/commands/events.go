@@ -63,9 +63,12 @@ func runEvents(_ context.Context, cmd *cli.Command) error {
 	typeFilter := cmd.String("type")
 	sessionFilter := cmd.String("session")
 
-	url := fmt.Sprintf("%s/api/events?limit=%d", gatewayURL, limit)
+	reqURL := fmt.Sprintf("%s/api/events?limit=%d", gatewayURL, limit)
+	if typeFilter != "" {
+		reqURL += "&type=" + typeFilter
+	}
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(reqURL)
 	if err != nil {
 		return fmt.Errorf("connect to gateway: %w", err)
 	}
@@ -80,12 +83,9 @@ func runEvents(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("decode events: %w", err)
 	}
 
-	// Apply client-side filters.
+	// Apply client-side filters (type is filtered server-side).
 	filtered := events[:0]
 	for _, e := range events {
-		if typeFilter != "" && e.Type != typeFilter {
-			continue
-		}
 		if sessionFilter != "" && e.SessionID != sessionFilter {
 			continue
 		}

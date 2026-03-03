@@ -13,6 +13,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/skills"
 )
 
@@ -51,7 +52,7 @@ func runScheduleList(_ context.Context, _ *cli.Command) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "SKILL\tCRON\tEVENT\tKEYWORDS")
+	fmt.Fprintln(w, "SOURCE\tNAME\tCRON\tEVENT\tENABLED")
 
 	found := false
 	for _, sk := range reg.All() {
@@ -70,12 +71,30 @@ func runScheduleList(_ context.Context, _ *cli.Command) error {
 			eventStr = sk.Triggers.OnEvent.Event
 		}
 
-		kwStr := "-"
-		if len(sk.Triggers.Keywords) > 0 {
-			kwStr = fmt.Sprintf("%v", sk.Triggers.Keywords)
-		}
+		fmt.Fprintf(w, "skill\t%s\t%s\t%s\tyes\n", sk.Name, cronStr, eventStr)
+	}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", sk.Name, cronStr, eventStr, kwStr)
+	// Dynamic schedules from persistent store
+	schedulesDir := filepath.Join(config.OzziePath(), "schedules")
+	schedStore := scheduler.NewScheduleStore(schedulesDir)
+	entries, err := schedStore.List()
+	if err == nil {
+		for _, e := range entries {
+			found = true
+			cronStr := "-"
+			if e.CronSpec != "" {
+				cronStr = e.CronSpec
+			}
+			eventStr := "-"
+			if e.OnEvent != nil {
+				eventStr = e.OnEvent.Event
+			}
+			enabledStr := "yes"
+			if !e.Enabled {
+				enabledStr = "no"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.Source, e.Title, cronStr, eventStr, enabledStr)
+		}
 	}
 
 	if !found {

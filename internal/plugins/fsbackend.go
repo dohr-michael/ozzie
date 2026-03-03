@@ -58,13 +58,14 @@ const writeConfirmTimeout = 60 * time.Second
 // where writes are permitted without confirmation.
 type OzzieBackend struct {
 	writeAllowedPaths []string
-	bus               *events.Bus // nil = no interactive confirmation (tests)
+	bus               *events.Bus      // nil = no interactive confirmation (tests)
+	perms             *ToolPermissions // nil = no accept-all bypass
 }
 
 // NewOzzieBackend creates a new filesystem backend.
 // Any extra paths are added to the write allow-list.
-func NewOzzieBackend(bus *events.Bus, writeAllowedPaths ...string) *OzzieBackend {
-	return &OzzieBackend{writeAllowedPaths: writeAllowedPaths, bus: bus}
+func NewOzzieBackend(bus *events.Bus, perms *ToolPermissions, writeAllowedPaths ...string) *OzzieBackend {
+	return &OzzieBackend{writeAllowedPaths: writeAllowedPaths, bus: bus, perms: perms}
 }
 
 // isInsideSandbox checks whether absPath falls inside the working directory
@@ -111,6 +112,13 @@ func (b *OzzieBackend) validateWritePath(ctx context.Context, path string) error
 	// Outside sandbox — autonomous mode: hard block
 	if events.IsAutonomousContext(ctx) {
 		return fmt.Errorf("write blocked: path %q is outside allowed write directories", path)
+	}
+
+	// Accept-all mode (e.g. -y flag) — skip confirmation
+	if b.perms != nil {
+		if sid := events.SessionIDFromContext(ctx); sid != "" && b.perms.IsSessionAcceptAll(sid) {
+			return nil
+		}
 	}
 
 	// Outside sandbox — interactive mode: ask for confirmation

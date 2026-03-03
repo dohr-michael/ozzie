@@ -23,11 +23,34 @@ func TestOzziePath_Default(t *testing.T) {
 
 func TestOzziePath_EnvOverride(t *testing.T) {
 	t.Setenv("OZZIE_PATH", "/tmp/custom-ozzie")
+	t.Setenv("OZZIE_HOME", "")
 
 	got := OzziePath()
 	want := "/tmp/custom-ozzie"
 	if got != want {
 		t.Errorf("OzziePath() = %q, want %q", got, want)
+	}
+}
+
+func TestOzziePath_HomeAlias(t *testing.T) {
+	t.Setenv("OZZIE_PATH", "")
+	t.Setenv("OZZIE_HOME", "/tmp/home-ozzie")
+
+	got := OzziePath()
+	want := "/tmp/home-ozzie"
+	if got != want {
+		t.Errorf("OzziePath() = %q, want %q", got, want)
+	}
+}
+
+func TestOzziePath_PathTakesPriority(t *testing.T) {
+	t.Setenv("OZZIE_PATH", "/tmp/path-ozzie")
+	t.Setenv("OZZIE_HOME", "/tmp/home-ozzie")
+
+	got := OzziePath()
+	want := "/tmp/path-ozzie"
+	if got != want {
+		t.Errorf("OzziePath() = %q, want %q (OZZIE_PATH should take priority over OZZIE_HOME)", got, want)
 	}
 }
 

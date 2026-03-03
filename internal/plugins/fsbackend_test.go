@@ -21,7 +21,7 @@ func TestOzzieBackend_LsInfo(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	os.Mkdir(filepath.Join(dir, "sub"), 0o755)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	files, err := b.LsInfo(ctxWithWorkDir(dir), &filesystem.LsInfoRequest{Path: dir})
 	if err != nil {
 		t.Fatalf("LsInfo: %v", err)
@@ -36,7 +36,7 @@ func TestOzzieBackend_Read(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	content, err := b.Read(ctxWithWorkDir(dir), &filesystem.ReadRequest{
 		FilePath: path,
 	})
@@ -53,7 +53,7 @@ func TestOzzieBackend_Read_OffsetLimit(t *testing.T) {
 	path := filepath.Join(dir, "test.txt")
 	os.WriteFile(path, []byte("a\nb\nc\nd\ne\n"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	content, err := b.Read(ctxWithWorkDir(dir), &filesystem.ReadRequest{
 		FilePath: path,
 		Offset:   1,
@@ -72,7 +72,7 @@ func TestOzzieBackend_GrepRaw(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("hello world\nfoo bar\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\nfunc hello() {}\n"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	matches, err := b.GrepRaw(ctxWithWorkDir(dir), &filesystem.GrepRequest{
 		Pattern: "hello",
 		Path:    dir,
@@ -90,7 +90,7 @@ func TestOzzieBackend_GrepRaw_WithGlob(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("match here\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("match here too\n"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	matches, err := b.GrepRaw(ctxWithWorkDir(dir), &filesystem.GrepRequest{
 		Pattern: "match",
 		Path:    dir,
@@ -109,7 +109,7 @@ func TestOzzieBackend_GlobInfo(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o644)
 	os.WriteFile(filepath.Join(dir, "b.go"), []byte("b"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	files, err := b.GlobInfo(ctxWithWorkDir(dir), &filesystem.GlobInfoRequest{
 		Pattern: "*.go",
 		Path:    dir,
@@ -126,7 +126,7 @@ func TestOzzieBackend_Write(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "new", "file.txt")
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Write(ctxWithWorkDir(dir), &filesystem.WriteRequest{
 		FilePath: path,
 		Content:  "hello",
@@ -149,7 +149,7 @@ func TestOzzieBackend_Edit(t *testing.T) {
 	path := filepath.Join(dir, "edit.txt")
 	os.WriteFile(path, []byte("foo bar baz"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Edit(ctxWithWorkDir(dir), &filesystem.EditRequest{
 		FilePath:  path,
 		OldString: "bar",
@@ -173,7 +173,7 @@ func TestOzzieBackend_Edit_MultipleOccurrences(t *testing.T) {
 	path := filepath.Join(dir, "edit.txt")
 	os.WriteFile(path, []byte("foo foo foo"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Edit(ctxWithWorkDir(dir), &filesystem.EditRequest{
 		FilePath:  path,
 		OldString: "foo",
@@ -206,7 +206,7 @@ func TestWriteGuard_AutonomousBlocked(t *testing.T) {
 	workDir := t.TempDir()
 	outsideDir := t.TempDir()
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
 		FilePath: filepath.Join(outsideDir, "evil.txt"),
 		Content:  "should be blocked",
@@ -222,7 +222,7 @@ func TestWriteGuard_AutonomousBlocked(t *testing.T) {
 func TestWriteGuard_AutonomousAllowedWorkDir(t *testing.T) {
 	workDir := t.TempDir()
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
 		FilePath: filepath.Join(workDir, "ok.txt"),
 		Content:  "allowed",
@@ -236,7 +236,7 @@ func TestWriteGuard_AutonomousAllowedTmpDir(t *testing.T) {
 	workDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	b := NewOzzieBackend(nil, tmpDir)
+	b := NewOzzieBackend(nil, nil, tmpDir)
 	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
 		FilePath: filepath.Join(tmpDir, "scratch.txt"),
 		Content:  "tmp write",
@@ -250,7 +250,7 @@ func TestWriteGuard_InteractiveInsideSandbox(t *testing.T) {
 	workDir := t.TempDir()
 	ctx := ctxWithWorkDir(workDir)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Write(ctx, &filesystem.WriteRequest{
 		FilePath: filepath.Join(workDir, "ok.txt"),
 		Content:  "inside sandbox — always allowed",
@@ -268,7 +268,7 @@ func TestWriteGuard_InteractiveOutsideSandboxConfirmed(t *testing.T) {
 	bus := events.NewBus(16)
 	defer bus.Close()
 
-	b := NewOzzieBackend(bus)
+	b := NewOzzieBackend(bus, nil)
 
 	// Simulate user approval in background
 	ch, unsub := bus.SubscribeChan(1, events.EventPromptRequest)
@@ -301,7 +301,7 @@ func TestWriteGuard_InteractiveOutsideSandboxDenied(t *testing.T) {
 	bus := events.NewBus(16)
 	defer bus.Close()
 
-	b := NewOzzieBackend(bus)
+	b := NewOzzieBackend(bus, nil)
 
 	// Simulate user denial in background
 	ch, unsub := bus.SubscribeChan(1, events.EventPromptRequest)
@@ -338,7 +338,7 @@ func TestEditGuard_AutonomousBlocked(t *testing.T) {
 	target := filepath.Join(outsideDir, "target.txt")
 	os.WriteFile(target, []byte("old content"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	err := b.Edit(autonomousCtx(workDir), &filesystem.EditRequest{
 		FilePath:  target,
 		OldString: "old",
@@ -361,7 +361,7 @@ func TestOzzieBackend_GlobInfo_Recursive(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "a", "b", "deep.go"), []byte("package deep"), 0o644)
 	os.WriteFile(filepath.Join(dir, "a", "b", "deep.txt"), []byte("not go"), 0o644)
 
-	b := NewOzzieBackend(nil)
+	b := NewOzzieBackend(nil, nil)
 	files, err := b.GlobInfo(ctxWithWorkDir(dir), &filesystem.GlobInfoRequest{
 		Pattern: "**/*.go",
 		Path:    dir,

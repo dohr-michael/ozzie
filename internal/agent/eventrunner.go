@@ -77,11 +77,11 @@ type EventRunnerConfig struct {
 	Registry        ToolLookup
 	EventBus        *events.Bus
 	Store           sessions.Store
-	TaskStore       TaskStore    // task store for mailbox access (optional)
-	Pool            CapacityPool // actor pool for capacity management (optional)
-	DefaultProvider string       // default provider name for AcquireInteractive
-	ContextWindow   int          // total context window in tokens (for compression)
-	Tier            ModelTier    // model tier for adaptive compression
+	TaskStore       TaskStore        // task store for mailbox access (optional)
+	Pool            CapacityPool     // actor pool for capacity management (optional)
+	DefaultProvider string           // default provider name for AcquireInteractive
+	ContextWindow   int              // total context window in tokens (for compression)
+	Tier            ModelTier        // model tier for adaptive compression
 	Layered         *layered.Manager // layered context manager (optional)
 }
 
@@ -270,6 +270,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 
 func (er *EventRunner) runAgent(sessionID string, runner *adk.Runner, messages []*schema.Message) {
 	ctx := events.ContextWithSessionID(er.ctx, sessionID)
+	ctx = er.withSessionWorkDir(ctx, sessionID)
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 	er.consumeIterator(sessionID, iter)
@@ -277,9 +278,19 @@ func (er *EventRunner) runAgent(sessionID string, runner *adk.Runner, messages [
 
 func (er *EventRunner) runAgentBuffered(sessionID string, runner *adk.Runner, messages []*schema.Message) string {
 	ctx := events.ContextWithSessionID(er.ctx, sessionID)
+	ctx = er.withSessionWorkDir(ctx, sessionID)
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 	return er.consumeIteratorBuffered(sessionID, iter)
+}
+
+// withSessionWorkDir propagates the session's RootDir as WorkDir in the context
+// so that filesystem tools (list_files, read, etc.) resolve paths correctly.
+func (er *EventRunner) withSessionWorkDir(ctx context.Context, sessionID string) context.Context {
+	if sess, err := er.store.Get(sessionID); err == nil && sess.RootDir != "" {
+		ctx = events.ContextWithWorkDir(ctx, sess.RootDir)
+	}
+	return ctx
 }
 
 func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) {

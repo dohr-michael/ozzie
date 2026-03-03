@@ -163,9 +163,16 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Tool permissions — global auto-approved tools from config
 	toolPerms := plugins.NewToolPermissions(cfg.Tools.AllowedDangerous)
 
+	// Prepare tmp dir early — needed by both sandbox guard and filesystem middleware
+	tmpDir := filepath.Join(config.OzziePath(), "tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return fmt.Errorf("create tmp dir: %w", err)
+	}
+
 	// Sandbox guard — validates command content in autonomous mode (before dangerous wrapper)
 	if cfg.Sandbox.IsSandboxEnabled() {
-		plugins.WrapRegistrySandbox(toolRegistry, cfg.Sandbox.AllowedPaths)
+		sandboxPaths := append([]string{tmpDir}, cfg.Sandbox.AllowedPaths...)
+		plugins.WrapRegistrySandbox(toolRegistry, sandboxPaths)
 	}
 
 	// Wrap dangerous tools with confirmation for interactive gateway
@@ -236,11 +243,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	slog.Debug("loaded persona", "length", len(persona), "persona", persona)
 
 	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
-	tmpDir := filepath.Join(config.OzziePath(), "tmp")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		return fmt.Errorf("create tmp dir: %w", err)
-	}
-	fsBackend := plugins.NewOzzieBackend(bus, tmpDir)
+	fsBackend := plugins.NewOzzieBackend(bus, toolPerms, tmpDir)
 	fsMw, err := einoFs.NewMiddleware(ctx, &einoFs.Config{
 		Backend:                          fsBackend,
 		WithoutLargeToolResultOffloading: true, // offloading handled by reduction middleware below

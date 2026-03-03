@@ -22,13 +22,13 @@ import (
 
 // Server is the Ozzie gateway HTTP server.
 type Server struct {
-	httpServer   *http.Server
-	hub          *ws.Hub
-	bus          *events.Bus
-	store        sessions.Store
-	taskHandler  *WSTaskHandler
-	host         string
-	port         int
+	httpServer  *http.Server
+	hub         *ws.Hub
+	bus         *events.Bus
+	store       sessions.Store
+	taskHandler *WSTaskHandler
+	host        string
+	port        int
 }
 
 // NewServer creates a new gateway server.
@@ -92,18 +92,24 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		fmt.Sscanf(limitStr, "%d", &limit)
 	}
 
-	history := s.bus.History(limit)
+	typeFilter := r.URL.Query().Get("type")
+	var history []events.Event
+	if typeFilter != "" {
+		history = s.bus.HistoryFiltered(limit, events.EventType(typeFilter))
+	} else {
+		history = s.bus.History(limit)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 
 	// Format timestamps nicely
 	type eventJSON struct {
-		ID        string         `json:"id"`
-		SessionID string         `json:"session_id,omitempty"`
-		Type      string         `json:"type"`
-		Timestamp string         `json:"timestamp"`
+		ID        string             `json:"id"`
+		SessionID string             `json:"session_id,omitempty"`
+		Type      string             `json:"type"`
+		Timestamp string             `json:"timestamp"`
 		Source    events.EventSource `json:"source"`
-		Payload   map[string]any `json:"payload"`
+		Payload   map[string]any     `json:"payload"`
 	}
 
 	result := make([]eventJSON, len(history))
