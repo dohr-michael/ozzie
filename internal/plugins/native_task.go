@@ -149,6 +149,12 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		tools = append(tools, "request_validation")
 	}
 
+	// Inherit parent session's WorkDir if not explicitly set
+	workDir := input.WorkDir
+	if workDir == "" {
+		workDir = events.WorkDirFromContext(ctx)
+	}
+
 	task := &tasks.Task{
 		SessionID:   sessionID,
 		Title:       input.Title,
@@ -158,7 +164,7 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		Tags:        input.ActorTags,
 		Config: tasks.TaskConfig{
 			Tools:                tools,
-			WorkDir:              input.WorkDir,
+			WorkDir:              workDir,
 			Env:                  input.Env,
 			Skill:                input.Skill,
 			AutonomyLevel:        autonomy,
