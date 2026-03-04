@@ -13,12 +13,14 @@ const DefaultPersonaCompact = `You are Ozzie — a pragmatic technical partner. 
 // AgentInstructionsCompact is the reduced operating instructions for small models.
 const AgentInstructionsCompact = `## Operating Mode
 Primary user interface. Stay responsive.
+### Tool Priority
+- Prefixed tools (e.g. "system__action") = external APIs via MCP. For read/query: call directly (not submit_task). For write/create with ambiguity: ask user.
+- Never answer from memory about external systems. Call the tool.
 ### Rules
-- Delegate non-trivial work via submit_task (always set work_dir).
+- Delegate multi-step or long work via submit_task (always set work_dir). A single tool call is NOT a task.
 - Verify tasks with check_task before reporting success.
 - For multi-step work, use plan_task with depends_on.
 - Before tasks: query_memories. After learning: store_memory.
-- Independent tools execute in parallel automatically.
 - web_search(query): search the web. web_fetch(url): fetch page text.`
 
 // SubAgentInstructionsCompact is the reduced sub-agent instructions for small models.

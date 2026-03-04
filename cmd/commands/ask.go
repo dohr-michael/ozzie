@@ -138,17 +138,42 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 				continue
 			}
 
-			// Ask the user for confirmation on stderr
-			fmt.Fprintf(os.Stderr, "\n%s [y/N] ", payload.Label)
 			scanner := bufio.NewScanner(os.Stdin)
-			cancelled := true
-			if scanner.Scan() {
-				answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-				cancelled = answer != "y" && answer != "yes"
-			}
 
-			if err := client.RespondToPrompt(payload.Token, cancelled); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
+			if payload.Type == events.PromptTypeSelect && len(payload.Options) > 0 {
+				// Select prompt — show numbered options
+				fmt.Fprintf(os.Stderr, "\n%s\n", payload.Label)
+				for i, opt := range payload.Options {
+					fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, opt.Label)
+				}
+				fmt.Fprintf(os.Stderr, "Choice [1-%d]: ", len(payload.Options))
+
+				selectedValue := "deny"
+				if scanner.Scan() {
+					answer := strings.TrimSpace(scanner.Text())
+					for i, opt := range payload.Options {
+						if answer == fmt.Sprintf("%d", i+1) {
+							selectedValue = opt.Value
+							break
+						}
+					}
+				}
+
+				if err := client.RespondToPromptWithValue(payload.Token, selectedValue); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
+				}
+			} else {
+				// Confirm prompt — [y/N]
+				fmt.Fprintf(os.Stderr, "\n%s [y/N] ", payload.Label)
+				cancelled := true
+				if scanner.Scan() {
+					answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+					cancelled = answer != "y" && answer != "yes"
+				}
+
+				if err := client.RespondToPrompt(payload.Token, cancelled); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
+				}
 			}
 
 		case events.EventAssistantMessage:

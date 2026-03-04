@@ -49,7 +49,8 @@ type ActorPool struct {
 	maxValidationRounds int
 	skillRunner         tasks.SkillExecutor
 	taskMiddlewares     []adk.AgentMiddleware
-	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
+	retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
+	perms               tasks.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 
 	scheduleCh chan struct{} // wake-up signal for the scheduler
 	ctx        context.Context
@@ -64,11 +65,12 @@ type ActorPoolConfig struct {
 	Bus                 *events.Bus
 	Models              *models.Registry
 	ToolRegistry        agent.ToolLookup
-	AutonomyDefault     string              // "disabled" | "supervised" | "autonomous"
-	MaxValidationRounds int                 // max plan-revise cycles (0 = default 3)
-	SkillRunner         tasks.SkillExecutor // optional skill executor for direct skill tasks
-	TaskMiddlewares     []adk.AgentMiddleware // middlewares for sub-agents (filesystem, reduction)
-	Retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
+	AutonomyDefault     string                      // "disabled" | "supervised" | "autonomous"
+	MaxValidationRounds int                         // max plan-revise cycles (0 = default 3)
+	SkillRunner         tasks.SkillExecutor         // optional skill executor for direct skill tasks
+	TaskMiddlewares     []adk.AgentMiddleware       // middlewares for sub-agents (filesystem, reduction)
+	Retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
+	Perms               tasks.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 }
 
 // NewActorPool creates an ActorPool from provider configurations.
@@ -105,6 +107,7 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 		skillRunner:         cfg.SkillRunner,
 		taskMiddlewares:     cfg.TaskMiddlewares,
 		retriever:           cfg.Retriever,
+		perms:               cfg.Perms,
 		scheduleCh:          make(chan struct{}, 1),
 	}
 }
@@ -503,6 +506,7 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		Retriever:           p.retriever,
 		Tier:                tier,
 		PromptPrefix:        actor.PromptPrefix,
+		Perms:               p.perms,
 	})
 
 	if err := runner.Run(ctx); err != nil {
@@ -659,6 +663,7 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 		Retriever:           p.retriever,
 		Tier:                tier,
 		PromptPrefix:        actor.PromptPrefix,
+		Perms:               p.perms,
 	})
 
 	if err := runner.Run(ctx); err != nil {

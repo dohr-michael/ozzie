@@ -29,9 +29,9 @@ func newScheduleTestDeps(t *testing.T) (*scheduler.Scheduler, *events.Bus) {
 
 	schedStore := scheduler.NewScheduleStore(t.TempDir())
 	sched := scheduler.New(scheduler.Config{
-		Pool:   pool,
-		Bus:    bus,
-		Store:  schedStore,
+		Pool:  pool,
+		Bus:   bus,
+		Store: schedStore,
 	})
 	sched.Start()
 	t.Cleanup(func() { sched.Stop() })
@@ -41,7 +41,7 @@ func newScheduleTestDeps(t *testing.T) (*scheduler.Scheduler, *events.Bus) {
 
 func TestScheduleTaskTool_Create(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	tool := NewScheduleTaskTool(sched, bus)
+	tool := NewScheduleTaskTool(sched, bus, nil, nil)
 
 	input := `{"title":"git monitor","description":"check git changes","interval":"30s","tools":["cmd"]}`
 	result, err := tool.InvokableRun(context.Background(), input)
@@ -73,7 +73,7 @@ func TestScheduleTaskTool_Create(t *testing.T) {
 
 func TestScheduleTaskTool_CronTrigger(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	tool := NewScheduleTaskTool(sched, bus)
+	tool := NewScheduleTaskTool(sched, bus, nil, nil)
 
 	input := `{"title":"hourly check","description":"run hourly","cron":"0 * * * *"}`
 	result, err := tool.InvokableRun(context.Background(), input)
@@ -90,7 +90,7 @@ func TestScheduleTaskTool_CronTrigger(t *testing.T) {
 
 func TestScheduleTaskTool_EventTrigger(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	tool := NewScheduleTaskTool(sched, bus)
+	tool := NewScheduleTaskTool(sched, bus, nil, nil)
 
 	input := `{"title":"on complete","description":"react to task completion","on_event":"task.completed","cooldown":"10s"}`
 	result, err := tool.InvokableRun(context.Background(), input)
@@ -107,7 +107,7 @@ func TestScheduleTaskTool_EventTrigger(t *testing.T) {
 
 func TestScheduleTaskTool_Validation(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	tool := NewScheduleTaskTool(sched, bus)
+	tool := NewScheduleTaskTool(sched, bus, nil, nil)
 
 	tests := []struct {
 		name  string
@@ -137,7 +137,7 @@ func TestScheduleTaskTool_Validation(t *testing.T) {
 
 func TestUnscheduleTaskTool(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	scheduleTool := NewScheduleTaskTool(sched, bus)
+	scheduleTool := NewScheduleTaskTool(sched, bus, nil, nil)
 	unscheduleTool := NewUnscheduleTaskTool(sched, bus)
 
 	// Create an entry first
@@ -183,7 +183,7 @@ func TestUnscheduleTaskTool_NotFound(t *testing.T) {
 
 func TestListSchedulesTool(t *testing.T) {
 	sched, bus := newScheduleTestDeps(t)
-	scheduleTool := NewScheduleTaskTool(sched, bus)
+	scheduleTool := NewScheduleTaskTool(sched, bus, nil, nil)
 	listTool := NewListSchedulesTool(sched)
 
 	// Create two entries

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
@@ -19,12 +21,21 @@ import (
 // SubmitTaskTool submits a new async task to the actor pool.
 type SubmitTaskTool struct {
 	pool            tasks.TaskSubmitter
-	autonomyDefault string // "disabled" | "supervised" | "autonomous"
+	autonomyDefault string           // "disabled" | "supervised" | "autonomous"
+	registry        *ToolRegistry    // for looking up tool specs (dangerous flag)
+	perms           *ToolPermissions // for checking/setting approvals
+	bus             *events.Bus      // for emitting approval prompts
 }
 
 // NewSubmitTaskTool creates a new submit_task tool.
-func NewSubmitTaskTool(pool tasks.TaskSubmitter, autonomyDefault string) *SubmitTaskTool {
-	return &SubmitTaskTool{pool: pool, autonomyDefault: autonomyDefault}
+func NewSubmitTaskTool(pool tasks.TaskSubmitter, autonomyDefault string, registry *ToolRegistry, perms *ToolPermissions, bus *events.Bus) *SubmitTaskTool {
+	return &SubmitTaskTool{
+		pool:            pool,
+		autonomyDefault: autonomyDefault,
+		registry:        registry,
+		perms:           perms,
+		bus:             bus,
+	}
 }
 
 // SubmitTaskManifest returns the plugin manifest for the submit_task tool.
@@ -149,6 +160,13 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		tools = append(tools, "request_validation")
 	}
 
+	// Pre-approve dangerous tools before submitting
+	if t.registry != nil && t.perms != nil && t.bus != nil {
+		if err := t.preApproveDangerousTools(ctx, sessionID, tools); err != nil {
+			return "", fmt.Errorf("submit_task: %w", err)
+		}
+	}
+
 	// Inherit parent session's WorkDir if not explicitly set
 	workDir := input.WorkDir
 	if workDir == "" {
@@ -205,6 +223,62 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		"status":  "submitted",
 	})
 	return string(result), nil
+}
+
+// preApproveDangerousTools checks if any tools in the list are dangerous and
+// not yet approved. If so, prompts the user for batch approval before submit.
+func (t *SubmitTaskTool) preApproveDangerousTools(ctx context.Context, sessionID string, toolNames []string) error {
+	var unapproved []string
+	for _, name := range toolNames {
+		spec := t.registry.ToolSpec(name)
+		if spec == nil || !spec.Dangerous {
+			continue
+		}
+		if t.perms.IsAllowed(sessionID, name) {
+			continue
+		}
+		unapproved = append(unapproved, name)
+	}
+	if len(unapproved) == 0 {
+		return nil
+	}
+
+	token := uuid.New().String()
+
+	t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.PromptRequestPayload{
+		Type:  events.PromptTypeSelect,
+		Label: fmt.Sprintf("Task requires dangerous tools: %s. Allow?", strings.Join(unapproved, ", ")),
+		Options: []events.PromptOption{
+			{Value: "allow", Label: "Allow all listed tools"},
+			{Value: "deny", Label: "Deny"},
+		},
+		Token: token,
+	}, sessionID))
+
+	ch, unsub := t.bus.SubscribeChan(1, events.EventPromptResponse)
+	defer unsub()
+
+	for {
+		select {
+		case event := <-ch:
+			payload, ok := events.GetPromptResponsePayload(event)
+			if !ok || payload.Token != token {
+				continue
+			}
+			val, _ := payload.Value.(string)
+			if val == "allow" {
+				for _, name := range unapproved {
+					t.perms.AllowForSession(sessionID, name)
+					t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin,
+						events.ToolApprovedPayload{ToolName: name}, sessionID))
+				}
+				return nil
+			}
+			return fmt.Errorf("dangerous tools denied by user: %s", strings.Join(unapproved, ", "))
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for tool approval: %w", ctx.Err())
+		}
+	}
 }
 
 var _ tool.InvokableTool = (*SubmitTaskTool)(nil)

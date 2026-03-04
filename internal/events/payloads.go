@@ -100,6 +100,21 @@ type PromptResponsePayload struct {
 func (PromptResponsePayload) EventType() EventType { return EventPromptResponse }
 
 // =============================================================================
+// TOOL APPROVAL EVENTS
+// =============================================================================
+
+// ToolApprovedPayload is emitted when a dangerous tool is approved for a session.
+type ToolApprovedPayload struct {
+	ToolName string `json:"tool_name"`
+}
+
+func (ToolApprovedPayload) EventType() EventType { return EventToolApproved }
+
+func GetToolApprovedPayload(e Event) (ToolApprovedPayload, bool) {
+	return ExtractPayload[ToolApprovedPayload](e)
+}
+
+// =============================================================================
 // INTERNAL EVENTS
 // =============================================================================
 

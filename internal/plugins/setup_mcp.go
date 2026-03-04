@@ -49,6 +49,10 @@ func setupOneMCPServer(ctx context.Context, name string, cfg *config.MCPServerCo
 	for _, t := range cfg.AllowedTools {
 		allowedSet[t] = true
 	}
+	trustedSet := make(map[string]bool, len(cfg.TrustedTools))
+	for _, t := range cfg.TrustedTools {
+		trustedSet[t] = true
+	}
 
 	timeout := time.Duration(cfg.Timeout) * time.Millisecond
 	registered := 0
@@ -68,7 +72,8 @@ func setupOneMCPServer(ctx context.Context, name string, cfg *config.MCPServerCo
 			timeout:    timeout,
 		}
 
-		manifest := mcpToolManifest(name, mcpTool, cfg.IsDangerous())
+		isDangerous := cfg.IsDangerous() && !trustedSet[mcpTool.Name]
+		manifest := mcpToolManifest(name, mcpTool, isDangerous)
 		if err := registry.RegisterNative(prefixedName, proxyTool, resolvedNativeManifest(manifest)); err != nil {
 			slog.Warn("mcp tool register failed", "server", name, "tool", mcpTool.Name, "error", err)
 			continue

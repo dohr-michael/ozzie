@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
@@ -19,13 +21,15 @@ import (
 
 // ScheduleTaskTool creates a recurring schedule entry.
 type ScheduleTaskTool struct {
-	sched *scheduler.Scheduler
-	bus   *events.Bus
+	sched    *scheduler.Scheduler
+	bus      *events.Bus
+	registry *ToolRegistry
+	perms    *ToolPermissions
 }
 
 // NewScheduleTaskTool creates a new schedule_task tool.
-func NewScheduleTaskTool(sched *scheduler.Scheduler, bus *events.Bus) *ScheduleTaskTool {
-	return &ScheduleTaskTool{sched: sched, bus: bus}
+func NewScheduleTaskTool(sched *scheduler.Scheduler, bus *events.Bus, registry *ToolRegistry, perms *ToolPermissions) *ScheduleTaskTool {
+	return &ScheduleTaskTool{sched: sched, bus: bus, registry: registry, perms: perms}
 }
 
 // ScheduleTaskManifest returns the plugin manifest for the schedule_task tool.
@@ -181,6 +185,18 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		entry.CooldownSec = int(d.Seconds())
 	}
 
+	// Pre-approve dangerous tools before creating the schedule
+	if t.registry != nil && t.perms != nil && t.bus != nil && len(input.Tools) > 0 {
+		sessionID := events.SessionIDFromContext(ctx)
+		approvedTools, err := t.preApproveDangerousTools(ctx, sessionID, input.Tools)
+		if err != nil {
+			return "", fmt.Errorf("schedule_task: %w", err)
+		}
+		if len(approvedTools) > 0 {
+			entry.TaskTemplate.ApprovedTools = approvedTools
+		}
+	}
+
 	if err := t.sched.AddEntry(entry); err != nil {
 		return "", fmt.Errorf("schedule_task: %w", err)
 	}
@@ -200,6 +216,75 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		"title":    entry.Title,
 	})
 	return string(result), nil
+}
+
+// preApproveDangerousTools checks for dangerous tools and prompts the user.
+// Returns the list of approved dangerous tool names.
+func (t *ScheduleTaskTool) preApproveDangerousTools(ctx context.Context, sessionID string, toolNames []string) ([]string, error) {
+	var unapproved []string
+	for _, name := range toolNames {
+		spec := t.registry.ToolSpec(name)
+		if spec == nil || !spec.Dangerous {
+			continue
+		}
+		if t.perms.IsAllowed(sessionID, name) {
+			// Already approved — still include in template for future runs
+			unapproved = append(unapproved, name)
+			continue
+		}
+		unapproved = append(unapproved, name)
+	}
+	if len(unapproved) == 0 {
+		return nil, nil
+	}
+
+	// Check which are truly unapproved (need prompt)
+	var needPrompt []string
+	for _, name := range unapproved {
+		if !t.perms.IsAllowed(sessionID, name) {
+			needPrompt = append(needPrompt, name)
+		}
+	}
+	if len(needPrompt) == 0 {
+		return unapproved, nil
+	}
+
+	token := uuid.New().String()
+
+	t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.PromptRequestPayload{
+		Type:  events.PromptTypeSelect,
+		Label: fmt.Sprintf("Schedule requires dangerous tools: %s. Pre-approve for all future runs?", strings.Join(needPrompt, ", ")),
+		Options: []events.PromptOption{
+			{Value: "allow", Label: "Allow all listed tools"},
+			{Value: "deny", Label: "Deny"},
+		},
+		Token: token,
+	}, sessionID))
+
+	ch, unsub := t.bus.SubscribeChan(1, events.EventPromptResponse)
+	defer unsub()
+
+	for {
+		select {
+		case event := <-ch:
+			payload, ok := events.GetPromptResponsePayload(event)
+			if !ok || payload.Token != token {
+				continue
+			}
+			val, _ := payload.Value.(string)
+			if val == "allow" {
+				for _, name := range needPrompt {
+					t.perms.AllowForSession(sessionID, name)
+					t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin,
+						events.ToolApprovedPayload{ToolName: name}, sessionID))
+				}
+				return unapproved, nil
+			}
+			return nil, fmt.Errorf("dangerous tools denied by user: %s", strings.Join(needPrompt, ", "))
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for tool approval: %w", ctx.Err())
+		}
+	}
 }
 
 var _ tool.InvokableTool = (*ScheduleTaskTool)(nil)

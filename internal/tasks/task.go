@@ -70,6 +70,7 @@ type TaskConfig struct {
 	AutonomyLevel        string            `json:"autonomy_level,omitempty"` // "disabled" | "supervised" | "autonomous"
 	RequiredTags         []string          `json:"required_tags,omitempty"`
 	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
+	ApprovedTools        []string          `json:"approved_tools,omitempty"` // dangerous tools pre-approved
 }
 
 // IsCoordinator returns true if the task uses any coordinator workflow (supervised or autonomous).

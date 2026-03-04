@@ -3,7 +3,6 @@ package plugins
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -12,11 +11,10 @@ import (
 	"github.com/dohr-michael/ozzie/internal/events"
 )
 
-const confirmationTimeout = 60 * time.Second
-
 // DangerousToolWrapper wraps a tool.InvokableTool with a confirmation step.
-// Before executing, it emits a confirmation event and waits for the user response.
+// Before executing, it emits a prompt event and waits for the user response.
 // If the tool is pre-approved via ToolPermissions, execution proceeds immediately.
+// In sub-tasks, the prompt is routed to the parent session via session ID.
 type DangerousToolWrapper struct {
 	inner tool.InvokableTool
 	name  string
@@ -44,8 +42,9 @@ func (d *DangerousToolWrapper) Info(ctx context.Context) (*schema.ToolInfo, erro
 
 // InvokableRun checks permissions before executing the tool.
 // If pre-approved (global or session), executes immediately.
-// In autonomous mode (async tasks), returns an error for unapproved tools.
-// In interactive mode, prompts the user and memorizes the approval.
+// Otherwise, prompts the user with three options: allow once, always allow, deny.
+// The prompt is routed via session ID so sub-tasks bubble up to the parent client.
+// There is no timeout — waits until the user responds or the context is cancelled.
 func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	sessionID := events.SessionIDFromContext(ctx)
 
@@ -54,31 +53,29 @@ func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON
 		return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
 	}
 
-	// Autonomous mode (async task) — no one to confirm, fail immediately
-	if events.IsAutonomousContext(ctx) {
-		return "", fmt.Errorf("tool %q requires approval but is not in allowed_dangerous list (autonomous mode)", d.name)
-	}
-
-	// Interactive mode — prompt the user
+	// Prompt the user — works for both interactive and sub-task contexts
+	// because the session ID routes the event to the correct client.
 	token := uuid.New().String()
 
-	d.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.ToolCallPayload{
+	d.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.ToolCallPayload{
 		Status:    events.ToolStatusStarted,
 		Name:      d.name,
 		Arguments: map[string]any{"raw": argumentsInJSON},
-	}))
+	}, sessionID))
 
-	d.bus.Publish(events.NewTypedEvent(events.SourcePlugin, events.PromptRequestPayload{
-		Type:  events.PromptTypeConfirm,
-		Label: fmt.Sprintf("Allow %q to execute? Arguments: %s", d.name, truncate(argumentsInJSON, 200)),
+	d.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.PromptRequestPayload{
+		Type:  events.PromptTypeSelect,
+		Label: fmt.Sprintf("Tool %q requires approval. Arguments: %s", d.name, truncate(argumentsInJSON, 200)),
+		Options: []events.PromptOption{
+			{Value: "once", Label: "Allow once"},
+			{Value: "session", Label: "Always allow for this session"},
+			{Value: "deny", Label: "Deny"},
+		},
 		Token: token,
-	}))
+	}, sessionID))
 
 	ch, unsub := d.bus.SubscribeChan(1, events.EventPromptResponse)
 	defer unsub()
-
-	ctx, cancel := context.WithTimeout(ctx, confirmationTimeout)
-	defer cancel()
 
 	for {
 		select {
@@ -87,16 +84,30 @@ func (d *DangerousToolWrapper) InvokableRun(ctx context.Context, argumentsInJSON
 			if !ok || payload.Token != token {
 				continue
 			}
-			if payload.Cancelled {
+			switch val := payload.Value.(type) {
+			case string:
+				switch val {
+				case "once":
+					return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
+				case "session":
+					if d.perms != nil && sessionID != "" {
+						d.perms.AllowForSession(sessionID, d.name)
+					}
+					d.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin,
+						events.ToolApprovedPayload{ToolName: d.name}, sessionID))
+					return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
+				default:
+					return "", fmt.Errorf("tool %q execution denied by user", d.name)
+				}
+			default:
+				// Cancelled or unknown value type
+				if payload.Cancelled {
+					return "", fmt.Errorf("tool %q execution denied by user", d.name)
+				}
 				return "", fmt.Errorf("tool %q execution denied by user", d.name)
 			}
-			// Confirmed — memorize for session and execute
-			if d.perms != nil && sessionID != "" {
-				d.perms.AllowForSession(sessionID, d.name)
-			}
-			return d.inner.InvokableRun(ctx, argumentsInJSON, opts...)
 		case <-ctx.Done():
-			return "", fmt.Errorf("tool %q confirmation timed out", d.name)
+			return "", fmt.Errorf("tool %q: waiting for approval: %w", d.name, ctx.Err())
 		}
 	}
 }

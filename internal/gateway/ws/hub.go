@@ -62,6 +62,26 @@ func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermission
 		}
 	}, events.EventPromptRequest)
 
+	// Persist tool approvals to session store
+	bus.Subscribe(func(e events.Event) {
+		payload, ok := events.GetToolApprovedPayload(e)
+		if !ok || e.SessionID == "" {
+			return
+		}
+		sess, err := store.Get(e.SessionID)
+		if err != nil {
+			return
+		}
+		// Add tool if not already present
+		for _, t := range sess.ApprovedTools {
+			if t == payload.ToolName {
+				return
+			}
+		}
+		sess.ApprovedTools = append(sess.ApprovedTools, payload.ToolName)
+		_ = store.UpdateMeta(sess)
+	}, events.EventToolApproved)
+
 	// Subscribe to all events and bridge to WS clients
 	h.unsubscribe = bus.Subscribe(func(e events.Event) {
 		frame, err := NewEventFrame(string(e.Type), e.SessionID, e)
@@ -187,6 +207,9 @@ func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string, roo
 		}
 		c.sessionID = s.ID
 
+		// Restore persisted tool approvals
+		h.restoreApprovedTools(s)
+
 		// Update root_dir if provided (client may have changed directory)
 		if rootDir != "" && rootDir != s.RootDir {
 			s.RootDir = rootDir
@@ -224,6 +247,16 @@ func (h *Hub) handleOpenSession(c *Client, frameID string, sessionID string, roo
 		"session_id": s.ID,
 		"status":     "created",
 	})
+}
+
+// restoreApprovedTools loads persisted tool approvals into ToolPermissions.
+func (h *Hub) restoreApprovedTools(s *sessions.Session) {
+	if h.perms == nil || len(s.ApprovedTools) == 0 {
+		return
+	}
+	for _, toolName := range s.ApprovedTools {
+		h.perms.AllowForSession(s.ID, toolName)
+	}
 }
 
 // ensureSession auto-creates a session for a client if it doesn't have one.

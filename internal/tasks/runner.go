@@ -30,6 +30,11 @@ var ErrPreempted = errors.New("task preempted")
 // ErrSelfSuspend is returned when a task requests self-suspension (validation).
 var ErrSelfSuspend = errors.New("task self-suspended for validation")
 
+// ToolPermissionsSeeder can seed per-session tool permissions.
+type ToolPermissionsSeeder interface {
+	AllowForSession(sessionID, toolName string)
+}
+
 // TaskRunner executes a single task using an ephemeral agent.
 type TaskRunner struct {
 	task  *Task
@@ -45,6 +50,7 @@ type TaskRunner struct {
 	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
 	tier                agent.ModelTier       // model tier for prompt adaptation
 	promptPrefix        string                // overlay-specific prompt prefix
+	perms               ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 
 	selfSuspendCh chan events.ValidationRequest // side channel for self-suspension
 }
@@ -57,11 +63,12 @@ type TaskRunnerConfig struct {
 	ToolRegistry        agent.ToolLookup
 	SkillRunner         SkillExecutor
 	PreemptionCheck     func() bool
-	MaxValidationRounds int                    // max plan-revise cycles (0 = default 3)
-	Middlewares         []adk.AgentMiddleware   // middlewares for sub-agents (e.g. filesystem, reduction)
-	Retriever           agent.MemoryRetriever  // pre-task memory retrieval (optional)
-	Tier                agent.ModelTier        // model tier for prompt adaptation
-	PromptPrefix        string                 // overlay-specific prompt prefix (optional)
+	MaxValidationRounds int                   // max plan-revise cycles (0 = default 3)
+	Middlewares         []adk.AgentMiddleware // middlewares for sub-agents (e.g. filesystem, reduction)
+	Retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
+	Tier                agent.ModelTier       // model tier for prompt adaptation
+	PromptPrefix        string                // overlay-specific prompt prefix (optional)
+	Perms               ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 }
 
 // NewTaskRunner creates a runner for a specific task.
@@ -92,6 +99,7 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 		retriever:           cfg.Retriever,
 		tier:                cfg.Tier,
 		promptPrefix:        cfg.PromptPrefix,
+		perms:               cfg.Perms,
 		selfSuspendCh:       make(chan events.ValidationRequest, 1),
 	}
 }
@@ -113,6 +121,13 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 	}
 	if len(r.task.Config.Env) > 0 {
 		ctx = events.ContextWithTaskEnv(ctx, r.task.Config.Env)
+	}
+
+	// Seed pre-approved tools into permissions (from schedule or submit_task)
+	if r.perms != nil && r.task.SessionID != "" && len(r.task.Config.ApprovedTools) > 0 {
+		for _, toolName := range r.task.Config.ApprovedTools {
+			r.perms.AllowForSession(r.task.SessionID, toolName)
+		}
 	}
 
 	task := r.task
@@ -423,7 +438,7 @@ Focus on implementation — the exploration phase is complete.`, task.Title, tas
 	// Wrap the plan-execute agent in a Runner for our consumeRunnerOutput
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{
 		Agent:           peAgent,
-		EnableStreaming:  false,
+		EnableStreaming: false,
 	})
 
 	messages := []*schema.Message{
@@ -938,7 +953,7 @@ type selfSuspendError struct {
 	explorationContext string // accumulated assistant messages from Phase 1
 }
 
-func (e *selfSuspendError) Error() string { return ErrSelfSuspend.Error() }
+func (e *selfSuspendError) Error() string        { return ErrSelfSuspend.Error() }
 func (e *selfSuspendError) Is(target error) bool { return target == ErrSelfSuspend }
 
 // selfSuspendTask writes a mailbox request, sets WaitingForReply, and suspends.

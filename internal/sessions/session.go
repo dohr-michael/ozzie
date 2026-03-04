@@ -23,20 +23,21 @@ type TokenUsage struct {
 
 // Session holds metadata about a conversation session.
 type Session struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name,omitempty"`
-	Title        string            `json:"title"`
-	CreatedAt    time.Time         `json:"created_at"`
-	UpdatedAt    time.Time         `json:"updated_at"`
-	Status       SessionStatus     `json:"status"`
-	Model        string            `json:"model,omitempty"`
-	MessageCount int               `json:"message_count"`
-	TokenUsage   TokenUsage        `json:"token_usage"`
-	RootDir      string            `json:"root_dir,omitempty"`
-	Language     string            `json:"language,omitempty"`
-	Summary      string            `json:"summary,omitempty"`        // compressed context from older messages
-	SummaryUpTo  int               `json:"summary_up_to,omitempty"`  // index (exclusive) of last summarized message
-	Metadata     map[string]string `json:"metadata,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name,omitempty"`
+	Title         string            `json:"title"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Status        SessionStatus     `json:"status"`
+	Model         string            `json:"model,omitempty"`
+	MessageCount  int               `json:"message_count"`
+	TokenUsage    TokenUsage        `json:"token_usage"`
+	RootDir       string            `json:"root_dir,omitempty"`
+	Language      string            `json:"language,omitempty"`
+	Summary       string            `json:"summary,omitempty"`       // compressed context from older messages
+	SummaryUpTo   int               `json:"summary_up_to,omitempty"` // index (exclusive) of last summarized message
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	ApprovedTools []string          `json:"approved_tools,omitempty"` // dangerous tools approved for this session
 }
 
 // Message is a single turn in a conversation, serializable to JSONL.

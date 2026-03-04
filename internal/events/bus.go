@@ -58,6 +58,9 @@ const (
 	// Context
 	EventContextLayered EventType = "context.layered"
 
+	// Tool approval
+	EventToolApproved EventType = "tool.approved"
+
 	// Tasks
 	EventTaskCreated      EventType = "task.created"
 	EventTaskStarted      EventType = "task.started"

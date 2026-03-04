@@ -34,6 +34,7 @@ type MCPServerConfig struct {
 	Dangerous    *bool             `json:"dangerous,omitempty"`     // default: true — all tools from this server
 	AllowedTools []string          `json:"allowed_tools,omitempty"` // empty = all tools allowed
 	DeniedTools  []string          `json:"denied_tools,omitempty"`  // blacklist (takes priority over allowed)
+	TrustedTools []string          `json:"trusted_tools,omitempty"` // tools NOT marked dangerous (bypass confirmation)
 	Timeout      int               `json:"timeout,omitempty"`       // ms per CallTool (default: 30000)
 }
 

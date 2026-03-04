@@ -341,6 +341,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		SkillRunner:         skillExecutor,
 		TaskMiddlewares:     taskMiddlewares,
 		Retriever:           memoryRetriever,
+		Perms:               toolPerms,
 	})
 	pool.Start()
 	defer pool.Stop()
@@ -395,7 +396,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Register task tools
-	submitTool := plugins.NewSubmitTaskTool(pool, cfg.Agent.Coordinator.DefaultLevel)
+	submitTool := plugins.NewSubmitTaskTool(pool, cfg.Agent.Coordinator.DefaultLevel, toolRegistry, toolPerms, bus)
 	if err := toolRegistry.RegisterNative("submit_task", submitTool, plugins.SubmitTaskManifest()); err != nil {
 		slog.Warn("failed to register submit_task tool", "error", err)
 	}
@@ -421,7 +422,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Register schedule tools
-	scheduleTaskTool := plugins.NewScheduleTaskTool(sched, bus)
+	scheduleTaskTool := plugins.NewScheduleTaskTool(sched, bus, toolRegistry, toolPerms)
 	if err := toolRegistry.RegisterNative("schedule_task", scheduleTaskTool, plugins.ScheduleTaskManifest()); err != nil {
 		slog.Warn("failed to register schedule_task tool", "error", err)
 	}

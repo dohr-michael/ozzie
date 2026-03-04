@@ -492,9 +492,10 @@ func (s *Scheduler) triggerEntry(re *runtimeEntry, trigger string) string {
 			Title:       re.tmpl.Title,
 			Description: re.tmpl.Description,
 			Config: tasks.TaskConfig{
-				Tools:   re.tmpl.Tools,
-				WorkDir: re.tmpl.WorkDir,
-				Env:     re.tmpl.Env,
+				Tools:         re.tmpl.Tools,
+				WorkDir:       re.tmpl.WorkDir,
+				Env:           re.tmpl.Env,
+				ApprovedTools: re.tmpl.ApprovedTools,
 			},
 		}
 	} else {
