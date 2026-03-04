@@ -12,14 +12,16 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/embedding/openai"
 
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
 // NewEmbedder creates an Eino Embedder from the embedding config.
 // Supported drivers: "openai", "ollama".
-func NewEmbedder(ctx context.Context, cfg config.EmbeddingConfig) (embedding.Embedder, error) {
+// If kr is non-nil, ENC[age:...] auth values are decrypted transparently.
+func NewEmbedder(ctx context.Context, cfg config.EmbeddingConfig, kr *secrets.KeyRing) (embedding.Embedder, error) {
 	switch strings.ToLower(cfg.Driver) {
 	case "openai":
-		return newOpenAIEmbedder(ctx, cfg)
+		return newOpenAIEmbedder(ctx, cfg, kr)
 	case "ollama":
 		return newOllamaEmbedder(ctx, cfg)
 	default:
@@ -27,8 +29,8 @@ func NewEmbedder(ctx context.Context, cfg config.EmbeddingConfig) (embedding.Emb
 	}
 }
 
-func newOpenAIEmbedder(ctx context.Context, cfg config.EmbeddingConfig) (embedding.Embedder, error) {
-	apiKey := resolveEmbeddingAuth(cfg)
+func newOpenAIEmbedder(ctx context.Context, cfg config.EmbeddingConfig, kr *secrets.KeyRing) (embedding.Embedder, error) {
+	apiKey := resolveEmbeddingAuth(cfg, kr)
 	if apiKey == "" {
 		return nil, fmt.Errorf("openai embedding: API key not configured (set auth.api_key or OPENAI_API_KEY)")
 	}
@@ -62,19 +64,31 @@ func newOllamaEmbedder(ctx context.Context, cfg config.EmbeddingConfig) (embeddi
 
 // resolveEmbeddingAuth resolves the API key for the embedding provider.
 // Resolution order: direct api_key → OPENAI_API_KEY env.
-func resolveEmbeddingAuth(cfg config.EmbeddingConfig) string {
+// If kr is non-nil, ENC[age:...] values are decrypted transparently.
+func resolveEmbeddingAuth(cfg config.EmbeddingConfig, kr *secrets.KeyRing) string {
 	key := strings.TrimSpace(cfg.Auth.APIKey)
 	if key != "" {
 		if strings.HasPrefix(key, "${") && strings.HasSuffix(key, "}") {
-			return os.Getenv(key[2 : len(key)-1])
+			return embeddingMaybeDecrypt(os.Getenv(key[2:len(key)-1]), kr)
 		}
-		return key
+		return embeddingMaybeDecrypt(key, kr)
 	}
 	// Default env var per driver
 	switch strings.ToLower(cfg.Driver) {
 	case "openai":
-		return os.Getenv("OPENAI_API_KEY")
+		return embeddingMaybeDecrypt(os.Getenv("OPENAI_API_KEY"), kr)
 	default:
 		return ""
 	}
+}
+
+// embeddingMaybeDecrypt transparently decrypts ENC[age:...] values if a keyring is available.
+func embeddingMaybeDecrypt(value string, kr *secrets.KeyRing) string {
+	if kr == nil || !secrets.IsEncrypted(value) {
+		return value
+	}
+	if dec, err := kr.DecryptValue(value); err == nil {
+		return dec
+	}
+	return value
 }

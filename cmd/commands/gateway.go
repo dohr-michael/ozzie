@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"filippo.io/age"
 	"github.com/cloudwego/eino/adk"
 	einoCallbacks "github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
@@ -60,9 +59,28 @@ func NewGatewayCommand() *cli.Command {
 }
 
 func runGateway(_ context.Context, cmd *cli.Command) error {
-	// Load config
+	// 1. KeyRing — loaded before config (does not depend on config)
+	kr, krErr := secrets.NewKeyRing()
+	if krErr != nil {
+		slog.Warn("keyring not loaded, secret decryption disabled", "error", krErr)
+	}
+	if kr == nil {
+		slog.Info("no .age/ keyring found, secrets will not be decrypted")
+	}
+
+	// Decrypt function for config loader
+	var decryptFn config.DecryptFunc
+	if kr != nil {
+		decryptFn = kr.DecryptValue
+	}
+
+	// 2. Load config with decryption
 	configPath := cmd.String("config")
-	cfg, err := config.Load(configPath)
+	var loadOpts []config.LoadOption
+	if decryptFn != nil {
+		loadOpts = append(loadOpts, config.WithDecrypt(decryptFn))
+	}
+	cfg, err := config.Load(configPath, loadOpts...)
 	if err != nil {
 		slog.Warn("config not found, using defaults", "path", configPath, "error", err)
 		cfg = &config.Config{}
@@ -87,16 +105,8 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		cfg.Gateway.Port = cmd.Int("port")
 	}
 
-	// Age identity (optional — skip if ozzie wake not run)
-	var ageIdentity *age.X25519Identity
-	if id, err := secrets.LoadIdentity(secrets.KeyPath()); err == nil {
-		ageIdentity = id
-	} else {
-		slog.Warn("age key not found, secret encryption disabled", "error", err)
-	}
-
-	// Config reloader
-	reloader := config.NewReloader(configPath, config.DotenvPath(), cfg)
+	// 3. Config reloader with decrypt
+	reloader := config.NewReloader(configPath, config.DotenvPath(), cfg, decryptFn)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -134,8 +144,8 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		}
 	}
 
-	// Model registry
-	registry := models.NewRegistry(cfg.Models)
+	// Model registry (with keyring for encrypted auth)
+	registry := models.NewRegistry(cfg.Models, kr)
 
 	// Wire reloader → model registry for hot config reload
 	reloader.OnReload(func(newCfg *config.Config) {
@@ -243,7 +253,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	slog.Debug("loaded persona", "length", len(persona), "persona", persona)
 
 	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
-	fsBackend := plugins.NewOzzieBackend(bus, toolPerms, tmpDir)
+	fsOpts := []plugins.OzzieBackendOption{
+		plugins.WithWriteAllowedPaths(tmpDir),
+		plugins.WithReadRestrictedPaths(secrets.AgeDirPath()),
+	}
+	fsBackend := plugins.NewOzzieBackend(bus, toolPerms, fsOpts...)
 	fsMw, err := einoFs.NewMiddleware(ctx, &einoFs.Config{
 		Backend:                          fsBackend,
 		WithoutLargeToolResultOffloading: true, // offloading handled by reduction middleware below
@@ -283,7 +297,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	var vectorStore *memory.VectorStore
 	var pipeline *memory.Pipeline
 	if cfg.Embedding.IsEnabled() {
-		embedder, embedErr := memory.NewEmbedder(ctx, cfg.Embedding)
+		embedder, embedErr := memory.NewEmbedder(ctx, cfg.Embedding, kr)
 		if embedErr != nil {
 			slog.Warn("embedding disabled: failed to create embedder", "error", embedErr)
 		} else {
@@ -453,25 +467,19 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register reply_task tool", "error", err)
 	}
 
-	// Register set_secret tool (only if age identity is available)
-	if ageIdentity != nil {
-		setSecretTool := plugins.NewSetSecretTool(ageIdentity, reloader)
-		if err := toolRegistry.RegisterNative("set_secret", setSecretTool, plugins.SetSecretManifest()); err != nil {
-			slog.Warn("failed to register set_secret tool", "error", err)
-		}
-	}
-
 	// ToolSet: all native/built-in tools are always active,
 	// only WASM plugin tools require dynamic activation.
 	// Must be computed AFTER all native tools are registered.
 	coreTools := toolRegistry.NativeToolNames()
 	toolSet := agent.NewToolSet(coreTools, toolRegistry.ToolNames())
 
-	// Register activate_tools meta-tool (needs toolSet + toolRegistry)
+	// Register activate_tools meta-tool (needs toolSet + toolRegistry).
+	// Registered AFTER NewToolSet, so we must explicitly add it to core.
 	activateTool := plugins.NewActivateToolsTool(toolSet, toolRegistry)
 	if err := toolRegistry.RegisterNative("activate_tools", activateTool, plugins.ActivateToolsManifest()); err != nil {
 		slog.Warn("failed to register activate_tools tool", "error", err)
 	}
+	toolSet.RegisterCore("activate_tools")
 
 	slog.Info("tools loaded", "count", len(toolRegistry.ToolNames()))
 
@@ -560,8 +568,8 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port, toolPerms)
 
 	// Enable secret encryption on the WS hub
-	if ageIdentity != nil {
-		server.SetSecretEncryptor(ageIdentity.Recipient())
+	if kr != nil {
+		server.SetSecretEncryptor(kr.CurrentRecipient())
 	}
 
 	// Connect task handler to gateway (WS + HTTP task operations)

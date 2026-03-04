@@ -576,6 +576,20 @@ func (z *InputZone) PromptMulti(question, field, resumeToken string, options []I
 	z.textInput.Blur()
 }
 
+// PreSelectMulti pre-checks options whose Value is in the given set.
+// Must be called after PromptMulti.
+func (z *InputZone) PreSelectMulti(values []string) {
+	set := make(map[string]bool, len(values))
+	for _, v := range values {
+		set[v] = true
+	}
+	for i, opt := range z.options {
+		if set[opt.Value] {
+			z.multiSelect[i] = true
+		}
+	}
+}
+
 // PromptConfirm sets up a confirmation prompt.
 func (z *InputZone) PromptConfirm(question, resumeToken string) {
 	z.mode = ModeConfirm

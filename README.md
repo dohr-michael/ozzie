@@ -29,14 +29,19 @@ executable code. Ozzie takes a different approach:
   connect ephemerally via WebSocket
 - **Event-driven backbone** — Every action (message, decision, tool call) is an immutable event — auditable, replayable,
   human-readable
-- **Multi-LLM** — 4 drivers (Anthropic, OpenAI, Mistral, Ollama) with lazy-init registry, provider cooldown, and
-  automatic task retry on failure
+- **Multi-LLM** — 5 drivers (Anthropic, OpenAI, Gemini, Mistral, Ollama) with lazy-init registry, provider cooldown,
+  and automatic task retry on failure
 - **Agent autonomy** — Coordinator pattern (explore → plan → validate → execute), async task delegation, ephemeral
   sub-agents, cron/event scheduler
 - **Semantic memory** — Hybrid retrieval (keyword + vector embeddings), cross-task learning, automatic memory extraction
 - **3-level plugin architecture** — Communication (senses), Tools (hands), Skills (expertise) — each with distinct
   isolation boundaries
-- **MCP server** — Expose all Ozzie tools as an MCP server for Claude Code or any MCP-compatible client
+- **MCP client & server** — Connect external MCP servers (with `trusted_tools` and per-tool danger control); expose
+  Ozzie tools as an MCP server for Claude Code or any MCP-compatible client
+- **Dynamic tool activation** — Two-tier tool system: core tools always active, plugin/MCP tools activated on demand
+  via `activate_tools` with automatic retry
+- **Dangerous tool approval** — Interactive 3-option prompt (allow once / always allow for session / deny), session
+  persistence, pre-approval for async tasks and schedules
 - **Container-ready** — Multi-arch Docker images, goreleaser builds, GitHub Actions CI/CD
 
 ## Architecture
@@ -212,7 +217,8 @@ make build-plugins
 | `store_memory` / `query_memories` / `forget_memory` | Persistent semantic memory |
 | `update_session` | Update session metadata |
 | `schedule_task` / `unschedule_task` / `list_schedules` | Dynamic scheduling |
-| `activate_tools` | Dynamically enable WASM plugin tools |
+| `activate_tools` | Dynamically enable WASM plugin / MCP tools |
+| `set_secret` | Store encrypted secrets (age) |
 
 **Filesystem tools (via Eino ADK middleware):**
 
@@ -254,6 +260,41 @@ The `OZZIE_PATH` env var isolates dev data from `~/.ozzie`. To expose a single p
 
 Tools marked `dangerous` are **not** wrapped with confirmation in MCP mode — the MCP client handles its own safety.
 
+### External MCP Servers
+
+Ozzie can connect to external MCP servers as a client, exposing their tools to the agent:
+
+```jsonc
+{
+    "mcp": {
+        "servers": {
+            "controlm": {
+                "transport": "stdio",
+                "command": "controlm-mcp-server",
+                "args": ["--config", "/path/to/config.json"],
+                // All tools are dangerous by default (requires user confirmation)
+                "dangerous": true,
+                // Bypass confirmation for read-only tools
+                "trusted_tools": ["list_jobs", "get_job_status"],
+                // Whitelist (empty = all allowed)
+                "allowed_tools": [],
+                // Blacklist (takes priority)
+                "denied_tools": ["delete_job"]
+            }
+        }
+    }
+}
+```
+
+**Dangerous tool approval flow:**
+
+When a dangerous tool is called, the user is prompted with 3 options:
+1. **Allow once** — execute without remembering
+2. **Always allow for this session** — execute and persist the approval (survives gateway restart)
+3. **Deny** — refuse the execution
+
+Pre-approved tools can be configured per schedule (`approved_tools`) for unattended execution.
+
 ## Development
 
 ```bash
@@ -294,6 +335,7 @@ This sets up the MCP server, scaffolds the plugin structure, and iterates on the
 | Language      | **Go 1.25**          | Single binary, goroutines, fast compilation         |
 | Router        | **go-chi**           | Lightweight, idiomatic, middleware support           |
 | LLM Framework | **Eino** (CloudWeGo) | Type-safe, streaming-first, Deep Agent, MCP native  |
+| LLM Drivers   | Anthropic, OpenAI, Gemini, Mistral, Ollama | 5 providers via eino-ext           |
 | Sandbox       | **Extism** (wazero)  | Pure Go, no CGo, capabilities-based isolation       |
 | MCP SDK       | **go-sdk**           | Official MCP Go SDK, stdio transport                |
 | Event Bus     | In-memory channels   | Typed payloads, ring buffer, session-scoped routing |
@@ -328,8 +370,8 @@ This sets up the MCP server, scaffolds the plugin structure, and iterates on the
 
 Ozzie aims to be a **personal AI operating system** — a single self-hosted process that:
 
-1. **Orchestrates any LLM** — Cloud (Anthropic, OpenAI, Mistral) and local (Ollama) models with automatic failover,
-   provider cooldown, and capacity-aware routing
+1. **Orchestrates any LLM** — Cloud (Anthropic, OpenAI, Gemini, Mistral) and local (Ollama) models with automatic
+   failover, provider cooldown, and capacity-aware routing
 2. **Learns continuously** — Semantic memory accumulates across conversations and tasks; sub-agents inherit relevant
    context automatically
 3. **Operates autonomously** — The coordinator pattern enables supervised-to-autonomous progression; cron/event

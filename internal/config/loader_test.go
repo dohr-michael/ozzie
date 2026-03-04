@@ -128,7 +128,7 @@ func TestLoadDefaults_LogLevel(t *testing.T) {
 
 func TestExpandEnvTemplates(t *testing.T) {
 	t.Setenv("TEST_KEY", "my-secret")
-	result := expandEnvTemplates(`{"key": "${{ .Env.TEST_KEY }}"}`)
+	result := expandEnvTemplates(`{"key": "${{ .Env.TEST_KEY }}"}`, nil)
 	expected := `{"key": "my-secret"}`
 	if result != expected {
 		t.Errorf("expected %s, got %s", expected, result)

@@ -14,13 +14,15 @@ type Reloader struct {
 	current    atomic.Pointer[Config]
 	mu         sync.Mutex       // serializes reload
 	listeners  []func(*Config)
+	decrypt    DecryptFunc      // optional ENC[age:...] decryptor
 }
 
 // NewReloader creates a Reloader with the given initial config.
-func NewReloader(configPath, dotenvPath string, initial *Config) *Reloader {
+func NewReloader(configPath, dotenvPath string, initial *Config, decrypt DecryptFunc) *Reloader {
 	r := &Reloader{
 		configPath: configPath,
 		dotenvPath: dotenvPath,
+		decrypt:    decrypt,
 	}
 	r.current.Store(initial)
 	return r
@@ -48,8 +50,12 @@ func (r *Reloader) Reload() error {
 		return fmt.Errorf("reload dotenv: %w", err)
 	}
 
-	// Reload config (re-expands env templates)
-	cfg, err := Load(r.configPath)
+	// Reload config (re-expands env templates with decryption)
+	var loadOpts []LoadOption
+	if r.decrypt != nil {
+		loadOpts = append(loadOpts, WithDecrypt(r.decrypt))
+	}
+	cfg, err := Load(r.configPath, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("reload config: %w", err)
 	}

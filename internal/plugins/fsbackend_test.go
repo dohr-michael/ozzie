@@ -236,7 +236,7 @@ func TestWriteGuard_AutonomousAllowedTmpDir(t *testing.T) {
 	workDir := t.TempDir()
 	tmpDir := t.TempDir()
 
-	b := NewOzzieBackend(nil, nil, tmpDir)
+	b := NewOzzieBackend(nil, nil, WithWriteAllowedPaths(tmpDir))
 	err := b.Write(autonomousCtx(workDir), &filesystem.WriteRequest{
 		FilePath: filepath.Join(tmpDir, "scratch.txt"),
 		Content:  "tmp write",

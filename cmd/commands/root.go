@@ -37,6 +37,7 @@ func NewRootCommand(version, commit string) *cli.Command {
 			NewEventsCommand(),
 			NewScheduleCommand(),
 			NewMemoryCommand(),
+			NewSecretCommand(),
 			NewMCPServeCommand(),
 		},
 	}

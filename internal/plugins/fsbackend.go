@@ -56,16 +56,57 @@ const writeConfirmTimeout = 60 * time.Second
 // It resolves paths relative to the WorkDir from the context.
 // writeAllowedPaths lists additional directories (e.g. $OZZIE_HOME/tmp)
 // where writes are permitted without confirmation.
+// readRestrictedPaths lists directories that the agent cannot read (e.g. .age/).
 type OzzieBackend struct {
-	writeAllowedPaths []string
-	bus               *events.Bus      // nil = no interactive confirmation (tests)
-	perms             *ToolPermissions // nil = no accept-all bypass
+	writeAllowedPaths   []string
+	readRestrictedPaths []string
+	bus                 *events.Bus      // nil = no interactive confirmation (tests)
+	perms               *ToolPermissions // nil = no accept-all bypass
+}
+
+// OzzieBackendOption configures an OzzieBackend.
+type OzzieBackendOption func(*OzzieBackend)
+
+// WithWriteAllowedPaths adds paths where writes are permitted without confirmation.
+func WithWriteAllowedPaths(paths ...string) OzzieBackendOption {
+	return func(b *OzzieBackend) { b.writeAllowedPaths = append(b.writeAllowedPaths, paths...) }
+}
+
+// WithReadRestrictedPaths adds paths that the agent cannot read.
+func WithReadRestrictedPaths(paths ...string) OzzieBackendOption {
+	return func(b *OzzieBackend) { b.readRestrictedPaths = append(b.readRestrictedPaths, paths...) }
 }
 
 // NewOzzieBackend creates a new filesystem backend.
-// Any extra paths are added to the write allow-list.
-func NewOzzieBackend(bus *events.Bus, perms *ToolPermissions, writeAllowedPaths ...string) *OzzieBackend {
-	return &OzzieBackend{writeAllowedPaths: writeAllowedPaths, bus: bus, perms: perms}
+// Use functional options for write-allowed and read-restricted paths.
+func NewOzzieBackend(bus *events.Bus, perms *ToolPermissions, opts ...OzzieBackendOption) *OzzieBackend {
+	b := &OzzieBackend{bus: bus, perms: perms}
+	for _, opt := range opts {
+		opt(b)
+	}
+	return b
+}
+
+// validateReadPath checks if a path is inside a restricted directory.
+func (b *OzzieBackend) validateReadPath(ctx context.Context, path string) error {
+	absPath, err := filepath.Abs(b.resolvePath(ctx, path))
+	if err != nil {
+		return fmt.Errorf("read guard: resolve path: %w", err)
+	}
+	if real, err := evalSymlinksExisting(absPath); err == nil {
+		absPath = real
+	}
+
+	for _, restricted := range b.readRestrictedPaths {
+		clean := filepath.Clean(restricted)
+		if real, err := filepath.EvalSymlinks(clean); err == nil {
+			clean = real
+		}
+		if isUnder(absPath, clean) {
+			return fmt.Errorf("access denied: path %q is inside a restricted directory", path)
+		}
+	}
+	return nil
 }
 
 // isInsideSandbox checks whether absPath falls inside the working directory
@@ -188,8 +229,12 @@ func (b *OzzieBackend) LsInfo(ctx context.Context, req *filesystem.LsInfoRequest
 
 	result := make([]filesystem.FileInfo, 0, len(entries))
 	for _, e := range entries {
+		entryPath := filepath.Join(dir, e.Name())
+		if b.isRestrictedPath(entryPath) {
+			continue
+		}
 		result = append(result, filesystem.FileInfo{
-			Path: filepath.Join(dir, e.Name()),
+			Path: entryPath,
 		})
 	}
 	return result, nil
@@ -197,6 +242,9 @@ func (b *OzzieBackend) LsInfo(ctx context.Context, req *filesystem.LsInfoRequest
 
 // Read reads file content with support for line-based offset and limit.
 func (b *OzzieBackend) Read(ctx context.Context, req *filesystem.ReadRequest) (string, error) {
+	if err := b.validateReadPath(ctx, req.FilePath); err != nil {
+		return "", err
+	}
 	path := b.resolvePath(ctx, req.FilePath)
 
 	info, err := os.Stat(path)
@@ -258,6 +306,10 @@ func (b *OzzieBackend) GrepRaw(ctx context.Context, req *filesystem.GrepRequest)
 		}
 		if d.IsDir() {
 			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			// Skip restricted directories
+			if b.isRestrictedDir(path) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -326,6 +378,9 @@ func (b *OzzieBackend) GlobInfo(ctx context.Context, req *filesystem.GlobInfoReq
 
 	result := make([]filesystem.FileInfo, 0, len(matches))
 	for _, m := range matches {
+		if b.isRestrictedPath(m) {
+			continue
+		}
 		result = append(result, filesystem.FileInfo{Path: m})
 	}
 	return result, nil
@@ -392,6 +447,36 @@ func (b *OzzieBackend) Edit(ctx context.Context, req *filesystem.EditRequest) er
 		return fmt.Errorf("edit: write: %w", err)
 	}
 	return nil
+}
+
+// isRestrictedDir checks if a directory path falls inside a restricted path.
+func (b *OzzieBackend) isRestrictedDir(dirPath string) bool {
+	absPath, err := filepath.Abs(dirPath)
+	if err != nil {
+		return false
+	}
+	for _, restricted := range b.readRestrictedPaths {
+		clean := filepath.Clean(restricted)
+		if isUnder(absPath, clean) {
+			return true
+		}
+	}
+	return false
+}
+
+// isRestrictedPath checks if a file/dir path falls inside a restricted path.
+func (b *OzzieBackend) isRestrictedPath(path string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	for _, restricted := range b.readRestrictedPaths {
+		clean := filepath.Clean(restricted)
+		if isUnder(absPath, clean) {
+			return true
+		}
+	}
+	return false
 }
 
 var _ filesystem.Backend = (*OzzieBackend)(nil)

@@ -11,7 +11,7 @@ func TestReloader_Current(t *testing.T) {
 	cfg := &Config{}
 	cfg.Gateway.Port = 9999
 
-	r := NewReloader("", "", cfg)
+	r := NewReloader("", "", cfg, nil)
 	got := r.Current()
 	if got.Gateway.Port != 9999 {
 		t.Errorf("Current().Gateway.Port = %d, want 9999", got.Gateway.Port)
@@ -39,7 +39,7 @@ func TestReloader_Reload(t *testing.T) {
 	}
 
 	initial := &Config{}
-	r := NewReloader(configPath, dotenvPath, initial)
+	r := NewReloader(configPath, dotenvPath, initial, nil)
 
 	// Track listener invocations
 	var callCount atomic.Int32
@@ -82,7 +82,7 @@ func TestReloader_ReloadMissingDotenv(t *testing.T) {
 	}
 
 	initial := &Config{}
-	r := NewReloader(configPath, dotenvPath, initial)
+	r := NewReloader(configPath, dotenvPath, initial, nil)
 
 	// Should not error — missing .env is ok
 	if err := r.Reload(); err != nil {

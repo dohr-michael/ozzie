@@ -13,6 +13,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/memory"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
 // NewMemoryCommand returns the memory subcommand.
@@ -112,9 +113,14 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 	// Use hybrid retriever if embeddings are enabled
 	var vectorStore *memory.VectorStore
 	configPath := cmd.String("config")
-	cfg, cfgErr := config.Load(configPath)
+	kr, _ := secrets.NewKeyRing()
+	var loadOpts []config.LoadOption
+	if kr != nil {
+		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
+	}
+	cfg, cfgErr := config.Load(configPath, loadOpts...)
 	if cfgErr == nil && cfg.Embedding.IsEnabled() {
-		embedder, err := memory.NewEmbedder(ctx, cfg.Embedding)
+		embedder, err := memory.NewEmbedder(ctx, cfg.Embedding, kr)
 		if err == nil {
 			memoryDir := filepath.Join(config.OzziePath(), "memory")
 			vs, err := memory.NewVectorStore(ctx, memoryDir, embedder)
@@ -213,7 +219,12 @@ func runMemoryForget(_ context.Context, cmd *cli.Command) error {
 
 func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 	configPath := cmd.String("config")
-	cfg, err := config.Load(configPath)
+	kr, _ := secrets.NewKeyRing()
+	var loadOpts []config.LoadOption
+	if kr != nil {
+		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
+	}
+	cfg, err := config.Load(configPath, loadOpts...)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -222,7 +233,7 @@ func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("embedding is not enabled in config (set embedding.enabled = true)")
 	}
 
-	embedder, err := memory.NewEmbedder(ctx, cfg.Embedding)
+	embedder, err := memory.NewEmbedder(ctx, cfg.Embedding, kr)
 	if err != nil {
 		return fmt.Errorf("create embedder: %w", err)
 	}

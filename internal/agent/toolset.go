@@ -120,6 +120,15 @@ func (ts *ToolSet) HasInactiveTools(sessionID string) bool {
 	return active < len(ts.allNames)
 }
 
+// RegisterCore adds a tool to the core (always-active) set and the full catalog.
+// Use this for tools registered after NewToolSet (e.g. activate_tools itself).
+func (ts *ToolSet) RegisterCore(name string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.core[name] = true
+	ts.allNames[name] = true
+}
+
 // Cleanup removes all per-session state for the given session.
 func (ts *ToolSet) Cleanup(sessionID string) {
 	ts.mu.Lock()

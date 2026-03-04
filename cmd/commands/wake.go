@@ -3,13 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/urfave/cli/v3"
 
-	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/wizard"
 )
 
 // NewWakeCommand returns the onboarding subcommand.
@@ -22,125 +20,26 @@ func NewWakeCommand() *cli.Command {
 }
 
 func runWake(_ context.Context, _ *cli.Command) error {
-	root := config.OzziePath()
-	created := false
+	w := wizard.New()
+	p := tea.NewProgram(w, tea.WithAltScreen())
 
-	// Ensure directories exist.
-	dirs := []string{
-		root,
-		filepath.Join(root, "logs"),
-		filepath.Join(root, "skills"),
-		filepath.Join(root, "sessions"),
-	}
-	for _, d := range dirs {
-		if _, err := os.Stat(d); err != nil {
-			if err := os.MkdirAll(d, 0o755); err != nil {
-				return fmt.Errorf("create dir %s: %w", d, err)
-			}
-			fmt.Printf("  Created %s\n", d)
-			created = true
-		}
+	model, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("wizard: %w", err)
 	}
 
-	// Generate age key for secret encryption (idempotent).
-	ageKeyPath := filepath.Join(root, ".age-key")
-	if _, err := os.Stat(ageKeyPath); err != nil {
-		if err := secrets.GenerateIdentity(ageKeyPath); err != nil {
-			return fmt.Errorf("generate age identity: %w", err)
-		}
-		fmt.Printf("  Created %s\n", ageKeyPath)
-		created = true
+	wiz, ok := model.(*wizard.Wizard)
+	if !ok {
+		return fmt.Errorf("unexpected model type")
 	}
-
-	// Write default config if missing.
-	configPath := config.ConfigPath()
-	if _, err := os.Stat(configPath); err != nil {
-		if err := os.WriteFile(configPath, []byte(defaultConfig), 0o644); err != nil {
-			return fmt.Errorf("write config: %w", err)
-		}
-		fmt.Printf("  Created %s\n", configPath)
-		created = true
-	}
-
-	// Write default .env if missing.
-	dotenvPath := config.DotenvPath()
-	if _, err := os.Stat(dotenvPath); err != nil {
-		if err := os.WriteFile(dotenvPath, []byte(defaultDotenv), 0o600); err != nil {
-			return fmt.Errorf("write .env: %w", err)
-		}
-		fmt.Printf("  Created %s\n", dotenvPath)
-		created = true
-	}
-
-	if !created {
-		fmt.Printf("Already awake — %s is complete. Nothing to do.\n", root)
+	if wiz.Cancelled() {
+		fmt.Println("Setup cancelled.")
 		return nil
 	}
-
-	fmt.Println(wakeMessage(root))
-	return nil
-}
-
-const defaultConfig = `{
-	// Ozzie Configuration
-	// Docs: https://github.com/dohr-michael/ozzie
-
-	"gateway": {
-		"host": "127.0.0.1",
-		"port": 18420
-	},
-
-	"models": {
-		"default": "claude",
-		"providers": {
-			"claude": {
-				"driver": "anthropic",
-				"model": "claude-sonnet-4-20250514",
-				"auth": {
-					"env_var": "ANTHROPIC_API_KEY"
-				},
-				"max_tokens": 4096
-			}
-
-			// Local model via Ollama (no auth required)
-			// "local": {
-			// 	"driver": "ollama",
-			// 	"model": "llama3.1:8b",
-			// 	"base_url": "http://localhost:11434",
-			// 	"max_tokens": 4096
-			// }
-		}
-	},
-
-	"events": {
-		"buffer_size": 1024
-	},
-
-	"agent": {
-		"system_prompt": ""
+	if wiz.Err() != nil {
+		return wiz.Err()
 	}
-}
-`
 
-const defaultDotenv = `# Ozzie environment variables
-# This file is loaded automatically. Existing env vars are never overridden.
-
-# ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
-`
-
-func wakeMessage(root string) string {
-	return fmt.Sprintf(`
-  Morning. I'm Ozzie.
-
-  Home set up at %s
-  Config, logs, skills, sessions — all in there.
-
-  Next steps:
-    1. Drop your API key in %s/.env
-    2. Tweak %s/config.jsonc if you feel like it
-    3. Run: ozzie gateway
-
-  Let's see what's out there.
-`, root, root, root)
+	// Success message already printed by wizard via View().
+	return nil
 }

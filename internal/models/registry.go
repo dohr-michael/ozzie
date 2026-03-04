@@ -11,25 +11,32 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
 // defaultContextWindows maps known model prefixes to their context window sizes.
 var defaultContextWindows = map[string]int{
-	"claude-opus-4":    200000,
-	"claude-sonnet-4":  200000,
-	"claude-sonnet-3":  200000,
-	"claude-haiku-3":   200000,
-	"gpt-4o":           128000,
-	"gpt-4-turbo":      128000,
-	"gpt-4":            8192,
-	"gpt-3.5-turbo":    16385,
-	"o1":               200000,
-	"o3":               200000,
-	"mistral-large":    128000,
-	"mistral-small":    128000,
-	"codestral":        256000,
+	"claude-opus-4":     200000,
+	"claude-sonnet-4":   200000,
+	"claude-sonnet-3":   200000,
+	"claude-haiku-3":    200000,
+	"gpt-4o":            128000,
+	"gpt-4-turbo":       128000,
+	"gpt-4":             8192,
+	"gpt-3.5-turbo":     16385,
+	"o1":                200000,
+	"o3":                200000,
+	"mistral-large":     128000,
+	"mistral-small":     128000,
+	"codestral":         256000,
 	"open-mistral-nemo": 128000,
-	"pixtral":          128000,
+	"pixtral":           128000,
+	"gemini-2.5":        1048576,
+	"gemini-2.0":        1048576,
+	"gemini-1.5-pro":    2097152,
+	"gemini-1.5-flash":  1048576,
+	"gemini-2.0-flash":  1048576,
+	"gemini-2.5-flash":  1048576,
 }
 
 const fallbackContextWindow = 100000
@@ -47,13 +54,16 @@ type Registry struct {
 	mu          sync.RWMutex
 	providers   map[string]*ProviderEntry
 	defaultName string
+	kr          *secrets.KeyRing
 }
 
 // NewRegistry creates a model registry from config.
-func NewRegistry(cfg config.ModelsConfig) *Registry {
+// If kr is non-nil, encrypted auth values are decrypted at model init time.
+func NewRegistry(cfg config.ModelsConfig, kr *secrets.KeyRing) *Registry {
 	r := &Registry{
 		providers:   make(map[string]*ProviderEntry),
 		defaultName: cfg.Default,
+		kr:          kr,
 	}
 
 	for name, provCfg := range cfg.Providers {
@@ -74,7 +84,7 @@ func (r *Registry) Get(ctx context.Context, name string) (model.ToolCallingChatM
 	}
 
 	entry.once.Do(func() {
-		entry.model, entry.err = CreateModel(ctx, entry.Config)
+		entry.model, entry.err = CreateModel(ctx, entry.Config, r.kr)
 	})
 
 	return entry.model, entry.err

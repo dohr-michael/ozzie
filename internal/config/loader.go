@@ -11,16 +11,36 @@ import (
 
 var envTemplateRe = regexp.MustCompile(`\$\{\{\s*\.Env\.(\w+)\s*\}\}`)
 
+// DecryptFunc decrypts an ENC[age:...] value. Nil means no decryption.
+type DecryptFunc func(string) (string, error)
+
+// LoadOption configures Load behavior.
+type LoadOption func(*loadOptions)
+
+type loadOptions struct {
+	decrypt DecryptFunc
+}
+
+// WithDecrypt adds a decryption function for ENC[age:...] values.
+func WithDecrypt(fn DecryptFunc) LoadOption {
+	return func(o *loadOptions) { o.decrypt = fn }
+}
+
 // Load reads a JSONC config file, strips comments, expands ${{ .Env.VAR }} templates,
 // unmarshals it into Config, and applies defaults.
-func Load(path string) (*Config, error) {
+func Load(path string, opts ...LoadOption) (*Config, error) {
+	var o loadOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
 	// Expand environment variable templates (before stripping, since templates are in strings)
-	expanded := expandEnvTemplates(string(data))
+	expanded := expandEnvTemplates(string(data), o.decrypt)
 
 	// Strip JSONC comments and unmarshal
 	var cfg Config
@@ -32,14 +52,21 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// expandEnvTemplates replaces ${{ .Env.VAR }} with the env var value.
-func expandEnvTemplates(s string) string {
+// expandEnvTemplates replaces ${{ .Env.VAR }} with the env var value,
+// optionally decrypting ENC[age:...] blobs.
+func expandEnvTemplates(s string, decrypt DecryptFunc) string {
 	return envTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := envTemplateRe.FindStringSubmatch(match)
 		if len(parts) < 2 {
 			return match
 		}
-		return os.Getenv(parts[1])
+		value := os.Getenv(parts[1])
+		if decrypt != nil {
+			if decrypted, err := decrypt(value); err == nil {
+				return decrypted
+			}
+		}
+		return value
 	})
 }
 

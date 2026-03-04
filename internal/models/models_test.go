@@ -14,7 +14,7 @@ func TestResolveAuth_DirectAPIKey(t *testing.T) {
 		Driver: "anthropic",
 		Auth:   config.AuthConfig{APIKey: "sk-ant-test-123"},
 	}
-	auth, err := ResolveAuth(cfg)
+	auth, err := ResolveAuth(cfg, nil)
 	if err != nil {
 		t.Fatalf("ResolveAuth: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestResolveAuth_DirectBearerToken(t *testing.T) {
 			Token:  "bearer-token-xyz",
 		},
 	}
-	auth, err := ResolveAuth(cfg)
+	auth, err := ResolveAuth(cfg, nil)
 	if err != nil {
 		t.Fatalf("ResolveAuth: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestResolveAuth_EnvVarSyntax(t *testing.T) {
 		Driver: "anthropic",
 		Auth:   config.AuthConfig{APIKey: "${MY_CUSTOM_KEY}"},
 	}
-	auth, err := ResolveAuth(cfg)
+	auth, err := ResolveAuth(cfg, nil)
 	if err != nil {
 		t.Fatalf("ResolveAuth: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestResolveAuth_FallbackAnthropicEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "env-anthropic-key")
 
 	cfg := config.ProviderConfig{Driver: "anthropic"}
-	auth, err := ResolveAuth(cfg)
+	auth, err := ResolveAuth(cfg, nil)
 	if err != nil {
 		t.Fatalf("ResolveAuth: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestResolveAuth_FallbackOpenAIEnv(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "env-openai-key")
 
 	cfg := config.ProviderConfig{Driver: "openai"}
-	auth, err := ResolveAuth(cfg)
+	auth, err := ResolveAuth(cfg, nil)
 	if err != nil {
 		t.Fatalf("ResolveAuth: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestResolveAuth_UnknownDriver(t *testing.T) {
 	os.Unsetenv("OPENAI_API_KEY")
 
 	cfg := config.ProviderConfig{Driver: "unknown-driver"}
-	_, err := ResolveAuth(cfg)
+	_, err := ResolveAuth(cfg, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown driver")
 	}
@@ -119,7 +119,7 @@ func TestResolveAuth_NothingSet(t *testing.T) {
 	os.Unsetenv("ANTHROPIC_API_KEY")
 
 	cfg := config.ProviderConfig{Driver: "anthropic"}
-	_, err := ResolveAuth(cfg)
+	_, err := ResolveAuth(cfg, nil)
 	if err == nil {
 		t.Fatal("expected error when no auth is available")
 	}
@@ -133,7 +133,7 @@ func TestRegistry_GetUnknown(t *testing.T) {
 		Default:   "main",
 		Providers: map[string]config.ProviderConfig{},
 	}
-	reg := NewRegistry(cfg)
+	reg := NewRegistry(cfg, nil)
 
 	_, err := reg.Get(context.Background(), "nonexistent")
 	if err == nil {
@@ -151,7 +151,7 @@ func TestRegistry_DefaultName(t *testing.T) {
 			"claude-main": {Driver: "anthropic"},
 		},
 	}
-	reg := NewRegistry(cfg)
+	reg := NewRegistry(cfg, nil)
 
 	if reg.DefaultName() != "claude-main" {
 		t.Fatalf("expected default name %q, got %q", "claude-main", reg.DefaultName())
@@ -160,7 +160,7 @@ func TestRegistry_DefaultName(t *testing.T) {
 
 func TestCreateModel_UnknownDriver(t *testing.T) {
 	cfg := config.ProviderConfig{Driver: "unknown-driver"}
-	_, err := CreateModel(context.Background(), cfg)
+	_, err := CreateModel(context.Background(), cfg, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown driver")
 	}

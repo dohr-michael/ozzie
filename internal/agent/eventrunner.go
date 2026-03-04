@@ -235,13 +235,21 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 				return
 			}
 
-			content := er.runAgentBuffered(sessionID, runner, messages)
+			content, runErr := er.runAgentBuffered(sessionID, runner, messages)
 
 			if er.toolSet.ActivatedDuringTurn(sessionID) {
-				// Tools were activated — retry with expanded tool set (streamed)
+				// Tools were activated — retry with expanded tool set (streamed).
+				// Any error from the buffered run is expected (the newly activated
+				// tool wasn't in the frozen Eino graph yet).
 				slog.Info("tools activated, retrying with expanded set",
 					"session_id", sessionID)
 				continue
+			}
+
+			// No activation — surface any error from the buffered run.
+			if runErr != nil {
+				er.emitError(sessionID, runErr.Error())
+				return
 			}
 
 			// No activation — emit the buffered response
@@ -276,7 +284,7 @@ func (er *EventRunner) runAgent(sessionID string, runner *adk.Runner, messages [
 	er.consumeIterator(sessionID, iter)
 }
 
-func (er *EventRunner) runAgentBuffered(sessionID string, runner *adk.Runner, messages []*schema.Message) string {
+func (er *EventRunner) runAgentBuffered(sessionID string, runner *adk.Runner, messages []*schema.Message) (string, error) {
 	ctx := events.ContextWithSessionID(er.ctx, sessionID)
 	ctx = er.withSessionWorkDir(ctx, sessionID)
 	checkpointID := uuid.New().String()
@@ -346,7 +354,7 @@ func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator
 	er.persistAndEmitResponse(sessionID, contentBuilder)
 }
 
-func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) string {
+func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
 	var contentBuilder string
 
 	for {
@@ -357,8 +365,7 @@ func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.Async
 
 		if event.Err != nil {
 			slog.Error("agent error (buffered)", "error", event.Err)
-			er.emitError(sessionID, event.Err.Error())
-			return ""
+			return "", event.Err
 		}
 
 		if event.Output == nil || event.Output.MessageOutput == nil {
@@ -391,7 +398,7 @@ func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.Async
 		}
 	}
 
-	return contentBuilder
+	return contentBuilder, nil
 }
 
 func (er *EventRunner) consumeStream(sessionID string, stream *schema.StreamReader[*schema.Message]) string {
