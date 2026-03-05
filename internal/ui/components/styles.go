@@ -1,7 +1,11 @@
 // Package components provides reusable TUI components and styles.
 package components
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/dohr-michael/ozzie/internal/i18n"
+)
 
 // =============================================================================
 // Color Palette - Single Source of Truth
@@ -287,7 +291,7 @@ func RolePrefix(role string) string {
 	case "assistant":
 		return "" // No prefix — markdown content is enough
 	case "system":
-		return SystemStyle.Render("System: ")
+		return SystemStyle.Render(i18n.T("role.system"))
 	case "tool":
 		return ToolBulletStyle.Render("⏺ ")
 	default:

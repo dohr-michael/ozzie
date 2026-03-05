@@ -2,10 +2,11 @@
 package plugins
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
-	"github.com/marcozac/go-jsonc"
+	"github.com/tailscale/hujson"
 )
 
 // PluginManifest describes a plugin's metadata, capabilities, and tools.
@@ -51,8 +52,12 @@ func LoadManifest(path string) (*PluginManifest, error) {
 		return nil, fmt.Errorf("read manifest %s: %w", path, err)
 	}
 
+	standardized, err := hujson.Standardize(data)
+	if err != nil {
+		return nil, fmt.Errorf("standardize manifest %s: %w", path, err)
+	}
 	var m PluginManifest
-	if err := jsonc.Unmarshal(data, &m); err != nil {
+	if err := json.Unmarshal(standardized, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest %s: %w", path, err)
 	}
 

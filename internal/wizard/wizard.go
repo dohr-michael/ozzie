@@ -7,7 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dohr-michael/ozzie/clients/tui/components"
+	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
 
 // Wizard is the top-level Bubbletea model that orchestrates wizard steps.
@@ -30,7 +31,7 @@ func New() *Wizard {
 		steps: []Step{
 			newWelcomeStep(),
 			newProviderStep(),
-			newAPIKeyStep(),
+			newDefaultStep(),
 			newGatewayStep(),
 			newConfirmStep(),
 		},
@@ -55,6 +56,7 @@ func (w *Wizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		w.width = msg.Width
 		w.height = msg.Height
+		w.propagateSize()
 		return w, nil
 
 	case finalizeResultMsg:
@@ -108,13 +110,13 @@ func (w *Wizard) View() string {
 		return ""
 	}
 	if w.finalizing {
-		return components.HintStyle.Render("  Applying configuration...") + "\n"
+		return components.HintStyle.Render(i18n.T("wizard.applying")) + "\n"
 	}
 
 	var b strings.Builder
 
 	// Title
-	title := components.WelcomeTitleStyle.Render("  Ozzie Setup")
+	title := components.WelcomeTitleStyle.Render(i18n.T("wizard.title"))
 	b.WriteString(title)
 	b.WriteString("\n")
 
@@ -122,7 +124,7 @@ func (w *Wizard) View() string {
 	if w.currentStep > 0 {
 		totalVisible := w.countVisibleSteps()
 		currentVisible := w.currentVisibleIndex()
-		progress := fmt.Sprintf("  Step %d/%d — %s", currentVisible, totalVisible, w.steps[w.currentStep].Title())
+		progress := fmt.Sprintf(i18n.T("wizard.step_progress"), currentVisible, totalVisible, w.steps[w.currentStep].Title())
 		b.WriteString(components.HintStyle.Render(progress))
 		b.WriteString("\n")
 	}
@@ -144,9 +146,9 @@ func (w *Wizard) View() string {
 	b.WriteString(components.InputSeparatorStyle.Render(strings.Repeat("─", width)))
 	b.WriteString("\n")
 
-	hints := []string{"ctrl+c=quit"}
+	hints := []string{i18n.T("hint.quit")}
 	if w.currentStep > 0 {
-		hints = append([]string{"esc=back"}, hints...)
+		hints = append([]string{i18n.T("hint.back")}, hints...)
 	}
 	hintBar := lipgloss.NewStyle().Foreground(components.Muted).Render("  " + strings.Join(hints, " • "))
 	b.WriteString(hintBar)
@@ -159,7 +161,31 @@ func (w *Wizard) initCurrentStep() tea.Cmd {
 	if w.currentStep >= len(w.steps) {
 		return nil
 	}
+	w.propagateSize()
 	return w.steps[w.currentStep].Init(w.answers)
+}
+
+// propagateSize sends the available content dimensions to Resizable steps.
+func (w *Wizard) propagateSize() {
+	if w.width == 0 && w.height == 0 {
+		return
+	}
+	h := w.contentHeight()
+	for _, s := range w.steps {
+		if r, ok := s.(Resizable); ok {
+			r.SetSize(w.width, h)
+		}
+	}
+}
+
+// contentHeight returns the height available for step content.
+// Chrome: title(1) + progress(1) + separator(1) + padding(1) + separator(1) + hints(1) + padding(1) = 7
+func (w *Wizard) contentHeight() int {
+	h := w.height - 7
+	if h < 10 {
+		h = 10
+	}
+	return h
 }
 
 // advanceStep collects answers and moves to the next step.

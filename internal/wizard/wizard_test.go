@@ -1,7 +1,10 @@
 package wizard
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/tailscale/hujson"
 )
 
 func TestAnswersString(t *testing.T) {
@@ -60,22 +63,33 @@ func TestAnswersMerge(t *testing.T) {
 
 func TestBuildConfigData(t *testing.T) {
 	answers := Answers{
-		"driver":       "anthropic",
-		"model":        "claude-sonnet-4-20250514",
-		"gateway_host": "0.0.0.0",
-		"gateway_port": 9090,
+		"providers": []ProviderEntry{
+			{
+				Alias:      "claude",
+				Driver:     "anthropic",
+				Model:      "claude-sonnet-4-20250514",
+				EnvVarName: "ANTHROPIC_API_KEY",
+			},
+		},
+		"default_provider": "claude",
+		"gateway_host":     "0.0.0.0",
+		"gateway_port":     9090,
 	}
 
 	data := BuildConfigData(answers)
 
-	if data.ProviderName != "claude" {
-		t.Errorf("ProviderName: got %q, want %q", data.ProviderName, "claude")
+	if data.DefaultProvider != "claude" {
+		t.Errorf("DefaultProvider: got %q, want %q", data.DefaultProvider, "claude")
 	}
-	if data.Driver != "anthropic" {
-		t.Errorf("Driver: got %q, want %q", data.Driver, "anthropic")
+	if len(data.Providers) != 1 {
+		t.Fatalf("Providers: got %d, want 1", len(data.Providers))
 	}
-	if data.AuthEnvVar != "ANTHROPIC_API_KEY" {
-		t.Errorf("AuthEnvVar: got %q, want %q", data.AuthEnvVar, "ANTHROPIC_API_KEY")
+	p := data.Providers[0]
+	if p.Driver != "anthropic" {
+		t.Errorf("Driver: got %q, want %q", p.Driver, "anthropic")
+	}
+	if p.AuthEnvVar != "ANTHROPIC_API_KEY" {
+		t.Errorf("AuthEnvVar: got %q, want %q", p.AuthEnvVar, "ANTHROPIC_API_KEY")
 	}
 	if data.GatewayHost != "0.0.0.0" {
 		t.Errorf("GatewayHost: got %q, want %q", data.GatewayHost, "0.0.0.0")
@@ -87,32 +101,44 @@ func TestBuildConfigData(t *testing.T) {
 
 func TestBuildConfigDataOllama(t *testing.T) {
 	answers := Answers{
-		"driver":   "ollama",
-		"model":    "llama3.1:8b",
-		"base_url": "http://localhost:11434",
+		"providers": []ProviderEntry{
+			{
+				Alias:   "local",
+				Driver:  "ollama",
+				Model:   "llama3.1:8b",
+				BaseURL: "http://localhost:11434",
+			},
+		},
+		"default_provider": "local",
 	}
 
 	data := BuildConfigData(answers)
 
-	if data.ProviderName != "local" {
-		t.Errorf("ProviderName: got %q, want %q", data.ProviderName, "local")
+	if data.DefaultProvider != "local" {
+		t.Errorf("DefaultProvider: got %q, want %q", data.DefaultProvider, "local")
 	}
-	if data.AuthEnvVar != "" {
-		t.Errorf("AuthEnvVar: got %q, want empty", data.AuthEnvVar)
+	p := data.Providers[0]
+	if p.AuthEnvVar != "" {
+		t.Errorf("AuthEnvVar: got %q, want empty", p.AuthEnvVar)
 	}
-	if data.BaseURL != "http://localhost:11434" {
-		t.Errorf("BaseURL: got %q, want %q", data.BaseURL, "http://localhost:11434")
+	if p.BaseURL != "http://localhost:11434" {
+		t.Errorf("BaseURL: got %q, want %q", p.BaseURL, "http://localhost:11434")
 	}
 }
 
 func TestRenderConfig(t *testing.T) {
 	data := ConfigData{
-		ProviderName: "claude",
-		Driver:       "anthropic",
-		Model:        "claude-sonnet-4-20250514",
-		AuthEnvVar:   "ANTHROPIC_API_KEY",
-		GatewayHost:  "127.0.0.1",
-		GatewayPort:  18420,
+		DefaultProvider: "claude",
+		Providers: []ProviderConfigData{
+			{
+				Alias:      "claude",
+				Driver:     "anthropic",
+				Model:      "claude-sonnet-4-20250514",
+				AuthEnvVar: "ANTHROPIC_API_KEY",
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
 	}
 
 	content, err := RenderConfig(data)
@@ -120,31 +146,52 @@ func TestRenderConfig(t *testing.T) {
 		t.Fatalf("RenderConfig: %v", err)
 	}
 
-	// Check key content is present.
-	checks := []string{
-		`"host": "127.0.0.1"`,
-		`"port": 18420`,
-		`"default": "claude"`,
-		`"driver": "anthropic"`,
-		`"model": "claude-sonnet-4-20250514"`,
-		`ANTHROPIC_API_KEY`,
-		`"max_tokens": 4096`,
+	cfg := parseRendered(t, content)
+	if cfg.Gateway.Host != "127.0.0.1" {
+		t.Errorf("host = %q, want 127.0.0.1", cfg.Gateway.Host)
 	}
-	for _, check := range checks {
-		if !contains(content, check) {
-			t.Errorf("config missing %q", check)
-		}
+	if cfg.Gateway.Port != 18420 {
+		t.Errorf("port = %d, want 18420", cfg.Gateway.Port)
+	}
+	if cfg.Models.Default != "claude" {
+		t.Errorf("default = %q, want claude", cfg.Models.Default)
+	}
+	p, ok := cfg.Models.Providers["claude"]
+	if !ok {
+		t.Fatal("provider 'claude' not found")
+	}
+	if p.Driver != "anthropic" {
+		t.Errorf("driver = %q, want anthropic", p.Driver)
+	}
+	if p.Model != "claude-sonnet-4-20250514" {
+		t.Errorf("model = %q, want claude-sonnet-4-20250514", p.Model)
+	}
+	if p.Auth == nil || !contains(p.Auth.APIKey, "ANTHROPIC_API_KEY") {
+		t.Errorf("auth.api_key should reference ANTHROPIC_API_KEY, got %+v", p.Auth)
+	}
+	if p.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %d, want 4096", p.MaxTokens)
+	}
+
+	// Header comment should be present.
+	if !contains(content, "// Ozzie Configuration") {
+		t.Error("missing header comment")
 	}
 }
 
 func TestRenderConfigOllamaNoAuth(t *testing.T) {
 	data := ConfigData{
-		ProviderName: "local",
-		Driver:       "ollama",
-		Model:        "llama3.1:8b",
-		BaseURL:      "http://localhost:11434",
-		GatewayHost:  "127.0.0.1",
-		GatewayPort:  18420,
+		DefaultProvider: "local",
+		Providers: []ProviderConfigData{
+			{
+				Alias:   "local",
+				Driver:  "ollama",
+				Model:   "llama3.1:8b",
+				BaseURL: "http://localhost:11434",
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
 	}
 
 	content, err := RenderConfig(data)
@@ -152,11 +199,95 @@ func TestRenderConfigOllamaNoAuth(t *testing.T) {
 		t.Fatalf("RenderConfig: %v", err)
 	}
 
-	if contains(content, "api_key") {
-		t.Error("ollama config should not contain api_key")
+	cfg := parseRendered(t, content)
+	p := cfg.Models.Providers["local"]
+	if p.Auth != nil {
+		t.Error("ollama config should not contain auth")
 	}
-	if !contains(content, "base_url") {
-		t.Error("ollama config should contain base_url")
+	if p.BaseURL != "http://localhost:11434" {
+		t.Errorf("base_url = %q, want http://localhost:11434", p.BaseURL)
+	}
+}
+
+func TestRenderConfigMultiProvider(t *testing.T) {
+	data := ConfigData{
+		DefaultProvider: "claude",
+		Providers: []ProviderConfigData{
+			{
+				Alias:      "claude",
+				Driver:     "anthropic",
+				Model:      "claude-sonnet-4-20250514",
+				AuthEnvVar: "ANTHROPIC_API_KEY",
+			},
+			{
+				Alias:   "local",
+				Driver:  "ollama",
+				Model:   "llama3.1:8b",
+				BaseURL: "http://localhost:11434",
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
+	}
+
+	content, err := RenderConfig(data)
+	if err != nil {
+		t.Fatalf("RenderConfig: %v", err)
+	}
+
+	cfg := parseRendered(t, content)
+	if cfg.Models.Default != "claude" {
+		t.Errorf("default = %q, want claude", cfg.Models.Default)
+	}
+	if len(cfg.Models.Providers) != 2 {
+		t.Fatalf("got %d providers, want 2", len(cfg.Models.Providers))
+	}
+
+	claude := cfg.Models.Providers["claude"]
+	if claude.Driver != "anthropic" {
+		t.Errorf("claude.driver = %q, want anthropic", claude.Driver)
+	}
+	if claude.Auth == nil || !contains(claude.Auth.APIKey, "ANTHROPIC_API_KEY") {
+		t.Error("claude should have ANTHROPIC_API_KEY auth")
+	}
+
+	local := cfg.Models.Providers["local"]
+	if local.Driver != "ollama" {
+		t.Errorf("local.driver = %q, want ollama", local.Driver)
+	}
+	if local.BaseURL != "http://localhost:11434" {
+		t.Errorf("local.base_url = %q, want http://localhost:11434", local.BaseURL)
+	}
+	if local.Auth != nil {
+		t.Error("ollama should not have auth")
+	}
+}
+
+func TestRenderConfigWithSystemPrompt(t *testing.T) {
+	data := ConfigData{
+		DefaultProvider: "claude",
+		Providers: []ProviderConfigData{
+			{
+				Alias:        "claude",
+				Driver:       "anthropic",
+				Model:        "claude-sonnet-4-20250514",
+				AuthEnvVar:   "ANTHROPIC_API_KEY",
+				SystemPrompt: "You are a helpful assistant.",
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
+	}
+
+	content, err := RenderConfig(data)
+	if err != nil {
+		t.Fatalf("RenderConfig: %v", err)
+	}
+
+	cfg := parseRendered(t, content)
+	p := cfg.Models.Providers["claude"]
+	if p.PromptPrefix != "You are a helpful assistant." {
+		t.Errorf("prompt_prefix = %q, want 'You are a helpful assistant.'", p.PromptPrefix)
 	}
 }
 
@@ -195,10 +326,11 @@ func TestDefaultModelForDriver(t *testing.T) {
 }
 
 func TestDriverModelsHaveCustomOption(t *testing.T) {
-	for driver, models := range driverModels {
+	for _, driver := range []string{"anthropic", "openai", "gemini", "mistral", "ollama"} {
+		models := driverModelOptions(driver)
 		last := models[len(models)-1]
 		if last.Value != customModelValue {
-			t.Errorf("driverModels[%q]: last option should be custom, got %q", driver, last.Value)
+			t.Errorf("driverModelOptions(%q): last option should be custom, got %q", driver, last.Value)
 		}
 	}
 }
@@ -219,6 +351,29 @@ func TestAnswersStrings(t *testing.T) {
 	got = a.Strings("nil", []string{"fb"})
 	if len(got) != 1 || got[0] != "fb" {
 		t.Errorf("got %v, want [fb]", got)
+	}
+}
+
+func TestAnswersProviders(t *testing.T) {
+	providers := []ProviderEntry{
+		{Alias: "claude", Driver: "anthropic"},
+		{Alias: "local", Driver: "ollama"},
+	}
+	a := Answers{"providers": providers}
+	got := a.Providers()
+	if len(got) != 2 {
+		t.Fatalf("got %d providers, want 2", len(got))
+	}
+	if got[0].Alias != "claude" {
+		t.Errorf("got %q, want %q", got[0].Alias, "claude")
+	}
+	if got[1].Alias != "local" {
+		t.Errorf("got %q, want %q", got[1].Alias, "local")
+	}
+	// Missing.
+	a2 := Answers{}
+	if a2.Providers() != nil {
+		t.Error("expected nil for missing providers")
 	}
 }
 
@@ -249,14 +404,19 @@ func TestParseTags(t *testing.T) {
 
 func TestRenderConfigWithCapabilitiesAndTags(t *testing.T) {
 	data := ConfigData{
-		ProviderName: "claude",
-		Driver:       "anthropic",
-		Model:        "claude-sonnet-4-20250514",
-		AuthEnvVar:   "ANTHROPIC_API_KEY",
-		Capabilities: []string{"tool_use", "coding"},
-		Tags:         []string{"primary", "secured"},
-		GatewayHost:  "127.0.0.1",
-		GatewayPort:  18420,
+		DefaultProvider: "claude",
+		Providers: []ProviderConfigData{
+			{
+				Alias:        "claude",
+				Driver:       "anthropic",
+				Model:        "claude-sonnet-4-20250514",
+				AuthEnvVar:   "ANTHROPIC_API_KEY",
+				Capabilities: []string{"tool_use", "coding"},
+				Tags:         []string{"primary", "secured"},
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
 	}
 
 	content, err := RenderConfig(data)
@@ -264,25 +424,29 @@ func TestRenderConfigWithCapabilitiesAndTags(t *testing.T) {
 		t.Fatalf("RenderConfig: %v", err)
 	}
 
-	checks := []string{
-		`"capabilities": ["tool_use", "coding"]`,
-		`"tags": ["primary", "secured"]`,
+	cfg := parseRendered(t, content)
+	p := cfg.Models.Providers["claude"]
+	if len(p.Capabilities) != 2 || p.Capabilities[0] != "tool_use" || p.Capabilities[1] != "coding" {
+		t.Errorf("capabilities = %v, want [tool_use, coding]", p.Capabilities)
 	}
-	for _, check := range checks {
-		if !contains(content, check) {
-			t.Errorf("config missing %q\nGot:\n%s", check, content)
-		}
+	if len(p.Tags) != 2 || p.Tags[0] != "primary" || p.Tags[1] != "secured" {
+		t.Errorf("tags = %v, want [primary, secured]", p.Tags)
 	}
 }
 
 func TestRenderConfigWithoutCapabilitiesAndTags(t *testing.T) {
 	data := ConfigData{
-		ProviderName: "claude",
-		Driver:       "anthropic",
-		Model:        "claude-sonnet-4-20250514",
-		AuthEnvVar:   "ANTHROPIC_API_KEY",
-		GatewayHost:  "127.0.0.1",
-		GatewayPort:  18420,
+		DefaultProvider: "claude",
+		Providers: []ProviderConfigData{
+			{
+				Alias:      "claude",
+				Driver:     "anthropic",
+				Model:      "claude-sonnet-4-20250514",
+				AuthEnvVar: "ANTHROPIC_API_KEY",
+			},
+		},
+		GatewayHost: "127.0.0.1",
+		GatewayPort: 18420,
 	}
 
 	content, err := RenderConfig(data)
@@ -290,11 +454,13 @@ func TestRenderConfigWithoutCapabilitiesAndTags(t *testing.T) {
 		t.Fatalf("RenderConfig: %v", err)
 	}
 
-	if contains(content, "capabilities") {
-		t.Error("config should not contain capabilities when empty")
+	cfg := parseRendered(t, content)
+	p := cfg.Models.Providers["claude"]
+	if len(p.Capabilities) != 0 {
+		t.Errorf("capabilities should be empty, got %v", p.Capabilities)
 	}
-	if contains(content, `"tags"`) {
-		t.Error("config should not contain tags when empty")
+	if len(p.Tags) != 0 {
+		t.Errorf("tags should be empty, got %v", p.Tags)
 	}
 }
 
@@ -328,7 +494,8 @@ func TestDefaultCapsForUnknownModel(t *testing.T) {
 }
 
 func TestAllDriverModelsHaveDefaultCaps(t *testing.T) {
-	for driver, opts := range driverModels {
+	for _, driver := range []string{"anthropic", "openai", "gemini", "mistral", "ollama"} {
+		opts := driverModelOptions(driver)
 		for _, opt := range opts {
 			if opt.Value == customModelValue {
 				continue
@@ -372,6 +539,71 @@ func TestDriverEnvVars(t *testing.T) {
 	}
 }
 
+func TestFindReusableKey(t *testing.T) {
+	s := &providerStep{}
+
+	// No providers yet → nil.
+	s.providers = nil
+	s.current = ProviderEntry{Driver: "gemini"}
+	if got := s.findReusableKey(); got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+
+	// Provider exists with same driver and key → reusable.
+	s.providers = []ProviderEntry{
+		{Alias: "gemini", Driver: "gemini", EnvVarName: "GOOGLE_API_KEY", APIKey: "key123"},
+	}
+	if got := s.findReusableKey(); got == nil {
+		t.Error("expected reusable provider, got nil")
+	} else if got.Alias != "gemini" {
+		t.Errorf("got alias %q, want %q", got.Alias, "gemini")
+	}
+
+	// Provider exists with same driver but skipped key → not reusable.
+	s.providers = []ProviderEntry{
+		{Alias: "gemini", Driver: "gemini", EnvVarName: "GOOGLE_API_KEY", SkipKey: true},
+	}
+	if got := s.findReusableKey(); got != nil {
+		t.Errorf("skipped key should not be reusable, got %+v", got)
+	}
+
+	// Different driver → not reusable.
+	s.providers = []ProviderEntry{
+		{Alias: "claude", Driver: "anthropic", EnvVarName: "ANTHROPIC_API_KEY", APIKey: "key"},
+	}
+	s.current = ProviderEntry{Driver: "gemini"}
+	if got := s.findReusableKey(); got != nil {
+		t.Errorf("different driver should not be reusable, got %+v", got)
+	}
+}
+
+func TestResolveEnvVarName(t *testing.T) {
+	s := &providerStep{}
+
+	// First gemini provider gets the base env var.
+	s.providers = nil
+	s.current = ProviderEntry{Driver: "gemini", Alias: "gemini"}
+	if got := s.resolveEnvVarName(); got != "GOOGLE_API_KEY" {
+		t.Errorf("first gemini: got %q, want GOOGLE_API_KEY", got)
+	}
+
+	// Second gemini provider (different alias) gets suffixed.
+	s.providers = []ProviderEntry{
+		{Driver: "gemini", Alias: "gemini", EnvVarName: "GOOGLE_API_KEY"},
+	}
+	s.current = ProviderEntry{Driver: "gemini", Alias: "gemini-2"}
+	if got := s.resolveEnvVarName(); got != "GOOGLE_API_KEY_GEMINI_2" {
+		t.Errorf("second gemini: got %q, want GOOGLE_API_KEY_GEMINI_2", got)
+	}
+
+	// Ollama has no env var.
+	s.current = ProviderEntry{Driver: "ollama", Alias: "local"}
+	if got := s.resolveEnvVarName(); got != "" {
+		t.Errorf("ollama: got %q, want empty", got)
+	}
+}
+
+
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && containsStr(s, substr)
 }
@@ -383,4 +615,49 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// parsedConfig is used by tests to verify rendered config semantically.
+type parsedConfig struct {
+	Gateway struct {
+		Host string `json:"host"`
+		Port int    `json:"port"`
+	} `json:"gateway"`
+	Models struct {
+		Default   string                          `json:"default"`
+		Providers map[string]parsedConfigProvider  `json:"providers"`
+	} `json:"models"`
+	Events struct {
+		BufferSize int `json:"buffer_size"`
+	} `json:"events"`
+	Agent struct {
+		SystemPrompt string `json:"system_prompt"`
+	} `json:"agent"`
+}
+
+type parsedConfigProvider struct {
+	Driver       string   `json:"driver"`
+	Model        string   `json:"model"`
+	BaseURL      string   `json:"base_url,omitempty"`
+	Auth         *struct {
+		APIKey string `json:"api_key"`
+	} `json:"auth,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
+	PromptPrefix string   `json:"prompt_prefix,omitempty"`
+	MaxTokens    int      `json:"max_tokens"`
+}
+
+// parseRendered standardizes hujson output and unmarshals into parsedConfig.
+func parseRendered(t *testing.T, content string) parsedConfig {
+	t.Helper()
+	std, err := hujson.Standardize([]byte(content))
+	if err != nil {
+		t.Fatalf("Standardize rendered config: %v\nContent:\n%s", err, content)
+	}
+	var cfg parsedConfig
+	if err := json.Unmarshal(std, &cfg); err != nil {
+		t.Fatalf("Unmarshal rendered config: %v\nJSON:\n%s", err, std)
+	}
+	return cfg
 }

@@ -5,7 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/dohr-michael/ozzie/clients/tui/components"
+	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
 
 type gatewayStep struct {
@@ -39,15 +40,15 @@ func (s *gatewayStep) Init(answers Answers) tea.Cmd {
 
 func (s *gatewayStep) showHostInput() {
 	s.input.PromptText(
-		"Gateway host",
+		i18n.T("wizard.gateway.host"),
 		"gateway_host", s.host, "", false, "",
 	)
 }
 
 func (s *gatewayStep) showPortInput() {
-	s.input.AddCompletedField("Host", s.host)
+	s.input.AddCompletedField(i18n.T("wizard.gateway.field.host"), s.host)
 	s.input.PromptText(
-		"Gateway port",
+		i18n.T("wizard.gateway.port"),
 		"gateway_port", strconv.Itoa(s.port), "", false, `^\d+$`,
 	)
 }

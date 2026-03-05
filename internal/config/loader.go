@@ -1,12 +1,13 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 
-	"github.com/marcozac/go-jsonc"
+	"github.com/tailscale/hujson"
 )
 
 var envTemplateRe = regexp.MustCompile(`\$\{\{\s*\.Env\.(\w+)\s*\}\}`)
@@ -42,9 +43,13 @@ func Load(path string, opts ...LoadOption) (*Config, error) {
 	// Expand environment variable templates (before stripping, since templates are in strings)
 	expanded := expandEnvTemplates(string(data), o.decrypt)
 
-	// Strip JSONC comments and unmarshal
+	// Strip JSONC comments/trailing commas and unmarshal.
+	standardized, err := hujson.Standardize([]byte(expanded))
+	if err != nil {
+		return nil, fmt.Errorf("standardize config: %w", err)
+	}
 	var cfg Config
-	if err := jsonc.Unmarshal([]byte(expanded), &cfg); err != nil {
+	if err := json.Unmarshal(standardized, &cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 

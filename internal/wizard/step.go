@@ -34,6 +34,11 @@ type Step interface {
 	ShouldSkip(answers Answers) bool
 }
 
+// Resizable is an optional interface for steps that adapt to terminal size.
+type Resizable interface {
+	SetSize(width, height int)
+}
+
 // Answers is a typed map of collected wizard answers.
 type Answers map[string]any
 
@@ -80,9 +85,33 @@ func (a Answers) Strings(key string, fallback []string) []string {
 	return fallback
 }
 
+// Providers returns the []ProviderEntry stored in answers.
+func (a Answers) Providers() []ProviderEntry {
+	if v, ok := a["providers"]; ok {
+		if p, ok := v.([]ProviderEntry); ok {
+			return p
+		}
+	}
+	return nil
+}
+
 // Merge copies all entries from other into a.
 func (a Answers) Merge(other Answers) {
 	for k, v := range other {
 		a[k] = v
 	}
+}
+
+// ProviderEntry holds the configuration for a single LLM provider.
+type ProviderEntry struct {
+	Alias        string
+	Driver       string
+	Model        string
+	BaseURL      string
+	APIKey       string // plaintext, encrypted in finalize
+	EnvVarName   string
+	SkipKey      bool
+	Capabilities []string
+	Tags         []string
+	SystemPrompt string
 }

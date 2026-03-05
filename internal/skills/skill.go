@@ -1,11 +1,12 @@
 package skills
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/marcozac/go-jsonc"
+	"github.com/tailscale/hujson"
 )
 
 // SkillType distinguishes simple (single agent) from workflow (DAG) skills.
@@ -75,8 +76,12 @@ func LoadSkill(path string) (*Skill, error) {
 		return nil, fmt.Errorf("read skill %s: %w", path, err)
 	}
 
+	standardized, err := hujson.Standardize(data)
+	if err != nil {
+		return nil, fmt.Errorf("standardize skill %s: %w", path, err)
+	}
 	var s Skill
-	if err := jsonc.Unmarshal(data, &s); err != nil {
+	if err := json.Unmarshal(standardized, &s); err != nil {
 		return nil, fmt.Errorf("parse skill %s: %w", path, err)
 	}
 

@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dohr-michael/ozzie/clients/tui/components"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
 	"github.com/dohr-michael/ozzie/internal/events"
 )

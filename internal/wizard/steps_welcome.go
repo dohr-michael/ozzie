@@ -7,16 +7,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dohr-michael/ozzie/clients/tui/components"
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
+)
+
+const (
+	welcomePhaseLanguage = iota
+	welcomePhaseAction
+	welcomePhaseAutoAdvance
 )
 
 type welcomeStep struct {
 	configExists bool
 	input        *components.InputZone
 	answers      Answers
-	showSelect   bool // true when config exists and we need user choice
-	autoAdvance  bool // true when no config, auto-advance after delay
+	phase        int
+	autoAdvance  bool
 }
 
 func newWelcomeStep() *welcomeStep {
@@ -31,36 +38,43 @@ func (s *welcomeStep) Title() string { return "Welcome" }
 
 func (s *welcomeStep) ShouldSkip(_ Answers) bool { return false }
 
-func (s *welcomeStep) Init(answers Answers) tea.Cmd {
+func (s *welcomeStep) Init(_ Answers) tea.Cmd {
 	s.answers = make(Answers)
 	_, err := os.Stat(config.ConfigPath())
 	s.configExists = err == nil
 
-	if s.configExists {
-		s.showSelect = true
-		s.answers["existing_config"] = true
-		s.input.ClearCompletedFields()
-		s.input.PromptSelect(
-			"Existing config found. What would you like to do?",
-			"action", "",
-			[]components.InputOption{
-				{Value: "edit", Label: "Load existing & modify", Description: "Pre-fill from current config"},
-				{Value: "fresh", Label: "Start fresh", Description: "Overwrite with new config"},
-				{Value: "cancel", Label: "Cancel", Description: "Exit without changes"},
-			},
-			"edit",
-		)
-		return nil
-	}
+	// Start with language selection.
+	s.phase = welcomePhaseLanguage
+	s.autoAdvance = false
+	s.showLanguageSelect()
+	return nil
+}
 
-	// No config — auto-advance after short delay or on enter.
-	s.showSelect = false
-	s.autoAdvance = true
-	s.answers["existing_config"] = false
-	s.answers["action"] = "fresh"
-	return tea.Tick(time.Second, func(_ time.Time) tea.Msg {
-		return autoAdvanceMsg{}
-	})
+func (s *welcomeStep) showLanguageSelect() {
+	s.input.ClearCompletedFields()
+	s.input.PromptSelect(
+		i18n.T("wizard.welcome.language"),
+		"language", "",
+		[]components.InputOption{
+			{Value: "en", Label: "English"},
+			{Value: "fr", Label: "Français"},
+		},
+		i18n.Lang,
+	)
+}
+
+func (s *welcomeStep) showActionSelect() {
+	s.input.ClearCompletedFields()
+	s.input.PromptSelect(
+		i18n.T("wizard.welcome.existing_q"),
+		"action", "",
+		[]components.InputOption{
+			{Value: "edit", Label: i18n.T("wizard.welcome.load"), Description: i18n.T("wizard.welcome.load.desc")},
+			{Value: "fresh", Label: i18n.T("wizard.welcome.fresh"), Description: i18n.T("wizard.welcome.fresh.desc")},
+			{Value: "cancel", Label: i18n.T("wizard.welcome.cancel"), Description: i18n.T("wizard.welcome.cancel.desc")},
+		},
+		"edit",
+	)
 }
 
 type autoAdvanceMsg struct{}
@@ -80,16 +94,12 @@ func (s *welcomeStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 		}
 	}
 
-	if s.showSelect {
+	if s.phase == welcomePhaseLanguage || s.phase == welcomePhaseAction {
 		input, cmd := s.input.Update(msg)
 		s.input = input
 
 		if result, ok := msg.(components.InputResult); ok {
-			s.answers["action"] = result.Selected
-			if result.Selected == "edit" {
-				s.prefillFromConfig()
-			}
-			return s, func() tea.Msg { return StepDoneMsg{} }
+			return s.handleResult(result)
 		}
 		return s, cmd
 	}
@@ -97,19 +107,51 @@ func (s *welcomeStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 	return s, nil
 }
 
-func (s *welcomeStep) View() string {
-	if s.showSelect {
-		return s.input.View()
+func (s *welcomeStep) handleResult(result components.InputResult) (Step, tea.Cmd) {
+	switch s.phase {
+	case welcomePhaseLanguage:
+		i18n.Lang = result.Selected
+
+		if s.configExists {
+			s.phase = welcomePhaseAction
+			s.answers["existing_config"] = true
+			s.showActionSelect()
+			return s, nil
+		}
+
+		// No config — auto-advance.
+		s.phase = welcomePhaseAutoAdvance
+		s.autoAdvance = true
+		s.answers["existing_config"] = false
+		s.answers["action"] = "fresh"
+		return s, tea.Tick(time.Second, func(_ time.Time) tea.Msg {
+			return autoAdvanceMsg{}
+		})
+
+	case welcomePhaseAction:
+		s.answers["action"] = result.Selected
+		if result.Selected == "edit" {
+			s.prefillFromConfig()
+		}
+		return s, func() tea.Msg { return StepDoneMsg{} }
 	}
 
-	title := lipgloss.NewStyle().
-		Foreground(components.Secondary).
-		Bold(true).
-		Render("  Welcome to Ozzie!")
+	return s, nil
+}
 
-	subtitle := components.HintStyle.Render("  Let's set up your agent OS. Press enter to continue...")
+func (s *welcomeStep) View() string {
+	if s.phase == welcomePhaseAutoAdvance {
+		title := lipgloss.NewStyle().
+			Foreground(components.Secondary).
+			Bold(true).
+			Render(i18n.T("wizard.welcome.title"))
 
-	return title + "\n\n" + subtitle
+		subtitle := components.HintStyle.Render(i18n.T("wizard.welcome.subtitle"))
+
+		return title + "\n\n" + subtitle
+	}
+
+	return s.input.View()
 }
 
 func (s *welcomeStep) Collect() Answers {
@@ -123,21 +165,30 @@ func (s *welcomeStep) prefillFromConfig() {
 		return
 	}
 
-	if cfg.Models.Default != "" && cfg.Models.Providers != nil {
-		provider, ok := cfg.Models.Providers[cfg.Models.Default]
-		if ok {
-			s.answers["driver"] = provider.Driver
-			s.answers["model"] = provider.Model
-			if provider.BaseURL != "" {
-				s.answers["base_url"] = provider.BaseURL
+	// Build provider entries from all configured providers.
+	if cfg.Models.Providers != nil {
+		var providers []ProviderEntry
+		for alias, p := range cfg.Models.Providers {
+			entry := ProviderEntry{
+				Alias:        alias,
+				Driver:       p.Driver,
+				Model:        p.Model,
+				BaseURL:      p.BaseURL,
+				EnvVarName:   driverEnvVars[p.Driver],
+				SkipKey:      true, // don't re-prompt for existing keys
+				Capabilities: p.Capabilities,
+				Tags:         p.Tags,
+				SystemPrompt: p.PromptPrefix,
 			}
-			if len(provider.Capabilities) > 0 {
-				s.answers["capabilities"] = provider.Capabilities
-			}
-			if len(provider.Tags) > 0 {
-				s.answers["tags"] = provider.Tags
-			}
+			providers = append(providers, entry)
 		}
+		if len(providers) > 0 {
+			s.answers["providers"] = providers
+		}
+	}
+
+	if cfg.Models.Default != "" {
+		s.answers["default_provider"] = cfg.Models.Default
 	}
 
 	if cfg.Gateway.Host != "" {

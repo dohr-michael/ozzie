@@ -4,15 +4,24 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/dohr-michael/ozzie/clients/tui/components"
+	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
+
+// inputAreaLines is the number of lines reserved for the confirm input + spacing.
+const inputAreaLines = 4
 
 type confirmStep struct {
 	input     *components.InputZone
+	vp        viewport.Model
 	answers   Answers
 	confirmed bool
+	width     int
+	height    int
+	ready     bool
 }
 
 func newConfirmStep() *confirmStep {
@@ -27,11 +36,20 @@ func (s *confirmStep) Title() string { return "Confirm" }
 
 func (s *confirmStep) ShouldSkip(_ Answers) bool { return false }
 
+// SetSize implements the Resizable interface.
+func (s *confirmStep) SetSize(width, height int) {
+	s.width = width
+	s.height = height
+	s.updateViewport()
+}
+
 func (s *confirmStep) Init(answers Answers) tea.Cmd {
 	s.answers = answers
 	s.confirmed = false
 	s.input.ClearCompletedFields()
-	s.input.PromptConfirm("Apply this configuration?", "")
+	s.input.PromptConfirm(i18n.T("wizard.confirm.apply"), "")
+	s.vp.SetContent(s.buildSummary())
+	s.vp.GotoTop()
 	return nil
 }
 
@@ -45,56 +63,34 @@ func (s *confirmStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 			s.confirmed = true
 			return s, func() tea.Msg { return StepDoneMsg{} }
 		}
-		// "No" → go back to provider step.
+		// "No" → go back.
 		return s, func() tea.Msg { return StepBackMsg{} }
 	}
 
-	input, cmd := s.input.Update(msg)
+	// Let viewport handle scroll keys (↑/↓/pgup/pgdn).
+	var vpCmd tea.Cmd
+	s.vp, vpCmd = s.vp.Update(msg)
+
+	// Delegate to input as well.
+	input, inputCmd := s.input.Update(msg)
 	s.input = input
-	return s, cmd
+
+	return s, tea.Batch(vpCmd, inputCmd)
 }
 
 func (s *confirmStep) View() string {
 	var b strings.Builder
 
-	b.WriteString(components.LabelStyle.Render("  Configuration Summary"))
-	b.WriteString("\n\n")
-
-	driver := s.answers.String("driver", "anthropic")
-	model := s.answers.String("model", "")
-	host := s.answers.String("gateway_host", "127.0.0.1")
-	port := s.answers.Int("gateway_port", 18420)
-	hasKey := s.answers.String("api_key", "") != ""
-	skipKey := s.answers.Bool("skip_key", false)
-
-	// Provider
-	b.WriteString(formatRow("Provider", fmt.Sprintf("%s (%s)", driver, model)))
-
-	// API Key
-	if driver == "ollama" {
-		b.WriteString(formatRow("API Key", "not required"))
-	} else if hasKey {
-		b.WriteString(formatRow("API Key", "provided (will be encrypted)"))
-	} else if skipKey {
-		b.WriteString(formatRow("API Key", "skipped (set later)"))
-	}
-
-	// Gateway
-	b.WriteString(formatRow("Gateway", fmt.Sprintf("%s:%d", host, port)))
-
-	// Base URL (ollama)
-	if baseURL := s.answers.String("base_url", ""); baseURL != "" {
-		b.WriteString(formatRow("Base URL", baseURL))
-	}
-
-	// Capabilities
-	if caps := s.answers.Strings("capabilities", nil); len(caps) > 0 {
-		b.WriteString(formatRow("Capabilities", strings.Join(caps, ", ")))
-	}
-
-	// Tags
-	if tags := s.answers.Strings("tags", nil); len(tags) > 0 {
-		b.WriteString(formatRow("Tags", strings.Join(tags, ", ")))
+	if !s.ready {
+		// Viewport not yet sized — render summary directly.
+		b.WriteString(s.buildSummary())
+	} else {
+		b.WriteString(s.vp.View())
+		if s.vp.TotalLineCount() > s.vp.VisibleLineCount() {
+			scrollHint := fmt.Sprintf("  %s  %.0f%%", i18n.T("hint.scroll"), s.vp.ScrollPercent()*100)
+			b.WriteString("\n")
+			b.WriteString(components.HintStyle.Render(scrollHint))
+		}
 	}
 
 	b.WriteString("\n")
@@ -107,6 +103,77 @@ func (s *confirmStep) Collect() Answers {
 	return Answers{
 		"confirmed": s.confirmed,
 	}
+}
+
+// buildSummary renders the configuration summary text.
+func (s *confirmStep) buildSummary() string {
+	var b strings.Builder
+
+	b.WriteString(components.LabelStyle.Render(i18n.T("wizard.confirm.title")))
+	b.WriteString("\n\n")
+
+	providers := s.answers.Providers()
+	defaultProvider := s.answers.String("default_provider", "")
+	host := s.answers.String("gateway_host", "127.0.0.1")
+	port := s.answers.Int("gateway_port", 18420)
+
+	// Providers summary.
+	for _, p := range providers {
+		isDefault := ""
+		if p.Alias == defaultProvider {
+			isDefault = i18n.T("wizard.confirm.default")
+		}
+		b.WriteString(formatRow(i18n.T("wizard.confirm.provider"), fmt.Sprintf("%s%s — %s (%s)", p.Alias, isDefault, p.Driver, p.Model)))
+
+		if p.BaseURL != "" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.base_url"), p.BaseURL))
+		}
+
+		if p.Driver == "ollama" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), i18n.T("wizard.confirm.key.none")))
+		} else if p.APIKey != "" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), i18n.T("wizard.confirm.key.provided")))
+		} else if p.SkipKey {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), i18n.T("wizard.confirm.key.skipped")))
+		}
+
+		if len(p.Capabilities) > 0 {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.caps"), strings.Join(p.Capabilities, ", ")))
+		}
+
+		if len(p.Tags) > 0 {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.tags"), strings.Join(p.Tags, ", ")))
+		}
+
+		if p.SystemPrompt != "" {
+			prompt := p.SystemPrompt
+			if len(prompt) > 60 {
+				prompt = prompt[:57] + "..."
+			}
+			b.WriteString(formatRow(i18n.T("wizard.confirm.prompt"), prompt))
+		}
+
+		b.WriteString("\n")
+	}
+
+	// Gateway.
+	b.WriteString(formatRow(i18n.T("wizard.confirm.gateway"), fmt.Sprintf("%s:%d", host, port)))
+
+	return b.String()
+}
+
+// updateViewport recalculates viewport dimensions.
+func (s *confirmStep) updateViewport() {
+	if s.width == 0 || s.height == 0 {
+		return
+	}
+	vpHeight := s.height - inputAreaLines
+	if vpHeight < 3 {
+		vpHeight = 3
+	}
+	s.vp.Width = s.width
+	s.vp.Height = vpHeight
+	s.ready = true
 }
 
 func formatRow(label, value string) string {

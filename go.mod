@@ -13,6 +13,7 @@ require (
 	github.com/cloudwego/eino v0.7.36
 	github.com/cloudwego/eino-ext/components/embedding/ollama v0.0.0-20260228075615-1332771b7a8e
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260228075615-1332771b7a8e
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.28
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/components/tool/bingsearch v0.0.0-20260228075615-1332771b7a8e
@@ -22,11 +23,13 @@ require (
 	github.com/extism/go-sdk v1.7.1
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/google/uuid v1.6.0
-	github.com/marcozac/go-jsonc v0.1.1
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/robfig/cron/v3 v3.0.1
+	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
 	github.com/urfave/cli/v3 v3.6.2
+	golang.org/x/term v0.40.0
+	google.golang.org/genai v1.36.0
 )
 
 require (
@@ -54,7 +57,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/components/model/gemini v0.1.28 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/corpix/uarand v0.2.0 // indirect
 	github.com/dlclark/regexp2 v1.11.5 // indirect
@@ -68,7 +70,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/goccy/go-json v0.10.5 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
@@ -130,10 +131,8 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/api v0.204.0 // indirect
-	google.golang.org/genai v1.36.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250825161204-c5933d9347a5 // indirect
 	google.golang.org/grpc v1.75.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect

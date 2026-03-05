@@ -7,6 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/urfave/cli/v3"
 
+	"github.com/dohr-michael/ozzie/internal/i18n"
+	_ "github.com/dohr-michael/ozzie/internal/ui/components" // register component translations
 	"github.com/dohr-michael/ozzie/internal/wizard"
 )
 
@@ -20,6 +22,7 @@ func NewWakeCommand() *cli.Command {
 }
 
 func runWake(_ context.Context, _ *cli.Command) error {
+	i18n.Lang = i18n.Detect()
 	w := wizard.New()
 	p := tea.NewProgram(w, tea.WithAltScreen())
 

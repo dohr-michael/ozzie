@@ -7,6 +7,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/dohr-michael/ozzie/internal/i18n"
 )
 
 // InputMode represents the current input mode.
@@ -91,7 +93,7 @@ type InputZone struct {
 func NewInputZone() *InputZone {
 	ti := textinput.New()
 	ti.Prompt = "" // We render our own ❯ prompt
-	ti.Placeholder = "Type a message..."
+	ti.Placeholder = i18n.T("input.placeholder.chat")
 	ti.CharLimit = 2000
 	ti.Width = 80
 
@@ -214,7 +216,7 @@ func (z *InputZone) submit() (*InputZone, tea.Cmd) {
 	case ModeText:
 		text := strings.TrimSpace(z.textInput.Value())
 		if text == "" && z.required {
-			z.errorMsg = "This field is required"
+			z.errorMsg = i18n.T("input.error.required")
 			return z, nil
 		}
 		if !z.validate() {
@@ -281,7 +283,7 @@ func (z *InputZone) validate() bool {
 	}
 
 	if !z.validation.MatchString(value) {
-		z.errorMsg = "Invalid format"
+		z.errorMsg = i18n.T("input.error.invalid")
 		return false
 	}
 
@@ -327,7 +329,7 @@ func (z *InputZone) wrapWithSeparators(content string) string {
 }
 
 func (z *InputZone) renderDisabled() string {
-	return z.wrapWithSeparators(DisabledStyle.Render("  Waiting for response..."))
+	return z.wrapWithSeparators(DisabledStyle.Render(i18n.T("input.waiting")))
 }
 
 func (z *InputZone) renderChat() string {
@@ -388,7 +390,7 @@ func (z *InputZone) renderText() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(z.renderHint("enter=submit • esc=cancel"))
+	b.WriteString(z.renderHint(i18n.T("hint.text")))
 
 	return z.wrapWithSeparators(b.String())
 }
@@ -412,7 +414,7 @@ func (z *InputZone) renderSelect() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(z.renderHint("↑↓=navigate • enter=select • esc=cancel"))
+	b.WriteString(z.renderHint(i18n.T("hint.select")))
 
 	return z.wrapWithSeparators(b.String())
 }
@@ -441,7 +443,7 @@ func (z *InputZone) renderMulti() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(z.renderHint("↑↓=navigate • space=toggle • enter=submit • esc=cancel"))
+	b.WriteString(z.renderHint(i18n.T("hint.multi")))
 
 	return z.wrapWithSeparators(b.String())
 }
@@ -456,7 +458,7 @@ func (z *InputZone) renderConfirm() string {
 	}
 
 	// Yes/No options
-	options := []string{"Yes", "No"}
+	options := []string{i18n.T("confirm.yes"), i18n.T("confirm.no")}
 	for i, opt := range options {
 		if i == z.selectIdx {
 			b.WriteString(SelectedOptionStyle.Render("> " + opt))
@@ -466,7 +468,7 @@ func (z *InputZone) renderConfirm() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(z.renderHint("y/n or ↑↓ + enter • esc=cancel"))
+	b.WriteString(z.renderHint(i18n.T("hint.confirm")))
 
 	return z.wrapWithSeparators(b.String())
 }
@@ -485,7 +487,7 @@ func (z *InputZone) Reset() {
 	z.errorMsg = ""
 	z.completedFields = nil
 	z.textInput.SetValue("")
-	z.textInput.Placeholder = "Type a message..."
+	z.textInput.Placeholder = i18n.T("input.placeholder.chat")
 }
 
 // AddCompletedField records a completed workflow field answer.
@@ -538,7 +540,7 @@ func (z *InputZone) PromptText(question, field, placeholder, resumeToken string,
 	if placeholder != "" {
 		z.textInput.Placeholder = placeholder
 	} else {
-		z.textInput.Placeholder = "Enter value..."
+		z.textInput.Placeholder = i18n.T("input.placeholder.value")
 	}
 	if validation != "" {
 		z.validation, _ = regexp.Compile(validation)
@@ -613,7 +615,7 @@ func (z *InputZone) Prompt(mode InputMode, cfg PromptConfig) {
 		if cfg.Placeholder != "" {
 			z.textInput.Placeholder = cfg.Placeholder
 		} else {
-			z.textInput.Placeholder = "Enter value..."
+			z.textInput.Placeholder = i18n.T("input.placeholder.value")
 		}
 		if cfg.Validation != "" {
 			z.validation, _ = regexp.Compile(cfg.Validation)

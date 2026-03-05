@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/dohr-michael/ozzie/internal/i18n"
 )
 
 // Header displays LLM context and token usage as a compact footer.
@@ -79,12 +81,12 @@ func (h *Header) View() string {
 
 	// Token count
 	if h.tokensUsed > 0 {
-		segments = append(segments, HeaderTokenStyle.Render(FormatTokenCount(h.tokensUsed)+" tokens"))
+		segments = append(segments, HeaderTokenStyle.Render(FormatTokenCount(h.tokensUsed)+i18n.T("header.tokens")))
 	}
 
 	// Streaming indicator
 	if h.streaming {
-		segments = append(segments, HeaderStreamStyle.Render("● streaming"))
+		segments = append(segments, HeaderStreamStyle.Render(i18n.T("header.streaming")))
 	}
 
 	content := strings.Join(segments, sep)

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
@@ -59,12 +61,17 @@ func Finalize(answers Answers) (string, error) {
 		return "", fmt.Errorf("write config: %w", err)
 	}
 
-	// 5. Encrypt and write API key if provided.
+	// 5. Encrypt and write API keys for each provider.
 	dotenvPath := config.DotenvPath()
-	apiKey := answers.String("api_key", "")
-	envVarName := answers.String("env_var_name", "")
+	providers := answers.Providers()
+	hasAnyKey := false
 
-	if apiKey != "" && envVarName != "" {
+	for _, p := range providers {
+		if p.APIKey == "" || p.EnvVarName == "" {
+			continue
+		}
+		hasAnyKey = true
+
 		kr, err := secrets.NewKeyRing()
 		if err != nil {
 			return "", fmt.Errorf("load keyring: %w", err)
@@ -73,16 +80,18 @@ func Finalize(answers Answers) (string, error) {
 			return "", fmt.Errorf("no keyring available after key generation")
 		}
 
-		encrypted, err := secrets.Encrypt(apiKey, kr.CurrentRecipient())
+		encrypted, err := secrets.Encrypt(p.APIKey, kr.CurrentRecipient())
 		if err != nil {
-			return "", fmt.Errorf("encrypt api key: %w", err)
+			return "", fmt.Errorf("encrypt api key for %s: %w", p.Alias, err)
 		}
 
-		if err := secrets.SetEntry(dotenvPath, envVarName, encrypted); err != nil {
-			return "", fmt.Errorf("write api key to .env: %w", err)
+		if err := secrets.SetEntry(dotenvPath, p.EnvVarName, encrypted); err != nil {
+			return "", fmt.Errorf("write api key to .env for %s: %w", p.Alias, err)
 		}
-	} else {
-		// Write default .env if missing.
+	}
+
+	// Write default .env if missing and no keys were written.
+	if !hasAnyKey {
 		if _, err := os.Stat(dotenvPath); os.IsNotExist(err) {
 			if err := os.WriteFile(dotenvPath, []byte(defaultDotenv), 0o600); err != nil {
 				return "", fmt.Errorf("write .env: %w", err)
@@ -90,27 +99,29 @@ func Finalize(answers Answers) (string, error) {
 		}
 	}
 
-	return formatSuccessMessage(root, data, apiKey != ""), nil
+	return formatSuccessMessage(root, data, providers), nil
 }
 
-func formatSuccessMessage(root string, data ConfigData, hasKey bool) string {
-	msg := fmt.Sprintf(`
-  Ozzie is ready.
+func formatSuccessMessage(root string, data ConfigData, providers []ProviderEntry) string {
+	var b strings.Builder
 
-  Home:     %s
-  Provider: %s (%s)
-  Gateway:  %s:%d
-`, root, data.Driver, data.Model, data.GatewayHost, data.GatewayPort)
+	b.WriteString(i18n.T("wizard.final.ready"))
+	b.WriteString(fmt.Sprintf(i18n.T("wizard.final.home"), root))
+	b.WriteString(fmt.Sprintf(i18n.T("wizard.final.gateway"), data.GatewayHost, data.GatewayPort))
+	b.WriteString(fmt.Sprintf(i18n.T("wizard.final.default"), data.DefaultProvider))
 
-	if hasKey {
-		msg += fmt.Sprintf("  API Key:  encrypted in .env (%s)\n", data.AuthEnvVar)
-	} else if data.AuthEnvVar != "" {
-		msg += fmt.Sprintf(`
-  Next: set your API key
-    ozzie secret set %s
-`, data.AuthEnvVar)
+	// Provider summary.
+	for _, p := range providers {
+		label := fmt.Sprintf("  %s: %s (%s)", p.Alias, p.Driver, p.Model)
+		b.WriteString(label)
+		if p.APIKey != "" {
+			b.WriteString(i18n.T("wizard.final.key_encrypted"))
+		} else if p.EnvVarName != "" && p.SkipKey {
+			b.WriteString(fmt.Sprintf(i18n.T("wizard.final.key_later"), p.EnvVarName))
+		}
+		b.WriteString("\n")
 	}
 
-	msg += "\n  Run: ozzie gateway\n"
-	return msg
+	b.WriteString(i18n.T("wizard.final.run"))
+	return b.String()
 }

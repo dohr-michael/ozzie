@@ -4,6 +4,8 @@ package components
 import (
 	"fmt"
 	"strings"
+
+	"github.com/dohr-michael/ozzie/internal/i18n"
 )
 
 // ToolCallStatus represents the state of a tool call.
@@ -69,7 +71,7 @@ func RenderExpandedTools(tools []ToolCall, width int) string {
 
 // RenderThinking renders the thinking indicator.
 func RenderThinking() string {
-	return ToolBulletStyle.Render("⏺ ") + ThinkingStyle.Render("Thinking...")
+	return ToolBulletStyle.Render("⏺ ") + ThinkingStyle.Render(i18n.T("chat.thinking"))
 }
 
 // RenderWelcome renders the welcome message.
@@ -77,9 +79,9 @@ func RenderWelcome() string {
 	var b strings.Builder
 	b.WriteString("\n")
 	b.WriteString(WelcomeTitleStyle.Render("Ozzie"))
-	b.WriteString(WelcomeSubtitleStyle.Render(" — Your personal AI agent operating system."))
+	b.WriteString(WelcomeSubtitleStyle.Render(i18n.T("chat.welcome.tagline")))
 	b.WriteString("\n\n")
-	b.WriteString(HelpTextStyle.Render("  Tips: Ctrl+C to quit"))
+	b.WriteString(HelpTextStyle.Render(i18n.T("chat.tips.quit")))
 	b.WriteString("\n")
 	return b.String()
 }
@@ -147,23 +149,23 @@ func renderSingleTool(tool ToolCall, width int) string {
 	// Status suffix for special states
 	switch tool.Status {
 	case ToolStatusAwaitingConfirmation:
-		b.WriteString(ConfirmWaitStyle.Render(" (awaiting confirmation)"))
+		b.WriteString(ConfirmWaitStyle.Render(i18n.T("chat.tool.awaiting")))
 	case ToolStatusDenied:
-		b.WriteString(ConfirmDeniedStyle.Render(" (denied)"))
+		b.WriteString(ConfirmDeniedStyle.Render(i18n.T("chat.tool.denied")))
 	}
 
 	// Result lines with ⎿ prefix
 	if tool.Completed && tool.Error == nil {
 		resultPrefix := ToolResultPrefixStyle.Render("  ⎿  ")
 		if tool.Result == "" {
-			b.WriteString("\n" + resultPrefix + ToolResultStyle.Render("(No output)"))
+			b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(i18n.T("chat.tool.no_output")))
 		} else {
 			result := wrapText(tool.Result, width-6)
 			lines := strings.Split(result, "\n")
 			maxLines := 10
 			for j, line := range lines {
 				if j >= maxLines {
-					b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(fmt.Sprintf("... (%d more lines)", len(lines)-maxLines)))
+					b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(fmt.Sprintf(i18n.T("chat.tool.more_lines"), len(lines)-maxLines)))
 					break
 				}
 				b.WriteString("\n" + resultPrefix + ToolResultStyle.Render(line))
