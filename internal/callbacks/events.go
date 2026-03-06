@@ -44,8 +44,10 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 				Model: info.Name,
 			}
 			if output.Message != nil && output.Message.ResponseMeta != nil && output.Message.ResponseMeta.Usage != nil {
-				payload.TokensInput = output.Message.ResponseMeta.Usage.PromptTokens
-				payload.TokensOutput = output.Message.ResponseMeta.Usage.CompletionTokens
+				u := output.Message.ResponseMeta.Usage
+				payload.TokensInput = u.PromptTokens
+				payload.TokensOutput = u.CompletionTokens
+				payload.TokensReasoning = u.CompletionTokensDetails.ReasoningTokens
 			}
 			publishTyped(ctx, payload)
 			return ctx
@@ -55,7 +57,7 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 			// Stream is a copy — must be drained. Run in goroutine to avoid blocking.
 			go func() {
 				defer output.Close()
-				var tokensIn, tokensOut int
+				var tokensIn, tokensOut, tokensReasoning int
 				for {
 					chunk, err := output.Recv()
 					if err != nil {
@@ -76,6 +78,9 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 						if chunk.TokenUsage.CompletionTokens > 0 {
 							tokensOut = chunk.TokenUsage.CompletionTokens
 						}
+						if chunk.TokenUsage.CompletionTokensDetails.ReasoningTokens > 0 {
+							tokensReasoning = chunk.TokenUsage.CompletionTokensDetails.ReasoningTokens
+						}
 					}
 					// Fallback: check Message.ResponseMeta.Usage
 					if chunk.Message != nil && chunk.Message.ResponseMeta != nil && chunk.Message.ResponseMeta.Usage != nil {
@@ -86,13 +91,17 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 						if u.CompletionTokens > 0 {
 							tokensOut = u.CompletionTokens
 						}
+						if u.CompletionTokensDetails.ReasoningTokens > 0 {
+							tokensReasoning = u.CompletionTokensDetails.ReasoningTokens
+						}
 					}
 				}
 				publishTyped(ctx, events.LLMCallPayload{
-					Phase:        "response",
-					Model:        info.Name,
-					TokensInput:  tokensIn,
-					TokensOutput: tokensOut,
+					Phase:           "response",
+					Model:           info.Name,
+					TokensInput:     tokensIn,
+					TokensOutput:    tokensOut,
+					TokensReasoning: tokensReasoning,
 				})
 			}()
 			return ctx

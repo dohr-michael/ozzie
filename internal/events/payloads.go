@@ -119,14 +119,15 @@ func GetToolApprovedPayload(e Event) (ToolApprovedPayload, bool) {
 // =============================================================================
 
 type LLMCallPayload struct {
-	Phase        string        `json:"phase"`
-	Model        string        `json:"model"`
-	Provider     string        `json:"provider,omitempty"`
-	MessageCount int           `json:"message_count,omitempty"`
-	TokensInput  int           `json:"tokens_input,omitempty"`
-	TokensOutput int           `json:"tokens_output,omitempty"`
-	Duration     time.Duration `json:"duration,omitempty"`
-	Error        string        `json:"error,omitempty"`
+	Phase           string        `json:"phase"`
+	Model           string        `json:"model"`
+	Provider        string        `json:"provider,omitempty"`
+	MessageCount    int           `json:"message_count,omitempty"`
+	TokensInput     int           `json:"tokens_input,omitempty"`
+	TokensOutput    int           `json:"tokens_output,omitempty"`
+	TokensReasoning int           `json:"tokens_reasoning,omitempty"`
+	Duration        time.Duration `json:"duration,omitempty"`
+	Error           string        `json:"error,omitempty"`
 }
 
 func (LLMCallPayload) EventType() EventType { return EventLLMCall }
