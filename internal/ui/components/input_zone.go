@@ -544,6 +544,8 @@ func (z *InputZone) PromptText(question, field, placeholder, resumeToken string,
 	}
 	if validation != "" {
 		z.validation, _ = regexp.Compile(validation)
+	} else {
+		z.validation = nil
 	}
 	z.textInput.Focus()
 }
@@ -619,6 +621,8 @@ func (z *InputZone) Prompt(mode InputMode, cfg PromptConfig) {
 		}
 		if cfg.Validation != "" {
 			z.validation, _ = regexp.Compile(cfg.Validation)
+		} else {
+			z.validation = nil
 		}
 		z.textInput.Focus()
 
