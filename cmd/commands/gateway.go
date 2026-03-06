@@ -188,13 +188,14 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Wrap dangerous tools with confirmation for interactive gateway
 	plugins.WrapRegistryDangerous(toolRegistry, bus, toolPerms)
 
-	// Skill registry — load declarative skills and register as tools
+	// Skill registry — load from SKILL.md directories
 	skillRegistry := skills.NewRegistry()
 	for _, dir := range cfg.Skills.Dirs {
 		if err := skillRegistry.LoadDir(dir); err != nil {
 			slog.Warn("failed to load skills", "dir", dir, "error", err)
 		}
 	}
+	slog.Info("skills loaded", "count", len(skillRegistry.All()))
 
 	// Verifier for acceptance criteria
 	verifier := skills.NewVerifier(registry)
@@ -205,16 +206,9 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		EventBus:      bus,
 		Verifier:      verifier,
 	}
-	skillDescs := make(map[string]string)
-	for _, sk := range skillRegistry.All() {
-		skillTool := skills.NewSkillTool(sk, skillRunCfg)
-		manifest := skills.SkillToManifest(sk)
-		if err := toolRegistry.RegisterNative(sk.Name, skillTool, manifest); err != nil {
-			slog.Warn("register skill", "name", sk.Name, "error", err)
-		}
-		skillDescs[sk.Name] = sk.Description
-	}
-	slog.Info("skills loaded", "count", len(skillRegistry.All()))
+
+	// Catalog for context middleware (name → description only)
+	skillDescs := skillRegistry.Catalog()
 
 	// Session store
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
@@ -399,17 +393,15 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 
 	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
 	pool := actors.NewActorPool(actors.ActorPoolConfig{
-		Providers:           cfg.Models.Providers,
-		Store:               taskStore,
-		Bus:                 bus,
-		Models:              registry,
-		ToolRegistry:        toolRegistry,
-		AutonomyDefault:     cfg.Agent.Coordinator.DefaultLevel,
-		MaxValidationRounds: cfg.Agent.Coordinator.MaxValidationRounds,
-		SkillRunner:         skillExecutor,
-		TaskMiddlewares:     taskMiddlewares,
-		Retriever:           memoryRetriever,
-		Perms:               toolPerms,
+		Providers:       cfg.Models.Providers,
+		Store:           taskStore,
+		Bus:             bus,
+		Models:          registry,
+		ToolRegistry:    toolRegistry,
+		SkillRunner:     skillExecutor,
+		TaskMiddlewares: taskMiddlewares,
+		Retriever:       memoryRetriever,
+		Perms:           toolPerms,
 	})
 	pool.Start()
 	defer pool.Stop()
@@ -421,7 +413,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Extract skill schedule info for the scheduler (avoids import cycle)
 	var schedSkills []scheduler.SkillScheduleInfo
 	for _, sk := range skillRegistry.All() {
-		if !sk.Triggers.HasScheduleTrigger() {
+		if sk.Triggers == nil || !sk.Triggers.HasScheduleTrigger() {
 			continue
 		}
 		info := scheduler.SkillScheduleInfo{
@@ -464,7 +456,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 
 	// Register task tools
-	submitTool := plugins.NewSubmitTaskTool(pool, cfg.Agent.Coordinator.DefaultLevel, toolRegistry, toolPerms, bus)
+	submitTool := plugins.NewSubmitTaskTool(pool, toolRegistry, toolPerms, bus)
 	if err := toolRegistry.RegisterNative("submit_task", submitTool, plugins.SubmitTaskManifest()); err != nil {
 		slog.Warn("failed to register submit_task tool", "error", err)
 	}
@@ -510,17 +502,6 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register trigger_schedule tool", "error", err)
 	}
 
-	// Register validation tools (coordinator pattern)
-	requestValidationTool := plugins.NewRequestValidationTool()
-	if err := toolRegistry.RegisterNative("request_validation", requestValidationTool, plugins.RequestValidationManifest()); err != nil {
-		slog.Warn("failed to register request_validation tool", "error", err)
-	}
-
-	replyTaskTool := plugins.NewReplyTaskTool(pool)
-	if err := toolRegistry.RegisterNative("reply_task", replyTaskTool, plugins.ReplyTaskManifest()); err != nil {
-		slog.Warn("failed to register reply_task tool", "error", err)
-	}
-
 	// ToolSet: all native/built-in tools are always active,
 	// only WASM plugin tools require dynamic activation.
 	// Must be computed AFTER all native tools are registered.
@@ -534,6 +515,20 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register activate_tools tool", "error", err)
 	}
 	toolSet.RegisterCore("activate_tools")
+
+	// Register activate_skill (core tool — always active, progressive disclosure)
+	activateSkillTool := plugins.NewActivateSkillTool(skillRegistry, toolSet, toolRegistry)
+	if err := toolRegistry.RegisterNative("activate_skill", activateSkillTool, plugins.ActivateSkillManifest()); err != nil {
+		slog.Warn("failed to register activate_skill tool", "error", err)
+	}
+	toolSet.RegisterCore("activate_skill")
+
+	// Register run_workflow (core tool — executes skill workflow DAGs)
+	runWorkflowTool := plugins.NewRunWorkflowTool(skillExecutor)
+	if err := toolRegistry.RegisterNative("run_workflow", runWorkflowTool, plugins.RunWorkflowManifest()); err != nil {
+		slog.Warn("failed to register run_workflow tool", "error", err)
+	}
+	toolSet.RegisterCore("run_workflow")
 
 	slog.Info("tools loaded", "count", len(toolRegistry.ToolNames()))
 
@@ -610,7 +605,6 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		Registry:        toolRegistry,
 		EventBus:        bus,
 		Store:           sessionStore,
-		TaskStore:       newTaskStoreAdapter(taskStore),
 		Pool:            actors.NewPoolAdapter(pool),
 		DefaultProvider: registry.DefaultName(),
 		ContextWindow:   registry.DefaultContextWindow(),
@@ -649,15 +643,6 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 }
 
-// taskStoreAdapter adapts tasks.Store to agent.TaskStore (avoids import cycle).
-type taskStoreAdapter struct {
-	store tasks.Store
-}
-
-func newTaskStoreAdapter(s tasks.Store) *taskStoreAdapter {
-	return &taskStoreAdapter{store: s}
-}
-
 // extractorLLMAdapter adapts a ToolCallingChatModel to memory.LLMSummarizer.
 type extractorLLMAdapter struct {
 	chatModel model.ToolCallingChatModel
@@ -684,17 +669,3 @@ func resolveLogLevel(s string) slog.Level {
 	}
 }
 
-func (a *taskStoreAdapter) LoadMailbox(taskID string) ([]agent.TaskMailboxMessage, error) {
-	msgs, err := a.store.LoadMailbox(taskID)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]agent.TaskMailboxMessage, len(msgs))
-	for i, m := range msgs {
-		result[i] = agent.TaskMailboxMessage{
-			Type:    m.Type,
-			Content: m.Content,
-		}
-	}
-	return result, nil
-}

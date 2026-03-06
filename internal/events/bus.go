@@ -69,8 +69,6 @@ const (
 	EventTaskFailed       EventType = "task.failed"
 	EventTaskCancelled    EventType = "task.cancelled"
 	EventTaskVerification EventType = "task.verification"
-	EventTaskSuspended    EventType = "task.suspended"
-	EventTaskResumed      EventType = "task.resumed"
 )
 
 // EventSource identifies the component that emitted an event.

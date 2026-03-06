@@ -7,11 +7,9 @@ import (
 
 func TestValidateVars_RequiredPresent(t *testing.T) {
 	wr := &WorkflowRunner{
-		skill: &Skill{
-			Name: "test",
-			Vars: map[string]Var{
-				"url": {Required: true},
-			},
+		skillName: "test",
+		vars: map[string]VarDef{
+			"url": {Required: true},
 		},
 	}
 
@@ -23,11 +21,9 @@ func TestValidateVars_RequiredPresent(t *testing.T) {
 
 func TestValidateVars_RequiredMissing(t *testing.T) {
 	wr := &WorkflowRunner{
-		skill: &Skill{
-			Name: "test",
-			Vars: map[string]Var{
-				"url": {Required: true},
-			},
+		skillName: "test",
+		vars: map[string]VarDef{
+			"url": {Required: true},
 		},
 	}
 
@@ -42,11 +38,9 @@ func TestValidateVars_RequiredMissing(t *testing.T) {
 
 func TestValidateVars_OptionalMissing(t *testing.T) {
 	wr := &WorkflowRunner{
-		skill: &Skill{
-			Name: "test",
-			Vars: map[string]Var{
-				"format": {Required: false, Default: "markdown"},
-			},
+		skillName: "test",
+		vars: map[string]VarDef{
+			"format": {Required: false, Default: "markdown"},
 		},
 	}
 
@@ -57,7 +51,7 @@ func TestValidateVars_OptionalMissing(t *testing.T) {
 }
 
 func TestBuildStepInstruction_Basic(t *testing.T) {
-	wr := &WorkflowRunner{skill: &Skill{Name: "test"}}
+	wr := &WorkflowRunner{skillName: "test"}
 	step := &Step{
 		ID:          "analyze",
 		Instruction: "Analyze the code.",
@@ -70,7 +64,7 @@ func TestBuildStepInstruction_Basic(t *testing.T) {
 }
 
 func TestBuildStepInstruction_WithVars(t *testing.T) {
-	wr := &WorkflowRunner{skill: &Skill{Name: "test"}}
+	wr := &WorkflowRunner{skillName: "test"}
 	step := &Step{
 		ID:          "analyze",
 		Instruction: "Analyze the code.",
@@ -91,7 +85,7 @@ func TestBuildStepInstruction_WithVars(t *testing.T) {
 }
 
 func TestBuildStepInstruction_WithPrevResults(t *testing.T) {
-	wr := &WorkflowRunner{skill: &Skill{Name: "test"}}
+	wr := &WorkflowRunner{skillName: "test"}
 	step := &Step{
 		ID:          "summarize",
 		Instruction: "Summarize the analysis.",
@@ -116,7 +110,7 @@ func TestBuildStepInstruction_WithPrevResults(t *testing.T) {
 }
 
 func TestBuildStepInstruction_WithAcceptance(t *testing.T) {
-	wr := &WorkflowRunner{skill: &Skill{Name: "test"}}
+	wr := &WorkflowRunner{skillName: "test"}
 	step := &Step{
 		ID:          "review",
 		Instruction: "Review the code.",
@@ -134,7 +128,7 @@ func TestBuildStepInstruction_WithAcceptance(t *testing.T) {
 }
 
 func TestBuildStepInstruction_Full(t *testing.T) {
-	wr := &WorkflowRunner{skill: &Skill{Name: "test"}}
+	wr := &WorkflowRunner{skillName: "test"}
 	step := &Step{
 		ID:          "final",
 		Instruction: "Produce the final report.",

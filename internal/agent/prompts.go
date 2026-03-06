@@ -36,23 +36,6 @@ Task execution agent. Call tools — do NOT describe actions.
 ## File Access
 Write ONLY in working dir or shared tmp. No /home, /tmp, /etc.`
 
-// CoordinatorSystemPromptCompact is the reduced coordinator prompt for small models.
-const CoordinatorSystemPromptCompact = `Coding coordinator. Methodical workflow:
-1. **Explore** — Read files, understand structure and conventions.
-2. **Plan** — Step-by-step implementation in markdown.
-3. **Validate** — Call request_validation. Wait for feedback.
-4. **Execute** — Implement based on feedback. Clean, minimal changes.
-5. **Verify** — Run build/lint/test. Fix issues. Summarize.
-ALWAYS validate before changing code. Follow existing conventions.`
-
-// AutonomousSystemPromptCompact is the reduced autonomous prompt for small models.
-const AutonomousSystemPromptCompact = `Autonomous coding agent. Methodical workflow:
-1. **Explore** — Read files, understand structure.
-2. **Plan** — Step-by-step implementation.
-3. **Execute** — Implement immediately. Clean, minimal changes.
-4. **Verify** — Run build/lint/test. Fix issues. Summarize.
-Do NOT call request_validation. Proceed directly after planning.`
-
 // PersonaForTier returns the full persona for non-small tiers, or a compact
 // version for TierSmall. If the persona is custom (not DefaultPersona), it is
 // always returned as-is — even for TierSmall.
@@ -82,26 +65,3 @@ func SubAgentInstructionsForTier(tier ModelTier) string {
 	return SubAgentInstructions
 }
 
-// CoordinatorPromptForTier returns the coordinator prompt appropriate for the tier.
-// Custom prompts (loaded from COORDINATOR.md) are always returned as-is.
-func CoordinatorPromptForTier(fullPrompt string, tier ModelTier) string {
-	if tier != TierSmall {
-		return fullPrompt
-	}
-	if fullPrompt != CoordinatorSystemPrompt {
-		return fullPrompt
-	}
-	return CoordinatorSystemPromptCompact
-}
-
-// AutonomousPromptForTier returns the autonomous prompt appropriate for the tier.
-// Custom prompts (loaded from AUTONOMOUS.md) are always returned as-is.
-func AutonomousPromptForTier(fullPrompt string, tier ModelTier) string {
-	if tier != TierSmall {
-		return fullPrompt
-	}
-	if fullPrompt != AutonomousSystemPrompt {
-		return fullPrompt
-	}
-	return AutonomousSystemPromptCompact
-}

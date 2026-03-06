@@ -62,25 +62,6 @@ func TaskEnvFromContext(ctx context.Context) map[string]string {
 	return env
 }
 
-// ValidationRequest is sent by the request_validation tool to signal self-suspension.
-type ValidationRequest struct {
-	Token   string
-	Content string
-}
-
-type validationChKey struct{}
-
-// ContextWithValidationCh returns a context carrying a validation request channel.
-func ContextWithValidationCh(ctx context.Context, ch chan<- ValidationRequest) context.Context {
-	return context.WithValue(ctx, validationChKey{}, ch)
-}
-
-// ValidationChFromContext extracts the validation channel from the context, or nil if absent.
-func ValidationChFromContext(ctx context.Context) chan<- ValidationRequest {
-	ch, _ := ctx.Value(validationChKey{}).(chan<- ValidationRequest)
-	return ch
-}
-
 type taskIDKey struct{}
 
 // ContextWithTaskID returns a context carrying the current task ID.

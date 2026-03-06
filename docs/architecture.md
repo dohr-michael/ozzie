@@ -188,55 +188,69 @@ into a single lookup. Each tool implements Eino's `tool.InvokableTool` interface
 
 ## Skill System
 
-Skills are declarative agent behaviors defined in JSONC files.
+Skills are declarative agent behaviors defined as directories containing a `SKILL.md`
+file (instructions in markdown with YAML frontmatter) and an optional `workflow.yaml`
+for DAG-based execution.
 
-### Simple Skills
+### SKILL.md Format
 
-A simple skill wraps a single LLM agent with a specific instruction:
+Each skill is a directory with a `SKILL.md` file:
 
-```jsonc
-{
-  "name": "code-review",
-  "description": "Review code for quality issues",
-  "type": "simple",
-  "instruction": "Review the provided code...",
-  "model": "claude-sonnet",
-  "tools": ["read_file", "search"]
-}
+```markdown
+---
+name: code-review
+description: Review code for quality issues
+allowed-tools:
+  - read_file
+  - search
+---
+# Code Review
+
+Review the provided code for quality issues, security vulnerabilities,
+and adherence to project conventions.
 ```
+
+The YAML frontmatter declares metadata and allowed tools. The markdown body
+contains the skill instructions loaded as the agent's system prompt.
 
 ### Workflow Skills
 
-Workflow skills define a DAG (directed acyclic graph) of steps:
+Skills can include a `workflow.yaml` defining a DAG (directed acyclic graph) of steps:
 
-```jsonc
-{
-  "name": "deploy",
-  "description": "Deploy pipeline",
-  "type": "workflow",
-  "vars": {
-    "env": { "description": "Target environment", "required": true }
-  },
-  "steps": [
-    { "id": "build", "instruction": "Build the project." },
-    { "id": "test",  "instruction": "Run tests.", "needs": ["build"] },
-    { "id": "deploy","instruction": "Deploy to {{env}}.", "needs": ["test"] }
-  ]
-}
+```yaml
+vars:
+  env:
+    description: Target environment
+    required: true
+
+steps:
+  - id: build
+    title: Build
+    instruction: Build the project.
+    tools: [run_command]
+
+  - id: test
+    title: Test
+    instruction: Run tests.
+    tools: [run_command]
+    needs: [build]
+
+  - id: deploy
+    title: Deploy
+    instruction: Deploy to {{env}}.
+    tools: [run_command]
+    needs: [test]
 ```
 
 Steps execute in parallel where the dependency graph allows. The `WorkflowRunner`
 uses Kahn's algorithm for topological ordering and `ReadySteps()` to determine
 which steps can run concurrently.
 
-### Skill-as-Tool Pattern
+### Skill Activation
 
-Skills are exposed to the main agent as tools via `SkillTool`. When the agent
-decides to invoke a skill, it calls the tool, which:
-
-1. Emits `skill.started` event
-2. Creates an ephemeral agent (simple) or runs the DAG (workflow)
-3. Emits `skill.completed` event with output and duration
+The main agent loads skills on demand via `activate_skill`. Once activated, the
+skill's instructions and tools become available for the current turn. Skills can
+also be used in async tasks via the `skill` parameter in `submit_task`.
 
 ## Session & Storage
 

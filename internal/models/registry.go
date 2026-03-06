@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ type ProviderEntry struct {
 	model  model.ToolCallingChatModel
 	once   sync.Once
 	err    error
+	cb     *CircuitBreaker // nil when no resilience configured
 }
 
 // Registry manages named model providers with lazy initialization.
@@ -73,8 +75,9 @@ func NewRegistry(cfg config.ModelsConfig, kr *secrets.KeyRing) *Registry {
 	return r
 }
 
-// Get returns the named model, initializing it lazily.
-func (r *Registry) Get(ctx context.Context, name string) (model.ToolCallingChatModel, error) {
+// initRaw creates and caches the base model (with circuit breaker if configured).
+// Does NOT resolve fallback — safe to call from fallback resolution without deadlock.
+func (r *Registry) initRaw(ctx context.Context, name string) (model.ToolCallingChatModel, error) {
 	r.mu.RLock()
 	entry, ok := r.providers[name]
 	r.mu.RUnlock()
@@ -84,10 +87,49 @@ func (r *Registry) Get(ctx context.Context, name string) (model.ToolCallingChatM
 	}
 
 	entry.once.Do(func() {
-		entry.model, entry.err = CreateModel(ctx, entry.Config, r.kr)
+		m, err := CreateModel(ctx, entry.Config, r.kr)
+		if err != nil {
+			entry.err = err
+			return
+		}
+
+		// Wrap with resilience (retry + circuit breaker) if configured
+		if entry.Config.Retry != nil || entry.Config.Fallback != "" {
+			entry.cb = NewCircuitBreaker(CircuitBreakerConfig{})
+			m = NewResilientModel(m, entry.cb, name, entry.Config.Retry)
+		}
+
+		entry.model = m
 	})
 
 	return entry.model, entry.err
+}
+
+// Get returns the named model, initializing it lazily.
+// If a fallback provider is configured and the primary has a circuit breaker,
+// the returned model transparently falls back when the primary circuit opens.
+func (r *Registry) Get(ctx context.Context, name string) (model.ToolCallingChatModel, error) {
+	m, err := r.initRaw(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.RLock()
+	entry := r.providers[name]
+	r.mu.RUnlock()
+
+	// Wrap with fallback if configured (max 1 level — uses initRaw to prevent chaining)
+	if entry.Config.Fallback != "" {
+		fb, fbErr := r.initRaw(ctx, entry.Config.Fallback)
+		if fbErr != nil {
+			slog.Warn("fallback provider init failed", "provider", name,
+				"fallback", entry.Config.Fallback, "error", fbErr)
+		} else {
+			m = NewFallbackModel(m, fb, name)
+		}
+	}
+
+	return m, nil
 }
 
 // Default returns the default model.

@@ -30,22 +30,36 @@ type RunnerConfig struct {
 
 // WorkflowRunner executes a workflow skill by running its DAG of steps.
 type WorkflowRunner struct {
-	skill *Skill
-	dag   *DAG
-	cfg   RunnerConfig
+	skillName string
+	model     string
+	vars      map[string]VarDef
+	dag       *DAG
+	cfg       RunnerConfig
 }
 
-// NewWorkflowRunner creates a runner for a workflow skill.
-func NewWorkflowRunner(skill *Skill, cfg RunnerConfig) (*WorkflowRunner, error) {
-	dag, err := NewDAG(skill.Steps)
+// NewWorkflowRunnerFromDef creates a runner from a SkillMD with a workflow definition.
+func NewWorkflowRunnerFromDef(skill *SkillMD, cfg RunnerConfig) (*WorkflowRunner, error) {
+	if !skill.HasWorkflow() {
+		return nil, fmt.Errorf("skill %q has no workflow definition", skill.Name)
+	}
+
+	// Convert StepDef → Step for the DAG
+	steps := make([]Step, len(skill.Workflow.Steps))
+	for i, sd := range skill.Workflow.Steps {
+		steps[i] = sd.ToStep()
+	}
+
+	dag, err := NewDAG(steps)
 	if err != nil {
 		return nil, fmt.Errorf("build DAG for skill %q: %w", skill.Name, err)
 	}
 
 	return &WorkflowRunner{
-		skill: skill,
-		dag:   dag,
-		cfg:   cfg,
+		skillName: skill.Name,
+		model:     skill.Workflow.Model,
+		vars:      skill.Workflow.Vars,
+		dag:       dag,
+		cfg:       cfg,
 	}, nil
 }
 
@@ -57,7 +71,7 @@ func (wr *WorkflowRunner) Run(ctx context.Context, vars map[string]string) (stri
 	}
 
 	// Apply defaults
-	for name, v := range wr.skill.Vars {
+	for name, v := range wr.vars {
 		if _, ok := vars[name]; !ok && v.Default != "" {
 			vars[name] = v.Default
 		}
@@ -123,10 +137,10 @@ func (wr *WorkflowRunner) Run(ctx context.Context, vars map[string]string) (stri
 }
 
 func (wr *WorkflowRunner) validateVars(vars map[string]string) error {
-	for name, v := range wr.skill.Vars {
+	for name, v := range wr.vars {
 		if v.Required {
 			if _, ok := vars[name]; !ok {
-				return fmt.Errorf("skill %q: required variable %q not provided", wr.skill.Name, name)
+				return fmt.Errorf("skill %q: required variable %q not provided", wr.skillName, name)
 			}
 		}
 	}
@@ -142,12 +156,12 @@ func (wr *WorkflowRunner) runStep(ctx context.Context, stepID string, vars map[s
 	sessionID := events.SessionIDFromContext(ctx)
 	modelName := step.Model
 	if modelName == "" {
-		modelName = wr.skill.Model
+		modelName = wr.model
 	}
 
 	// Emit step started
 	wr.cfg.EventBus.Publish(events.NewTypedEventWithSession(events.SourceSkill, events.SkillStepStartedPayload{
-		SkillName: wr.skill.Name,
+		SkillName: wr.skillName,
 		StepID:    stepID,
 		StepTitle: step.Title,
 		Model:     modelName,
@@ -248,7 +262,7 @@ func (wr *WorkflowRunner) verifyAndRetry(ctx context.Context, step *Step, output
 
 		// Emit verification event
 		wr.cfg.EventBus.Publish(events.NewTypedEventWithSession(events.SourceSkill, events.TaskVerificationPayload{
-			SkillName: wr.skill.Name,
+			SkillName: wr.skillName,
 			StepID:    step.ID,
 			Pass:      result.Pass,
 			Score:     result.Score,
@@ -283,7 +297,7 @@ func (wr *WorkflowRunner) verifyAndRetry(ctx context.Context, step *Step, output
 func (wr *WorkflowRunner) retryStep(ctx context.Context, step *Step, previousOutput, feedback string, vars map[string]string, prevResults map[string]string) (string, error) {
 	modelName := step.Model
 	if modelName == "" {
-		modelName = wr.skill.Model
+		modelName = wr.model
 	}
 
 	chatModel, err := wr.cfg.ModelRegistry.Get(ctx, modelName)
@@ -333,7 +347,7 @@ func (wr *WorkflowRunner) resolveTools(toolNames []string) []tool.InvokableTool 
 
 func (wr *WorkflowRunner) emitStepCompleted(sessionID, stepID, stepTitle, output string, err error, start time.Time) {
 	payload := events.SkillStepCompletedPayload{
-		SkillName: wr.skill.Name,
+		SkillName: wr.skillName,
 		StepID:    stepID,
 		StepTitle: stepTitle,
 		Output:    output,

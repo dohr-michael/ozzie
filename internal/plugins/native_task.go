@@ -20,21 +20,19 @@ import (
 
 // SubmitTaskTool submits a new async task to the actor pool.
 type SubmitTaskTool struct {
-	pool            tasks.TaskSubmitter
-	autonomyDefault string           // "disabled" | "supervised" | "autonomous"
-	registry        *ToolRegistry    // for looking up tool specs (dangerous flag)
-	perms           *ToolPermissions // for checking/setting approvals
-	bus             *events.Bus      // for emitting approval prompts
+	pool     tasks.TaskSubmitter
+	registry *ToolRegistry    // for looking up tool specs (dangerous flag)
+	perms    *ToolPermissions // for checking/setting approvals
+	bus      *events.Bus      // for emitting approval prompts
 }
 
 // NewSubmitTaskTool creates a new submit_task tool.
-func NewSubmitTaskTool(pool tasks.TaskSubmitter, autonomyDefault string, registry *ToolRegistry, perms *ToolPermissions, bus *events.Bus) *SubmitTaskTool {
+func NewSubmitTaskTool(pool tasks.TaskSubmitter, registry *ToolRegistry, perms *ToolPermissions, bus *events.Bus) *SubmitTaskTool {
 	return &SubmitTaskTool{
-		pool:            pool,
-		autonomyDefault: autonomyDefault,
-		registry:        registry,
-		perms:           perms,
-		bus:             bus,
+		pool:     pool,
+		registry: registry,
+		perms:    perms,
+		bus:      bus,
 	}
 }
 
@@ -82,11 +80,6 @@ func SubmitTaskManifest() *PluginManifest {
 						Type:        "array",
 						Description: "Task IDs that must complete before this task starts",
 					},
-					"autonomy_level": {
-						Type:        "string",
-						Description: "Autonomy level: 'disabled' (standard single-step), 'supervised' (explore → plan → validate → execute), 'autonomous' (explore → plan → execute without validation). Defaults to system setting.",
-						Enum:        []string{"disabled", "supervised", "autonomous"},
-					},
 					"skill": {
 						Type:        "string",
 						Description: "Name of a skill to execute directly (bypasses agent reasoning)",
@@ -113,7 +106,6 @@ type submitTaskInput struct {
 	Env                  map[string]string `json:"env,omitempty"`
 	Priority             string            `json:"priority"`
 	DependsOn            []string          `json:"depends_on"`
-	AutonomyLevel        string            `json:"autonomy_level,omitempty"` // empty = use system default
 	Skill                string            `json:"skill,omitempty"`
 	ActorTags            []string          `json:"actor_tags,omitempty"`
 	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
@@ -144,20 +136,10 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 
 	sessionID := events.SessionIDFromContext(ctx)
 
-	// Resolve autonomy level: explicit per-task, or system default
-	autonomy := t.autonomyDefault
-	if input.AutonomyLevel != "" {
-		autonomy = input.AutonomyLevel
-	}
-
 	tools := input.Tools
 	// Default tools: if none specified and not a skill task, provide base action tools
 	if len(tools) == 0 && input.Skill == "" {
 		tools = []string{"run_command", "git", "query_memories"}
-	}
-	// Supervised mode: ensure request_validation is in the tool set
-	if autonomy == tasks.AutonomySupervised && !containsStr(tools, "request_validation") {
-		tools = append(tools, "request_validation")
 	}
 
 	// Pre-approve dangerous tools before submitting
@@ -185,7 +167,6 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 			WorkDir:              workDir,
 			Env:                  input.Env,
 			Skill:                input.Skill,
-			AutonomyLevel:        autonomy,
 			RequiredTags:         input.ActorTags,
 			RequiredCapabilities: input.RequiredCapabilities,
 		},
@@ -462,11 +443,3 @@ func (t *CancelTaskTool) InvokableRun(_ context.Context, argumentsInJSON string,
 
 var _ tool.InvokableTool = (*CancelTaskTool)(nil)
 
-func containsStr(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}

@@ -180,26 +180,3 @@ func (fs *FileStore) ReadOutput(taskID string) (string, error) {
 	return string(data), nil
 }
 
-// AppendMailbox appends a mailbox message to the JSONL file.
-func (fs *FileStore) AppendMailbox(taskID string, msg MailboxMessage) error {
-	fs.ds.Lock()
-	defer fs.ds.Unlock()
-
-	dir, err := fs.ds.Resolve(taskID)
-	if err != nil {
-		return err
-	}
-	return fs.ds.AppendJSONL(dir, "mailbox.jsonl", msg)
-}
-
-// LoadMailbox reads all mailbox messages from the JSONL file.
-func (fs *FileStore) LoadMailbox(taskID string) ([]MailboxMessage, error) {
-	fs.ds.RLock()
-	defer fs.ds.RUnlock()
-
-	dir, err := fs.ds.Resolve(taskID)
-	if err != nil {
-		return nil, err
-	}
-	return dirstore.LoadJSONL[MailboxMessage](fs.ds, dir, "mailbox.jsonl")
-}

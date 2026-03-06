@@ -7,7 +7,6 @@ import "context"
 type TaskSubmitter interface {
 	Submit(t *Task) error
 	Cancel(taskID string, reason string) error
-	ResumeTask(taskID string) error
 	Store() Store
 }
 

@@ -369,32 +369,6 @@ func GetTaskCancelledPayload(e Event) (TaskCancelledPayload, bool) {
 	return ExtractPayload[TaskCancelledPayload](e)
 }
 
-type TaskSuspendedPayload struct {
-	TaskID       string `json:"task_id"`
-	Title        string `json:"title"`
-	Reason       string `json:"reason,omitempty"`
-	SuspendCount int    `json:"suspend_count"`
-	PlanContent  string `json:"plan_content,omitempty"`
-	Token        string `json:"token,omitempty"`
-}
-
-func (TaskSuspendedPayload) EventType() EventType { return EventTaskSuspended }
-
-type TaskResumedPayload struct {
-	TaskID string `json:"task_id"`
-	Title  string `json:"title"`
-}
-
-func (TaskResumedPayload) EventType() EventType { return EventTaskResumed }
-
-func GetTaskSuspendedPayload(e Event) (TaskSuspendedPayload, bool) {
-	return ExtractPayload[TaskSuspendedPayload](e)
-}
-
-func GetTaskResumedPayload(e Event) (TaskResumedPayload, bool) {
-	return ExtractPayload[TaskResumedPayload](e)
-}
-
 // =============================================================================
 // SCHEDULER EVENTS
 // =============================================================================

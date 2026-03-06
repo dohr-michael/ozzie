@@ -30,7 +30,6 @@ type TaskHandler interface {
 	Check(taskID string) (any, error)
 	Cancel(taskID string, reason string) error
 	List(sessionID string) (any, error)
-	ReplyTask(taskID string, feedback string, status string, sessionID string) error
 }
 
 // Hub manages WebSocket clients and bridges them to the event bus.
@@ -409,9 +408,6 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 	case MethodListTasks:
 		c.handleListTasks(ctx, frame)
 
-	case MethodReplyTask:
-		c.handleReplyTask(ctx, frame)
-
 	case MethodAcceptAllTools:
 		c.hub.ensureSession(c)
 		if c.hub.perms != nil && c.sessionID != "" {
@@ -511,37 +507,6 @@ func (c *Client) handleListTasks(ctx context.Context, frame Frame) {
 	}
 
 	c.sendOK(ctx, frame.ID, result)
-}
-
-func (c *Client) handleReplyTask(ctx context.Context, frame Frame) {
-	if c.hub.tasks == nil {
-		c.sendError(ctx, frame.ID, "task system not available")
-		return
-	}
-
-	var params struct {
-		TaskID   string `json:"task_id"`
-		Feedback string `json:"feedback"`
-		Status   string `json:"status"` // "approved" | "revise"
-	}
-	if err := json.Unmarshal(frame.Params, &params); err != nil {
-		c.sendError(ctx, frame.ID, "invalid params")
-		return
-	}
-
-	// Default to "approved" for backwards compatibility
-	if params.Status == "" {
-		params.Status = "approved"
-	}
-
-	c.hub.ensureSession(c)
-
-	if err := c.hub.tasks.ReplyTask(params.TaskID, params.Feedback, params.Status, c.sessionID); err != nil {
-		c.sendError(ctx, frame.ID, err.Error())
-		return
-	}
-
-	c.sendOK(ctx, frame.ID, map[string]string{"task_id": params.TaskID, "status": "replied"})
 }
 
 // writePump writes queued messages to the WS connection.

@@ -6,22 +6,21 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // Registry manages loaded skill definitions.
 type Registry struct {
-	skills map[string]*Skill
+	skills map[string]*SkillMD
 }
 
 // NewRegistry creates a new skill registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		skills: make(map[string]*Skill),
+		skills: make(map[string]*SkillMD),
 	}
 }
 
-// LoadDir scans a directory for *.jsonc skill files and loads them.
+// LoadDir scans a directory for subdirectories containing SKILL.md files.
 func (r *Registry) LoadDir(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -33,17 +32,19 @@ func (r *Registry) LoadDir(dir string) error {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(entry.Name(), ".jsonc") {
+		if !entry.IsDir() {
 			continue
 		}
 
-		path := filepath.Join(dir, entry.Name())
-		skill, err := LoadSkill(path)
+		subDir := filepath.Join(dir, entry.Name())
+		skillPath := filepath.Join(subDir, "SKILL.md")
+		if _, err := os.Stat(skillPath); err != nil {
+			continue // no SKILL.md in this subdirectory
+		}
+
+		skill, err := LoadSkillDir(subDir)
 		if err != nil {
-			slog.Warn("failed to load skill", "path", path, "error", err)
+			slog.Warn("failed to load skill", "dir", subDir, "error", err)
 			continue
 		}
 
@@ -57,7 +58,7 @@ func (r *Registry) LoadDir(dir string) error {
 }
 
 // Register adds a skill to the registry.
-func (r *Registry) Register(skill *Skill) error {
+func (r *Registry) Register(skill *SkillMD) error {
 	if _, exists := r.skills[skill.Name]; exists {
 		return fmt.Errorf("skill %q already registered", skill.Name)
 	}
@@ -66,13 +67,13 @@ func (r *Registry) Register(skill *Skill) error {
 }
 
 // Get returns the skill with the given name, or nil.
-func (r *Registry) Get(name string) *Skill {
+func (r *Registry) Get(name string) *SkillMD {
 	return r.skills[name]
 }
 
 // All returns all registered skills sorted by name.
-func (r *Registry) All() []*Skill {
-	result := make([]*Skill, 0, len(r.skills))
+func (r *Registry) All() []*SkillMD {
+	result := make([]*SkillMD, 0, len(r.skills))
 	for _, s := range r.skills {
 		result = append(result, s)
 	}
@@ -90,4 +91,22 @@ func (r *Registry) Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Catalog returns a map of skill name → description for progressive disclosure.
+func (r *Registry) Catalog() map[string]string {
+	result := make(map[string]string, len(r.skills))
+	for name, s := range r.skills {
+		result[name] = s.Description
+	}
+	return result
+}
+
+// SkillBody implements the SkillCatalog interface for plugins.
+func (r *Registry) SkillBody(name string) (body string, allowedTools []string, hasWorkflow bool, dir string, err error) {
+	s := r.Get(name)
+	if s == nil {
+		return "", nil, false, "", fmt.Errorf("skill not found: %s", name)
+	}
+	return s.Body, s.AllowedTools, s.HasWorkflow(), s.Dir, nil
 }

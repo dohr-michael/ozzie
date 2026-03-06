@@ -213,6 +213,16 @@ type ProviderConfig struct {
 	Tier          string         `json:"tier,omitempty"`          // "small" | "medium" | "large" (auto-detected if empty)
 	Timeout       Duration       `json:"timeout,omitempty"`
 	Options       map[string]any `json:"options,omitempty"`
+	Retry         *RetryConfig   `json:"retry,omitempty"`    // retry + circuit breaker config
+	Fallback      string         `json:"fallback,omitempty"` // name of fallback provider
+}
+
+// RetryConfig configures retry behavior with exponential backoff.
+type RetryConfig struct {
+	MaxAttempts  int     `json:"max_attempts,omitempty"`  // total attempts including first (default: 3)
+	InitialDelay Duration `json:"initial_delay,omitempty"` // base delay before first retry (default: 1s)
+	MaxDelay     Duration `json:"max_delay,omitempty"`     // delay cap (default: 30s)
+	Multiplier   float64 `json:"multiplier,omitempty"`    // backoff multiplier (default: 2.0)
 }
 
 // AuthConfig configures API key resolution.
@@ -227,17 +237,10 @@ type EventsConfig struct {
 	LogLevel   string `json:"log_level"` // "debug" | "info" | "warn" | "error" (default: "info")
 }
 
-// CoordinatorConfig configures the coordinator pattern defaults.
-type CoordinatorConfig struct {
-	DefaultLevel        string `json:"default_level"`         // "disabled" | "supervised" | "autonomous" (default: "disabled")
-	MaxValidationRounds int    `json:"max_validation_rounds"` // max plan-revise cycles before failure (default: 3)
-}
-
 // AgentConfig holds agent settings.
 type AgentConfig struct {
-	SystemPrompt      string            `json:"system_prompt,omitempty"`
-	PreferredLanguage string            `json:"preferred_language,omitempty"` // e.g. "en", "fr"
-	Coordinator       CoordinatorConfig `json:"coordinator"`
+	SystemPrompt      string `json:"system_prompt,omitempty"`
+	PreferredLanguage string `json:"preferred_language,omitempty"` // e.g. "en", "fr"
 }
 
 // Duration wraps time.Duration for JSON unmarshaling.

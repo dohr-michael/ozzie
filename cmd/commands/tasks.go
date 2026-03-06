@@ -131,18 +131,6 @@ func runTasksShow(_ context.Context, cmd *cli.Command) error {
 		fmt.Printf("\nDescription:\n%s\n", t.Description)
 	}
 
-	// Plan steps
-	if t.Plan != nil && len(t.Plan.Steps) > 0 {
-		fmt.Println("\nPlan:")
-		for i, step := range t.Plan.Steps {
-			status := string(step.Status)
-			if status == "" {
-				status = "pending"
-			}
-			fmt.Printf("  %d. [%s] %s\n", i+1, status, step.Title)
-		}
-	}
-
 	// Checkpoints
 	cps, _ := store.LoadCheckpoints(t.ID)
 	if len(cps) > 0 {

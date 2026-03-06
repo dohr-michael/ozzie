@@ -1,9 +1,13 @@
 package models
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrCircuitOpen is returned when the circuit breaker is open for a provider.
+var ErrCircuitOpen = errors.New("circuit breaker open")
 
 // HandleError converts common SDK errors to user-friendly errors.
 func HandleError(err error) error {
@@ -34,6 +38,56 @@ func HandleError(err error) error {
 	}
 
 	return err
+}
+
+// IsRetryable returns true if the error is transient and the operation should be retried.
+// Non-retryable: auth errors, model not found, context too long, circuit breaker open.
+// Retryable: timeout, connection, EOF, rate limit, model unavailable.
+func IsRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, ErrCircuitOpen) {
+		return false
+	}
+
+	var unavail *ErrModelUnavailable
+	if errors.As(err, &unavail) {
+		return true
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Non-retryable errors
+	if containsAny(errStr, "401", "403", "unauthorized", "invalid api key", "forbidden") {
+		return false
+	}
+	if containsAny(errStr, "model not found", "404", "not found") {
+		return false
+	}
+	if containsAny(errStr, "context length", "too many tokens", "token limit", "context too long") {
+		return false
+	}
+
+	// Retryable errors
+	if containsAny(errStr, "timeout", "deadline exceeded", "connection", "eof", "dial",
+		"refused", "reset", "429", "rate limit", "too many requests", "quota",
+		"502", "503", "504", "overloaded") {
+		return true
+	}
+
+	return false
+}
+
+// IsRateLimit returns true if the error indicates a rate limit (429).
+// Rate-limited requests use a longer minimum backoff.
+func IsRateLimit(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return containsAny(errStr, "429", "rate limit", "too many requests", "quota")
 }
 
 // ErrModelUnavailable indicates the model backend returned a non-JSON or error response.

@@ -45,9 +45,7 @@ type ActorPool struct {
 	models           *models.Registry
 	toolRegistry     agent.ToolLookup
 
-	autonomyDefault     string
-	maxValidationRounds int
-	skillRunner         tasks.SkillExecutor
+	skillRunner     tasks.SkillExecutor
 	taskMiddlewares     []adk.AgentMiddleware
 	retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
 	perms               tasks.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
@@ -65,8 +63,6 @@ type ActorPoolConfig struct {
 	Bus                 *events.Bus
 	Models              *models.Registry
 	ToolRegistry        agent.ToolLookup
-	AutonomyDefault     string                      // "disabled" | "supervised" | "autonomous"
-	MaxValidationRounds int                         // max plan-revise cycles (0 = default 3)
 	SkillRunner         tasks.SkillExecutor         // optional skill executor for direct skill tasks
 	TaskMiddlewares     []adk.AgentMiddleware       // middlewares for sub-agents (filesystem, reduction)
 	Retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
@@ -102,8 +98,6 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 		bus:                 cfg.Bus,
 		models:              cfg.Models,
 		toolRegistry:        cfg.ToolRegistry,
-		autonomyDefault:     cfg.AutonomyDefault,
-		maxValidationRounds: cfg.MaxValidationRounds,
 		skillRunner:         cfg.SkillRunner,
 		taskMiddlewares:     cfg.TaskMiddlewares,
 		retriever:           cfg.Retriever,
@@ -273,39 +267,12 @@ func (p *ActorPool) scheduleLoop() {
 	}
 }
 
-// schedule assigns pending/suspended tasks to idle actors.
+// schedule assigns pending tasks to idle actors.
 func (p *ActorPool) schedule() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// 1. Resume suspended tasks first (skip tasks waiting for user reply)
-	suspended, _ := p.store.List(tasks.ListFilter{Status: tasks.TaskSuspended})
-	for _, t := range suspended {
-		if t.WaitingForReply {
-			continue
-		}
-
-		actor := p.findIdleActor("", t.Tags, t.Config.RequiredCapabilities)
-		if actor == nil {
-			continue
-		}
-		actor.Status = ActorBusy
-		actor.CurrentTask = t.ID
-
-		// Reset suspended state
-		t.Status = tasks.TaskPending
-		t.SuspendedAt = nil
-		_ = p.store.Update(t)
-
-		p.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskResumedPayload{
-			TaskID: t.ID,
-			Title:  t.Title,
-		}, t.SessionID))
-
-		p.startTask(t, actor)
-	}
-
-	// 2. Assign pending tasks (oldest first, dependencies resolved)
+	// Assign pending tasks (oldest first, dependencies resolved)
 	pending, _ := p.store.List(tasks.ListFilter{Status: tasks.TaskPending})
 	// List returns sorted by UpdatedAt DESC, iterate in reverse for oldest first
 	for i := len(pending) - 1; i >= 0; i-- {
@@ -495,18 +462,17 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 	tier := p.models.ProviderTier(actor.ProviderName)
 
 	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
-		Store:               p.store,
-		Bus:                 p.bus,
-		ChatModel:           chatModel,
-		ToolRegistry:        p.toolRegistry,
-		SkillRunner:         p.skillRunner,
-		PreemptionCheck:     preemptionCheck,
-		MaxValidationRounds: p.maxValidationRounds,
-		Middlewares:         p.taskMiddlewares,
-		Retriever:           p.retriever,
-		Tier:                tier,
-		PromptPrefix:        actor.PromptPrefix,
-		Perms:               p.perms,
+		Store:           p.store,
+		Bus:             p.bus,
+		ChatModel:       chatModel,
+		ToolRegistry:    p.toolRegistry,
+		SkillRunner:     p.skillRunner,
+		PreemptionCheck: preemptionCheck,
+		Middlewares:     p.taskMiddlewares,
+		Retriever:       p.retriever,
+		Tier:            tier,
+		PromptPrefix:    actor.PromptPrefix,
+		Perms:           p.perms,
 	})
 
 	if err := runner.Run(ctx); err != nil {
@@ -569,33 +535,6 @@ func (p *ActorPool) dependenciesResolved(t *tasks.Task) bool {
 	return true
 }
 
-// ResumeTask clears WaitingForReply, resets to pending, and wakes the scheduler.
-func (p *ActorPool) ResumeTask(taskID string) error {
-	task, err := p.store.Get(taskID)
-	if err != nil {
-		return fmt.Errorf("resume task: %w", err)
-	}
-
-	if task.Status != tasks.TaskSuspended {
-		return fmt.Errorf("resume task: task %s is not suspended (status: %s)", taskID, task.Status)
-	}
-
-	task.WaitingForReply = false
-	task.Status = tasks.TaskPending
-	task.SuspendedAt = nil
-	if err := p.store.Update(task); err != nil {
-		return fmt.Errorf("resume task update: %w", err)
-	}
-
-	p.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskResumedPayload{
-		TaskID: task.ID,
-		Title:  task.Title,
-	}, task.SessionID))
-
-	p.wakeScheduler()
-	return nil
-}
-
 // ShouldInline returns true when the pool has exactly one actor, meaning async
 // submission would deadlock (the single actor is occupied by the caller).
 func (p *ActorPool) ShouldInline() bool {
@@ -603,9 +542,8 @@ func (p *ActorPool) ShouldInline() bool {
 }
 
 // ExecuteInline runs a task synchronously in the caller's goroutine.
-// It applies the same defaults as Submit, forces AutonomyLevel to "disabled"
-// (supervised/autonomous require resume cycles impossible inline), creates the
-// task in the store, and delegates to a TaskRunner.
+// It applies the same defaults as Submit, creates the task in the store,
+// and delegates to a TaskRunner.
 func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, error) {
 	// Apply defaults (same as Submit)
 	if t.ID == "" {
@@ -620,9 +558,6 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 	if t.MaxRetries == 0 {
 		t.MaxRetries = defaultMaxRetries
 	}
-
-	// Force disabled autonomy — supervised/autonomous need resume cycles
-	t.Config.AutonomyLevel = tasks.AutonomyDisabled
 
 	// Persist to store (needed for dependency reads)
 	if err := p.store.Create(t); err != nil {
@@ -652,18 +587,17 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 	tier := p.models.ProviderTier(actor.ProviderName)
 
 	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
-		Store:               p.store,
-		Bus:                 p.bus,
-		ChatModel:           chatModel,
-		ToolRegistry:        p.toolRegistry,
-		SkillRunner:         p.skillRunner,
-		PreemptionCheck:     func() bool { return false },
-		MaxValidationRounds: p.maxValidationRounds,
-		Middlewares:         p.taskMiddlewares,
-		Retriever:           p.retriever,
-		Tier:                tier,
-		PromptPrefix:        actor.PromptPrefix,
-		Perms:               p.perms,
+		Store:           p.store,
+		Bus:             p.bus,
+		ChatModel:       chatModel,
+		ToolRegistry:    p.toolRegistry,
+		SkillRunner:     p.skillRunner,
+		PreemptionCheck: func() bool { return false },
+		Middlewares:     p.taskMiddlewares,
+		Retriever:       p.retriever,
+		Tier:            tier,
+		PromptPrefix:    actor.PromptPrefix,
+		Perms:           p.perms,
 	})
 
 	if err := runner.Run(ctx); err != nil {

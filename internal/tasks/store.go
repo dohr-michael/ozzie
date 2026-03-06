@@ -18,6 +18,4 @@ type Store interface {
 	LoadCheckpoints(taskID string) ([]Checkpoint, error)
 	WriteOutput(taskID string, content string) error
 	ReadOutput(taskID string) (string, error)
-	AppendMailbox(taskID string, msg MailboxMessage) error
-	LoadMailbox(taskID string) ([]MailboxMessage, error)
 }

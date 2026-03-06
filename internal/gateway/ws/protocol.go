@@ -23,7 +23,6 @@ const (
 	MethodCancelTask     Method = "cancel_task"
 	MethodListTasks      Method = "list_tasks"
 	MethodAcceptAllTools Method = "accept_all_tools"
-	MethodReplyTask     Method = "reply_task"
 )
 
 // Frame is the WebSocket protocol envelope.

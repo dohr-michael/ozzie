@@ -75,7 +75,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		instruction.WriteString(fmt.Sprintf("## Language\n\nThe user prefers to be answered in %s. Always respond in %s unless explicitly asked otherwise.\n\n", langName, langName))
 	}
 
-	// Layer 3b: Available skills (limited to 5 for TierSmall)
+	// Layer 3b: Available skills — progressive disclosure
 	if len(cfg.SkillDescriptions) > 0 {
 		names := make([]string, 0, len(cfg.SkillDescriptions))
 		for name := range cfg.SkillDescriptions {
@@ -89,7 +89,8 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		}
 
 		instruction.WriteString("## Available Skills\n\n")
-		instruction.WriteString("You can delegate complex tasks to these specialized skills:\n")
+		instruction.WriteString("Use `activate_skill(name)` to load a skill's full instructions when relevant.\n")
+		instruction.WriteString("Skills with a workflow can be executed via `run_workflow(skill_name, vars)`.\n\n")
 		for _, name := range names[:maxSkills] {
 			instruction.WriteString(fmt.Sprintf("- **%s**: %s\n", name, cfg.SkillDescriptions[name]))
 		}

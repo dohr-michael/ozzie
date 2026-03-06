@@ -119,8 +119,6 @@ func (m *mockStore) Delete(string) error                             { return ni
 func (m *mockStore) AppendCheckpoint(string, Checkpoint) error       { return nil }
 func (m *mockStore) LoadCheckpoints(string) ([]Checkpoint, error)    { return nil, nil }
 func (m *mockStore) WriteOutput(string, string) error                { return nil }
-func (m *mockStore) AppendMailbox(string, MailboxMessage) error      { return nil }
-func (m *mockStore) LoadMailbox(string) ([]MailboxMessage, error)    { return nil, nil }
 
 func TestBuildDependencyContext_NoDeps(t *testing.T) {
 	got := buildDependencyContext(&mockStore{}, nil)
@@ -262,105 +260,6 @@ func TestBuildDependencyContext_MissingDep(t *testing.T) {
 	got := buildDependencyContext(store, []string{"task_nonexistent"})
 	if got != "" {
 		t.Errorf("expected empty for missing dep, got %q", got)
-	}
-}
-
-// --- lastFeedbackStatus tests ---
-
-func TestLastFeedbackStatus_Empty(t *testing.T) {
-	got := lastFeedbackStatus(nil)
-	if got != "" {
-		t.Errorf("expected empty, got %q", got)
-	}
-}
-
-func TestLastFeedbackStatus_Approved(t *testing.T) {
-	mailbox := []MailboxMessage{
-		{Type: "request", Token: "t1"},
-		{Type: "response", Token: "t1", Status: "approved"},
-	}
-	got := lastFeedbackStatus(mailbox)
-	if got != "approved" {
-		t.Errorf("expected approved, got %q", got)
-	}
-}
-
-func TestLastFeedbackStatus_Revise(t *testing.T) {
-	mailbox := []MailboxMessage{
-		{Type: "request", Token: "t1"},
-		{Type: "response", Token: "t1", Status: "approved"},
-		{Type: "request", Token: "t2"},
-		{Type: "response", Token: "t2", Status: "revise"},
-	}
-	got := lastFeedbackStatus(mailbox)
-	if got != "revise" {
-		t.Errorf("expected revise, got %q", got)
-	}
-}
-
-func TestLastFeedbackStatus_OnlyRequests(t *testing.T) {
-	mailbox := []MailboxMessage{
-		{Type: "request", Token: "t1"},
-		{Type: "exploration"},
-	}
-	got := lastFeedbackStatus(mailbox)
-	if got != "" {
-		t.Errorf("expected empty, got %q", got)
-	}
-}
-
-// --- TaskConfig.IsCoordinator tests ---
-
-func TestTaskConfig_IsCoordinator(t *testing.T) {
-	tests := []struct {
-		level string
-		want  bool
-	}{
-		{"disabled", false},
-		{"supervised", true},
-		{"autonomous", true},
-		{"", false},
-	}
-	for _, tt := range tests {
-		cfg := TaskConfig{AutonomyLevel: tt.level}
-		if got := cfg.IsCoordinator(); got != tt.want {
-			t.Errorf("IsCoordinator(%q) = %v, want %v", tt.level, got, tt.want)
-		}
-	}
-}
-
-// --- TaskConfig backward compat ---
-
-func TestTaskConfig_UnmarshalJSON_BackwardCompat(t *testing.T) {
-	data := []byte(`{"coordinator": true, "tools": ["cmd"]}`)
-	var cfg TaskConfig
-	if err := cfg.UnmarshalJSON(data); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.AutonomyLevel != AutonomySupervised {
-		t.Errorf("expected supervised, got %q", cfg.AutonomyLevel)
-	}
-}
-
-func TestTaskConfig_UnmarshalJSON_NewField(t *testing.T) {
-	data := []byte(`{"autonomy_level": "autonomous"}`)
-	var cfg TaskConfig
-	if err := cfg.UnmarshalJSON(data); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.AutonomyLevel != AutonomyAutonomous {
-		t.Errorf("expected autonomous, got %q", cfg.AutonomyLevel)
-	}
-}
-
-func TestTaskConfig_UnmarshalJSON_CoordinatorFalse(t *testing.T) {
-	data := []byte(`{"coordinator": false}`)
-	var cfg TaskConfig
-	if err := cfg.UnmarshalJSON(data); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.AutonomyLevel != "" {
-		t.Errorf("expected empty, got %q", cfg.AutonomyLevel)
 	}
 }
 

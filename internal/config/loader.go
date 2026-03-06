@@ -92,12 +92,6 @@ func applyDefaults(cfg *Config) {
 	if len(cfg.Skills.Dirs) == 0 {
 		cfg.Skills.Dirs = []string{filepath.Join(OzziePath(), "skills")}
 	}
-	if cfg.Agent.Coordinator.DefaultLevel == "" {
-		cfg.Agent.Coordinator.DefaultLevel = "disabled"
-	}
-	if cfg.Agent.Coordinator.MaxValidationRounds == 0 {
-		cfg.Agent.Coordinator.MaxValidationRounds = 3
-	}
 	// Runtime environment
 	if cfg.Runtime.Environment == "" {
 		if v := os.Getenv("OZZIE_RUNTIME"); v != "" {

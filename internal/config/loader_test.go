@@ -87,26 +87,6 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadDefaults_CoordinatorDefaultLevel(t *testing.T) {
-	content := `{}`
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.jsonc")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg.Agent.Coordinator.DefaultLevel != "disabled" {
-		t.Errorf("expected default_level 'disabled', got %q", cfg.Agent.Coordinator.DefaultLevel)
-	}
-	if cfg.Agent.Coordinator.MaxValidationRounds != 3 {
-		t.Errorf("expected max_validation_rounds 3, got %d", cfg.Agent.Coordinator.MaxValidationRounds)
-	}
-}
 
 func TestLoadDefaults_LogLevel(t *testing.T) {
 	content := `{}`

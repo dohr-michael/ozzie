@@ -35,17 +35,6 @@ type CapacityPool interface {
 	Release(slot CapacitySlot)
 }
 
-// TaskStore provides mailbox access for the EventRunner.
-type TaskStore interface {
-	LoadMailbox(taskID string) ([]TaskMailboxMessage, error)
-}
-
-// TaskMailboxMessage mirrors tasks.MailboxMessage to avoid import cycle.
-type TaskMailboxMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-}
-
 // EventRunner wraps an AgentFactory and provides event-driven execution
 // with dynamic tool selection.
 type EventRunner struct {
@@ -54,7 +43,6 @@ type EventRunner struct {
 	registry   ToolLookup
 	bus        *events.Bus
 	store      sessions.Store
-	taskStore  TaskStore
 	compressor *Compressor
 	layered    *layered.Manager
 
@@ -77,7 +65,6 @@ type EventRunnerConfig struct {
 	Registry        ToolLookup
 	EventBus        *events.Bus
 	Store           sessions.Store
-	TaskStore       TaskStore        // task store for mailbox access (optional)
 	Pool            CapacityPool     // actor pool for capacity management (optional)
 	DefaultProvider string           // default provider name for AcquireInteractive
 	ContextWindow   int              // total context window in tokens (for compression)
@@ -101,7 +88,6 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		registry:        cfg.Registry,
 		bus:             cfg.EventBus,
 		store:           cfg.Store,
-		taskStore:       cfg.TaskStore,
 		compressor:      NewCompressor(compCfg),
 		layered:         cfg.Layered,
 		pool:            cfg.Pool,
@@ -114,7 +100,6 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
 		events.EventUserMessage,
 		events.EventTaskCompleted,
-		events.EventTaskSuspended,
 	)
 
 	return er
@@ -129,10 +114,6 @@ func (er *EventRunner) handleEvent(event events.Event) {
 	case events.EventTaskCompleted:
 		if payload, ok := events.GetTaskCompletedPayload(event); ok && event.SessionID != "" {
 			go er.handleTaskCompleted(event.SessionID, payload)
-		}
-	case events.EventTaskSuspended:
-		if payload, ok := events.GetTaskSuspendedPayload(event); ok && event.SessionID != "" {
-			go er.handleTaskSuspended(event.SessionID, payload)
 		}
 	}
 }
@@ -524,27 +505,6 @@ func (er *EventRunner) handleTaskCompleted(sessionID string, payload events.Task
 	}
 	if err := er.store.AppendMessage(sessionID, msg); err != nil {
 		slog.Error("persist task completed notification", "error", err, "session_id", sessionID)
-	}
-}
-
-// handleTaskSuspended injects a validation request into the session so the user
-// can see the plan and reply.
-func (er *EventRunner) handleTaskSuspended(sessionID string, payload events.TaskSuspendedPayload) {
-	// Only relay validation requests (tasks waiting for user reply)
-	if payload.PlanContent == "" {
-		return
-	}
-
-	summary := fmt.Sprintf("[Validation needed — %s (task %s)]\n\n%s\n\nReply with your feedback to resume this task.",
-		payload.Title, payload.TaskID, payload.PlanContent)
-
-	msg := sessions.Message{
-		Role:    "system",
-		Content: summary,
-		Ts:      time.Now(),
-	}
-	if err := er.store.AppendMessage(sessionID, msg); err != nil {
-		slog.Error("persist task suspended notification", "error", err, "session_id", sessionID)
 	}
 }
 

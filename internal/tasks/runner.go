@@ -12,10 +12,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/adk/prebuilt/planexecute"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
@@ -26,9 +24,6 @@ import (
 
 // ErrPreempted is returned when a task is preempted by a higher-priority request.
 var ErrPreempted = errors.New("task preempted")
-
-// ErrSelfSuspend is returned when a task requests self-suspension (validation).
-var ErrSelfSuspend = errors.New("task self-suspended for validation")
 
 // ToolPermissionsSeeder can seed per-session tool permissions.
 type ToolPermissionsSeeder interface {
@@ -41,43 +36,34 @@ type TaskRunner struct {
 	store Store
 	bus   *events.Bus
 
-	chatModel           model.ToolCallingChatModel
-	toolRegistry        agent.ToolLookup
-	skillRunner         SkillExecutor
-	preemptionCheck     func() bool
-	maxValidationRounds int
-	middlewares         []adk.AgentMiddleware
-	retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
-	tier                agent.ModelTier       // model tier for prompt adaptation
-	promptPrefix        string                // overlay-specific prompt prefix
-	perms               ToolPermissionsSeeder // for seeding pre-approved tools (optional)
-
-	selfSuspendCh chan events.ValidationRequest // side channel for self-suspension
+	chatModel       model.ToolCallingChatModel
+	toolRegistry    agent.ToolLookup
+	skillRunner     SkillExecutor
+	preemptionCheck func() bool
+	middlewares     []adk.AgentMiddleware
+	retriever       agent.MemoryRetriever // pre-task memory retrieval (optional)
+	tier            agent.ModelTier       // model tier for prompt adaptation
+	promptPrefix    string                // overlay-specific prompt prefix
+	perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 }
 
 // TaskRunnerConfig holds dependencies for creating a TaskRunner.
 type TaskRunnerConfig struct {
-	Store               Store
-	Bus                 *events.Bus
-	ChatModel           model.ToolCallingChatModel
-	ToolRegistry        agent.ToolLookup
-	SkillRunner         SkillExecutor
-	PreemptionCheck     func() bool
-	MaxValidationRounds int                   // max plan-revise cycles (0 = default 3)
-	Middlewares         []adk.AgentMiddleware // middlewares for sub-agents (e.g. filesystem, reduction)
-	Retriever           agent.MemoryRetriever // pre-task memory retrieval (optional)
-	Tier                agent.ModelTier       // model tier for prompt adaptation
-	PromptPrefix        string                // overlay-specific prompt prefix (optional)
-	Perms               ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	Store           Store
+	Bus             *events.Bus
+	ChatModel       model.ToolCallingChatModel
+	ToolRegistry    agent.ToolLookup
+	SkillRunner     SkillExecutor
+	PreemptionCheck func() bool
+	Middlewares     []adk.AgentMiddleware // middlewares for sub-agents (e.g. filesystem, reduction)
+	Retriever       agent.MemoryRetriever // pre-task memory retrieval (optional)
+	Tier            agent.ModelTier       // model tier for prompt adaptation
+	PromptPrefix    string                // overlay-specific prompt prefix (optional)
+	Perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 }
 
 // NewTaskRunner creates a runner for a specific task.
 func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
-	maxRounds := cfg.MaxValidationRounds
-	if maxRounds == 0 {
-		maxRounds = 3
-	}
-
 	// Prepend tool recovery middleware so sub-agents can self-correct on tool errors
 	recoveryMw := adk.AgentMiddleware{
 		WrapToolCall: agent.NewToolRecoveryMiddleware(agent.ToolRecoveryConfig{}),
@@ -87,20 +73,18 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 	mws = append(mws, cfg.Middlewares...)
 
 	return &TaskRunner{
-		task:                task,
-		store:               cfg.Store,
-		bus:                 cfg.Bus,
-		chatModel:           cfg.ChatModel,
-		toolRegistry:        cfg.ToolRegistry,
-		skillRunner:         cfg.SkillRunner,
-		preemptionCheck:     cfg.PreemptionCheck,
-		maxValidationRounds: maxRounds,
-		middlewares:         mws,
-		retriever:           cfg.Retriever,
-		tier:                cfg.Tier,
-		promptPrefix:        cfg.PromptPrefix,
-		perms:               cfg.Perms,
-		selfSuspendCh:       make(chan events.ValidationRequest, 1),
+		task:            task,
+		store:           cfg.Store,
+		bus:             cfg.Bus,
+		chatModel:       cfg.ChatModel,
+		toolRegistry:    cfg.ToolRegistry,
+		skillRunner:     cfg.SkillRunner,
+		preemptionCheck: cfg.PreemptionCheck,
+		middlewares:     mws,
+		retriever:       cfg.Retriever,
+		tier:            cfg.Tier,
+		promptPrefix:    cfg.PromptPrefix,
+		perms:           cfg.Perms,
 	}
 }
 
@@ -112,7 +96,6 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 	// Mark context as autonomous + carry session ID for tool permissions
 	ctx = events.WithAutonomous(ctx)
 	ctx = events.ContextWithTaskID(ctx, r.task.ID)
-	ctx = events.ContextWithValidationCh(ctx, r.selfSuspendCh)
 	if r.task.SessionID != "" {
 		ctx = events.ContextWithSessionID(ctx, r.task.SessionID)
 	}
@@ -150,12 +133,7 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 		return r.runSkillStep(ctx, task, startedAt)
 	}
 
-	// If no plan, run as single step
-	if task.Plan == nil || len(task.Plan.Steps) == 0 {
-		return r.runSingleStep(ctx, task, startedAt)
-	}
-
-	return r.runPlanSteps(ctx, task, startedAt)
+	return r.runSingleStep(ctx, task, startedAt)
 }
 
 // isPreempted checks whether a preemption has been requested.
@@ -163,79 +141,37 @@ func (r *TaskRunner) isPreempted() bool {
 	return r.preemptionCheck != nil && r.preemptionCheck()
 }
 
-// suspendTask transitions the task to suspended state and publishes an event.
-func (r *TaskRunner) suspendTask(task *Task, reason string) error {
-	return r.suspendTaskWithPayload(task, reason, "", "")
-}
-
-// suspendTaskWithPayload suspends a task with optional plan content and validation token.
-func (r *TaskRunner) suspendTaskWithPayload(task *Task, reason, planContent, token string) error {
-	now := time.Now()
-	task.Status = TaskSuspended
-	task.SuspendedAt = &now
-	task.SuspendCount++
-
+// preemptTask re-queues a preempted task as pending.
+func (r *TaskRunner) preemptTask(task *Task) error {
+	task.Status = TaskPending
+	task.StartedAt = nil
 	if err := r.store.Update(task); err != nil {
-		return fmt.Errorf("update task suspended: %w", err)
+		return fmt.Errorf("update task preempted: %w", err)
 	}
 
 	_ = r.store.AppendCheckpoint(task.ID, Checkpoint{
-		Ts:      now,
-		Type:    "suspended",
-		Summary: reason,
+		Ts:      time.Now(),
+		Type:    "preempted",
+		Summary: "Task preempted by higher-priority request",
 	})
 
-	r.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskSuspendedPayload{
-		TaskID:       task.ID,
-		Title:        task.Title,
-		Reason:       reason,
-		SuspendCount: task.SuspendCount,
-		PlanContent:  planContent,
-		Token:        token,
-	}, task.SessionID))
-
-	if task.SuspendCount > 3 {
-		slog.Warn("task suspended repeatedly", "task_id", task.ID, "count", task.SuspendCount)
-	}
-
-	return nil
+	return ErrPreempted
 }
 
 func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt time.Time) error {
-	switch task.Config.AutonomyLevel {
-	case AutonomySupervised:
-		// Supervised coordinator: explore → plan → validate → execute
-		mailbox, _ := r.store.LoadMailbox(task.ID)
-		switch lastFeedbackStatus(mailbox) {
-		case "approved":
-			return r.runCoordinatorExecution(ctx, task, startedAt, mailbox)
-		case "revise":
-			return r.runCoordinatorPlanning(ctx, task, startedAt)
-		default:
-			return r.runCoordinatorPlanning(ctx, task, startedAt)
-		}
-	case AutonomyAutonomous:
-		// Autonomous coordinator: explore → plan → execute (no validation)
-		return r.runCoordinatorAutonomous(ctx, task, startedAt)
-	}
-
-	// Standard task — single agent
 	var tools []tool.InvokableTool
 	if len(task.Config.Tools) > 0 {
 		tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
 	}
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
-	mailboxContext := buildMailboxContext(r.store, task.ID)
 	memoryContext := r.buildMemoryContext()
-	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext))
+	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s",
+		task.Title, task.Description, formatContextBlock(task.Config), depContext, memoryContext))
 
 	slog.Debug("task agent instruction",
 		"task_id", task.ID,
-		"autonomy", task.Config.AutonomyLevel,
 		"instruction_length", len(instruction),
-		"instruction", instruction,
 	)
 
 	runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
@@ -255,261 +191,7 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 			return err
 		}
 		if errors.Is(err, ErrPreempted) {
-			return r.suspendTask(task, "preempted during single step")
-		}
-		var sse *selfSuspendError
-		if errors.As(err, &sse) {
-			return r.selfSuspendTask(task, sse.request, sse.explorationContext)
-		}
-		return r.failTask(task, startedAt, err)
-	}
-
-	return r.completeTask(task, startedAt, output)
-}
-
-// runCoordinatorPlanning runs Phase 1 of a coordinator task: explore, plan, request_validation.
-func (r *TaskRunner) runCoordinatorPlanning(ctx context.Context, task *Task, startedAt time.Time) error {
-	// Check max validation rounds — count existing "request" messages
-	mailbox, _ := r.store.LoadMailbox(task.ID)
-	requestCount := 0
-	for _, msg := range mailbox {
-		if msg.Type == "request" {
-			requestCount++
-		}
-	}
-	if requestCount >= r.maxValidationRounds {
-		return r.failTask(task, startedAt, fmt.Errorf("coordinator: exceeded max validation rounds (%d)", r.maxValidationRounds))
-	}
-
-	var tools []tool.InvokableTool
-	if len(task.Config.Tools) > 0 {
-		tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
-	}
-
-	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
-	mailboxContext := buildMailboxContext(r.store, task.ID)
-	memoryContext := r.buildMemoryContext()
-	instruction := r.prefixedInstruction(agent.CoordinatorPromptForTier(agent.LoadCoordinatorPrompt(), r.tier))
-	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
-
-	slog.Debug("task agent instruction",
-		"task_id", task.ID,
-		"autonomy", task.Config.AutonomyLevel,
-		"instruction_length", len(instruction),
-		"instruction", instruction,
-	)
-
-	runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create coordinator agent: %w", err))
-	}
-
-	messages := []*schema.Message{
-		{Role: schema.User, Content: task.Description},
-	}
-
-	output, err := r.consumeRunnerOutput(ctx, runner, messages)
-	if err != nil {
-		var unavail *models.ErrModelUnavailable
-		if errors.As(err, &unavail) {
-			return err
-		}
-		if errors.Is(err, ErrPreempted) {
-			return r.suspendTask(task, "preempted during coordinator planning")
-		}
-		var sse *selfSuspendError
-		if errors.As(err, &sse) {
-			return r.selfSuspendTask(task, sse.request, sse.explorationContext)
-		}
-		return r.failTask(task, startedAt, err)
-	}
-
-	// If we reach here without self-suspend, the agent finished without requesting validation.
-	// This commonly happens with smaller models that don't reliably call request_validation.
-	// Fallback: re-run as autonomous so the task still produces real output.
-	slog.Warn("coordinator completed without request_validation — falling back to autonomous execution",
-		"task_id", task.ID, "output_length", len(output))
-	return r.runCoordinatorAutonomous(ctx, task, startedAt)
-}
-
-// coordinatorMaxExecutionIterations gives the plan-execute loop more room than the default.
-const coordinatorMaxExecutionIterations = 15
-
-// runCoordinatorExecution runs Phase 2 of a coordinator task using Eino's planexecute pattern.
-// The Planner generates a structured plan informed by the validated plan and user feedback.
-// The Executor executes each step with tools. The Replanner decides when we're done.
-func (r *TaskRunner) runCoordinatorExecution(ctx context.Context, task *Task, startedAt time.Time, mailbox []MailboxMessage) error {
-	// If a structured plan was parsed during validation, use runPlanSteps for precise execution
-	if task.Plan != nil && len(task.Plan.Steps) > 0 {
-		// Inject mailbox context into the first step's description
-		mailboxSummary := formatMailboxForPlanner(mailbox)
-		if mailboxSummary != "" && len(task.Plan.Steps) > 0 {
-			task.Plan.Steps[0].Description = mailboxSummary + "\n\n" + task.Plan.Steps[0].Description
-		}
-		// Exclude request_validation from tools in execution phase
-		origTools := task.Config.Tools
-		var filtered []string
-		for _, t := range origTools {
-			if t != "request_validation" {
-				filtered = append(filtered, t)
-			}
-		}
-		task.Config.Tools = filtered
-		defer func() { task.Config.Tools = origTools }()
-		return r.runPlanSteps(ctx, task, startedAt)
-	}
-
-	// Resolve executor tools (exclude request_validation — no longer needed in execution phase)
-	var baseTools []tool.BaseTool
-	if len(task.Config.Tools) > 0 {
-		for _, t := range r.toolRegistry.ToolsByNames(task.Config.Tools) {
-			info, _ := t.Info(ctx)
-			if info != nil && info.Name == "request_validation" {
-				continue
-			}
-			baseTools = append(baseTools, t)
-		}
-	}
-
-	// Build context from mailbox (validated plan + user feedback)
-	mailboxSummary := formatMailboxForPlanner(mailbox)
-
-	// Custom planner input: includes the validated plan and user feedback
-	plannerInputFn := func(_ context.Context, userInput []adk.Message) ([]adk.Message, error) {
-		content := fmt.Sprintf(`You are an expert planner. Create a detailed step-by-step execution plan.
-
-## Context
-The user has reviewed and approved a plan. Incorporate their feedback.
-
-## Task
-Title: %s
-Description: %s
-%s
-%s
-## Instructions
-Generate a step-by-step plan. Each step should be specific, actionable, and independently executable.
-Focus on implementation — the exploration phase is complete.`, task.Title, task.Description, formatContextBlock(task.Config), mailboxSummary)
-
-		return []*schema.Message{
-			{Role: schema.System, Content: content},
-			{Role: schema.User, Content: userInput[0].Content},
-		}, nil
-	}
-
-	planner, err := planexecute.NewPlanner(ctx, &planexecute.PlannerConfig{
-		ToolCallingChatModel: r.chatModel,
-		GenInputFn:           plannerInputFn,
-	})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create planner: %w", err))
-	}
-
-	executor, err := planexecute.NewExecutor(ctx, &planexecute.ExecutorConfig{
-		Model: r.chatModel,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: baseTools,
-			},
-		},
-		MaxIterations: taskMaxIterations,
-	})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create executor: %w", err))
-	}
-
-	replanner, err := planexecute.NewReplanner(ctx, &planexecute.ReplannerConfig{
-		ChatModel: r.chatModel,
-	})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create replanner: %w", err))
-	}
-
-	peAgent, err := planexecute.New(ctx, &planexecute.Config{
-		Planner:       planner,
-		Executor:      executor,
-		Replanner:     replanner,
-		MaxIterations: coordinatorMaxExecutionIterations,
-	})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create plan-execute agent: %w", err))
-	}
-
-	// Wrap the plan-execute agent in a Runner for our consumeRunnerOutput
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{
-		Agent:           peAgent,
-		EnableStreaming: false,
-	})
-
-	messages := []*schema.Message{
-		{Role: schema.User, Content: task.Description},
-	}
-
-	output, err := r.consumeRunnerOutput(ctx, runner, messages)
-	if err != nil {
-		var unavail *models.ErrModelUnavailable
-		if errors.As(err, &unavail) {
-			return err
-		}
-		if errors.Is(err, ErrPreempted) {
-			return r.suspendTask(task, "preempted during coordinator execution")
-		}
-		return r.failTask(task, startedAt, err)
-	}
-
-	return r.completeTask(task, startedAt, output)
-}
-
-// runCoordinatorAutonomous runs a fully autonomous coordinator: explore, plan, execute — no validation.
-func (r *TaskRunner) runCoordinatorAutonomous(ctx context.Context, task *Task, startedAt time.Time) error {
-	// Exclude request_validation from tools — autonomous agents must not call it
-	var tools []tool.InvokableTool
-	if len(task.Config.Tools) > 0 {
-		for _, t := range r.toolRegistry.ToolsByNames(task.Config.Tools) {
-			info, _ := t.Info(ctx)
-			if info != nil && info.Name == "request_validation" {
-				continue
-			}
-			tools = append(tools, t)
-		}
-	}
-
-	depContext := r.buildDependencyContextAdaptive(task.DependsOn)
-	mailboxContext := buildMailboxContext(r.store, task.ID)
-	memoryContext := r.buildMemoryContext()
-	instruction := r.prefixedInstruction(agent.AutonomousPromptForTier(agent.LoadAutonomousPrompt(), r.tier))
-	instruction += fmt.Sprintf("\n\n## Task\n\nTitle: %s\nDescription: %s%s%s%s%s",
-		task.Title, task.Description, formatContextBlock(task.Config), depContext, mailboxContext, memoryContext)
-
-	slog.Debug("task agent instruction",
-		"task_id", task.ID,
-		"autonomy", task.Config.AutonomyLevel,
-		"instruction_length", len(instruction),
-		"instruction", instruction,
-	)
-
-	runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create autonomous agent: %w", err))
-	}
-
-	messages := []*schema.Message{
-		{Role: schema.User, Content: task.Description},
-	}
-
-	output, err := r.consumeRunnerOutput(ctx, runner, messages)
-	if err != nil {
-		var unavail *models.ErrModelUnavailable
-		if errors.As(err, &unavail) {
-			return err
-		}
-		if errors.Is(err, ErrPreempted) {
-			return r.suspendTask(task, "preempted during autonomous execution")
-		}
-		// Ignore self-suspend errors in autonomous mode — should not happen but handle gracefully
-		var sse *selfSuspendError
-		if errors.As(err, &sse) {
-			return r.completeTask(task, startedAt, sse.request.Content)
+			return r.preemptTask(task)
 		}
 		return r.failTask(task, startedAt, err)
 	}
@@ -527,178 +209,15 @@ func (r *TaskRunner) runSkillStep(ctx context.Context, task *Task, startedAt tim
 	return r.completeTask(task, startedAt, output)
 }
 
-// lastFeedbackStatus returns the Status of the most recent "response" message in the mailbox.
-// Returns "" if no response exists.
-func lastFeedbackStatus(mailbox []MailboxMessage) string {
-	for i := len(mailbox) - 1; i >= 0; i-- {
-		if mailbox[i].Type == "response" {
-			return mailbox[i].Status
-		}
-	}
-	return ""
-}
-
-// formatMailboxForPlanner formats mailbox exchanges for the planner context.
-func formatMailboxForPlanner(mailbox []MailboxMessage) string {
-	var b strings.Builder
-	b.WriteString("\n## Validation History\n")
-	for _, msg := range mailbox {
-		switch msg.Type {
-		case "exploration":
-			b.WriteString("\n### Exploration Findings\n")
-			b.WriteString(msg.Content)
-			b.WriteString("\n")
-		case "request":
-			b.WriteString("\n### Proposed Plan\n")
-			b.WriteString(msg.Content)
-			b.WriteString("\n")
-		case "response":
-			b.WriteString("\n### User Feedback\n")
-			b.WriteString(msg.Content)
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
-}
-
-func (r *TaskRunner) runPlanSteps(ctx context.Context, task *Task, startedAt time.Time) error {
-	// Load existing checkpoints to find resume point
-	checkpoints, _ := r.store.LoadCheckpoints(task.ID)
-	completedSteps := make(map[string]bool)
-	for _, cp := range checkpoints {
-		if cp.Type == "step_completed" {
-			completedSteps[cp.StepID] = true
-		}
-	}
-
-	var lastOutput string
-	for i, step := range task.Plan.Steps {
-		if completedSteps[step.ID] {
-			continue // already completed (resumption)
-		}
-
-		// Check preemption between steps
-		if r.isPreempted() {
-			return r.suspendTask(task, fmt.Sprintf("preempted before step %d/%d", i+1, len(task.Plan.Steps)))
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		// Emit progress
-		pct := 0
-		if len(task.Plan.Steps) > 0 {
-			pct = (i * 100) / len(task.Plan.Steps)
-		}
-		task.Progress = TaskProgress{
-			CurrentStep:      i + 1,
-			TotalSteps:       len(task.Plan.Steps),
-			CurrentStepLabel: step.Title,
-			Percentage:       pct,
-		}
-		_ = r.store.Update(task)
-
-		r.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskProgressPayload{
-			TaskID:           task.ID,
-			CurrentStep:      i + 1,
-			TotalSteps:       len(task.Plan.Steps),
-			CurrentStepLabel: step.Title,
-			Percentage:       pct,
-		}, task.SessionID))
-
-		// Resolve tools
-		var tools []tool.InvokableTool
-		if len(task.Config.Tools) > 0 {
-			tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
-		}
-
-		// Build step instruction (dependency context + memory context only on first step)
-		depCtx := ""
-		memCtx := ""
-		if i == 0 {
-			depCtx = buildDependencyContext(r.store, task.DependsOn)
-			memCtx = r.buildMemoryContext()
-		}
-		instruction := r.prefixedInstruction(fmt.Sprintf("You are executing step %d/%d of a task.\n\nTask: %s\nStep: %s",
-			i+1, len(task.Plan.Steps), task.Title, step.Title))
-		if step.Description != "" {
-			instruction += fmt.Sprintf("\n\nStep details:\n%s", step.Description)
-		}
-		instruction += formatContextBlock(task.Config) + depCtx + memCtx
-		if lastOutput != "" {
-			instruction += fmt.Sprintf("\n\nPrevious step output:\n%s", lastOutput)
-		}
-
-		slog.Debug("task agent instruction",
-			"task_id", task.ID,
-			"autonomy", task.Config.AutonomyLevel,
-			"instruction_length", len(instruction),
-			"instruction", instruction,
-		)
-
-		runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
-		if err != nil {
-			return r.failTask(task, startedAt, fmt.Errorf("create agent for step %s: %w", step.ID, err))
-		}
-
-		messages := []*schema.Message{
-			{Role: schema.User, Content: step.Title},
-		}
-
-		output, err := r.consumeRunnerOutput(ctx, runner, messages)
-		if err != nil {
-			var unavail *models.ErrModelUnavailable
-			if errors.As(err, &unavail) {
-				return err
-			}
-			if errors.Is(err, ErrPreempted) {
-				return r.suspendTask(task, fmt.Sprintf("preempted during step %d/%d", i+1, len(task.Plan.Steps)))
-			}
-			var sse *selfSuspendError
-			if errors.As(err, &sse) {
-				return r.selfSuspendTask(task, sse.request, sse.explorationContext)
-			}
-			return r.failTask(task, startedAt, fmt.Errorf("step %s failed: %w", step.ID, err))
-		}
-
-		lastOutput = output
-
-		// Checkpoint
-		_ = r.store.AppendCheckpoint(task.ID, Checkpoint{
-			Ts:      time.Now(),
-			StepID:  step.ID,
-			Type:    "step_completed",
-			Summary: truncate(output, 200),
-		})
-
-		// Update plan step status
-		task.Plan.Steps[i].Status = TaskCompleted
-	}
-
-	return r.completeTask(task, startedAt, lastOutput)
-}
-
 func (r *TaskRunner) consumeRunnerOutput(ctx context.Context, runner *adk.Runner, messages []*schema.Message) (string, error) {
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 
 	var content string
-	var allContent []string // accumulate all assistant messages for exploration context
 	for {
 		// Check preemption between ReAct iterations
 		if r.isPreempted() {
 			return content, ErrPreempted
-		}
-
-		// Check self-suspension (validation request)
-		select {
-		case req := <-r.selfSuspendCh:
-			exploration := strings.Join(allContent, "\n\n---\n\n")
-			return req.Content, &selfSuspendError{request: req, explorationContext: exploration}
-		default:
 		}
 
 		event, ok := iter.Next()
@@ -732,10 +251,6 @@ func (r *TaskRunner) consumeRunnerOutput(ctx context.Context, runner *adk.Runner
 			if mv.Message.Content != "" {
 				content = mv.Message.Content
 			}
-		}
-
-		if content != "" {
-			allContent = append(allContent, content)
 		}
 	}
 
@@ -818,8 +333,6 @@ func (r *TaskRunner) failTask(task *Task, startedAt time.Time, taskErr error) er
 }
 
 // formatContextBlock builds a structured instruction block from task config.
-// Only includes execution context (work_dir, env). Tool reference and workflow
-// are now in SubAgentInstructions, injected via middleware.
 func formatContextBlock(cfg TaskConfig) string {
 	var b strings.Builder
 	if cfg.WorkDir != "" {
@@ -841,7 +354,6 @@ const maxMemoryContextLen = 2000
 
 // buildMemoryContext retrieves relevant memories for the task and formats them
 // as an instruction block. Single retrieval per task at startup — not per LLM call.
-// Limits are reduced for TierSmall.
 func (r *TaskRunner) buildMemoryContext() string {
 	if r.retriever == nil {
 		return ""
@@ -885,15 +397,6 @@ func (r *TaskRunner) buildMemoryContext() string {
 // injected into the instruction. Prevents context window overflow.
 const maxDependencyOutputLen = 1000
 
-// buildDependencyContextAdaptive calls buildDependencyContext with a tier-aware output limit.
-func (r *TaskRunner) buildDependencyContextAdaptive(dependsOn []string) string {
-	maxLen := maxDependencyOutputLen
-	if r.tier == agent.TierSmall {
-		maxLen = 400
-	}
-	return buildDependencyContextWithLimit(r.store, dependsOn, maxLen)
-}
-
 // buildDependencyContext reads outputs from completed dependency tasks
 // and formats them as an instruction block for the sub-agent.
 func buildDependencyContext(store Store, dependsOn []string) string {
@@ -915,7 +418,6 @@ func buildDependencyContextWithLimit(store Store, dependsOn []string, maxOutputL
 		}
 		output, err := store.ReadOutput(depID)
 		if err != nil || output == "" {
-			// Still mention the task even without output
 			if !found {
 				b.WriteString("\n\n## Completed Dependency Tasks\n")
 				found = true
@@ -942,76 +444,6 @@ func buildDependencyContextWithLimit(store Store, dependsOn []string, maxOutputL
 		}
 		b.WriteString(output)
 		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-// selfSuspendError wraps a ValidationRequest for error-chain detection.
-type selfSuspendError struct {
-	request            events.ValidationRequest
-	explorationContext string // accumulated assistant messages from Phase 1
-}
-
-func (e *selfSuspendError) Error() string        { return ErrSelfSuspend.Error() }
-func (e *selfSuspendError) Is(target error) bool { return target == ErrSelfSuspend }
-
-// selfSuspendTask writes a mailbox request, sets WaitingForReply, and suspends.
-// explorationContext is the accumulated assistant output from Phase 1 (may be empty).
-func (r *TaskRunner) selfSuspendTask(task *Task, req events.ValidationRequest, explorationContext string) error {
-	// Store exploration context as a separate mailbox message (if non-empty)
-	if explorationContext != "" {
-		explorationMsg := MailboxMessage{
-			ID:      uuid.New().String(),
-			Ts:      time.Now(),
-			Type:    "exploration",
-			Content: explorationContext,
-		}
-		_ = r.store.AppendMailbox(task.ID, explorationMsg)
-	}
-
-	msg := MailboxMessage{
-		ID:        uuid.New().String(),
-		Ts:        time.Now(),
-		Type:      "request",
-		Token:     req.Token,
-		Content:   req.Content,
-		SessionID: task.SessionID,
-	}
-	_ = r.store.AppendMailbox(task.ID, msg)
-
-	// Try to extract a structured plan from the validation request
-	if parsed := ParsePlanFromMarkdown(req.Content); parsed != nil {
-		task.Plan = parsed
-		_ = r.store.Update(task)
-	}
-
-	task.WaitingForReply = true
-
-	return r.suspendTaskWithPayload(task, "waiting for user validation", req.Content, req.Token)
-}
-
-// buildMailboxContext reads the mailbox and injects plan + user feedback into the instruction.
-func buildMailboxContext(store Store, taskID string) string {
-	messages, err := store.LoadMailbox(taskID)
-	if err != nil || len(messages) == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	b.WriteString("\n\n## Previous Validation Exchanges\n")
-
-	for _, msg := range messages {
-		switch msg.Type {
-		case "request":
-			b.WriteString("\n### Your Plan (submitted for review)\n")
-			b.WriteString(msg.Content)
-			b.WriteString("\n")
-		case "response":
-			b.WriteString("\n### User Feedback\n")
-			b.WriteString(msg.Content)
-			b.WriteString("\n")
-		}
 	}
 
 	return b.String()

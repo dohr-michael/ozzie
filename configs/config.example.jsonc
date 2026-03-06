@@ -18,6 +18,21 @@
         "capabilities": ["thinking", "tool_use", "coding", "vision"]
       }
 
+      // Resilience example: retry + fallback for self-hosted endpoints
+      //
+      // "local-llm": {
+      //   "driver": "openai",
+      //   "model": "my-model",
+      //   "base_url": "https://llm-api.home.example.com/v1",
+      //   "retry": {
+      //     "max_attempts": 3,       // total attempts (default: 3)
+      //     "initial_delay": "2s",   // base delay before first retry (default: 1s)
+      //     "max_delay": "30s",      // delay cap (default: 30s)
+      //     "multiplier": 2.0        // exponential backoff factor (default: 2.0)
+      //   },
+      //   "fallback": "claude"       // use claude if local-llm's circuit breaker opens
+      // },
+
       // Overlay example: multi-model setup with specialized actors
       //
       // "planner": {
@@ -52,17 +67,7 @@
     // Leave empty to use the built-in Ozzie persona (recommended).
     // Inspired by Ozzie Isaacs from the Commonwealth Saga:
     // laid-back genius, explorer, pragmatist, dry wit.
-    "system_prompt": "",
-    "coordinator": {
-      // Default autonomy level for new tasks:
-      // "disabled" — standard single-step execution
-      // "supervised" — explore → plan → validate → execute (requires user approval)
-      // "autonomous" — explore → plan → execute (no validation)
-      // Can be overridden per-task via the "autonomy_level" parameter in submit_task.
-      "default_level": "disabled",
-      // Maximum plan-revise cycles before the task fails (supervised mode only).
-      "max_validation_rounds": 3
-    }
+    "system_prompt": ""
   },
   // Semantic memory: vector embeddings for meaning-based retrieval.
   // Hybrid scoring: 30% keyword + 70% cosine similarity.
@@ -104,7 +109,14 @@
     }
   },
   "skills": {
-    // Directories containing skill JSONC definitions.
+    // Directories containing skill subdirectories (each with SKILL.md).
+    // Each skill is a directory with:
+    //   SKILL.md       — YAML frontmatter + Markdown instructions (required)
+    //   workflow.yaml   — DAG workflow definition (optional)
+    //   triggers.yaml   — cron/event triggers (optional)
+    //   scripts/        — executable scripts (optional)
+    //   references/     — documentation (optional)
+    //   assets/         — templates, resources (optional)
     // Default: [~/.ozzie/skills]
     "dirs": [],
     // List of enabled skill names. Empty = all skills are loaded.

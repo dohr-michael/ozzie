@@ -1,11 +1,6 @@
 package gateway
 
 import (
-	"fmt"
-	"time"
-
-	"github.com/google/uuid"
-
 	"github.com/dohr-michael/ozzie/internal/tasks"
 )
 
@@ -77,69 +72,6 @@ func (h *WSTaskHandler) Cancel(taskID string, reason string) error {
 		reason = "cancelled via WS"
 	}
 	return h.pool.Cancel(taskID, reason)
-}
-
-// ReplyTask sends user feedback to a suspended coordinator task and resumes it.
-func (h *WSTaskHandler) ReplyTask(taskID string, feedback string, status string, sessionID string) error {
-	store := h.pool.Store()
-
-	task, err := store.Get(taskID)
-	if err != nil {
-		return fmt.Errorf("task not found: %w", err)
-	}
-	if task.Status != tasks.TaskSuspended {
-		return fmt.Errorf("task %s is not suspended (status: %s)", taskID, task.Status)
-	}
-	if !task.WaitingForReply {
-		return fmt.Errorf("task %s is not waiting for a reply", taskID)
-	}
-
-	if status != "approved" && status != "revise" {
-		return fmt.Errorf("invalid status %q: must be 'approved' or 'revise'", status)
-	}
-
-	// Find pending request token
-	mailbox, err := store.LoadMailbox(taskID)
-	if err != nil {
-		return fmt.Errorf("load mailbox: %w", err)
-	}
-
-	token := findPendingToken(mailbox)
-	if token == "" {
-		return fmt.Errorf("no pending request found in task mailbox")
-	}
-
-	// Append response
-	msg := tasks.MailboxMessage{
-		ID:        uuid.New().String(),
-		Ts:        time.Now(),
-		Type:      "response",
-		Token:     token,
-		Content:   feedback,
-		Status:    status,
-		SessionID: sessionID,
-	}
-	if err := store.AppendMailbox(taskID, msg); err != nil {
-		return fmt.Errorf("append mailbox: %w", err)
-	}
-
-	return h.pool.ResumeTask(taskID)
-}
-
-// findPendingToken returns the token of the last unanswered request in a mailbox.
-func findPendingToken(mailbox []tasks.MailboxMessage) string {
-	responded := make(map[string]bool)
-	for _, msg := range mailbox {
-		if msg.Type == "response" {
-			responded[msg.Token] = true
-		}
-	}
-	for i := len(mailbox) - 1; i >= 0; i-- {
-		if mailbox[i].Type == "request" && !responded[mailbox[i].Token] {
-			return mailbox[i].Token
-		}
-	}
-	return ""
 }
 
 // List returns all tasks for a session.
