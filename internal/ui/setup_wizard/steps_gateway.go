@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"strconv"

@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"fmt"
@@ -153,6 +153,51 @@ func (s *confirmStep) buildSummary() string {
 			b.WriteString(formatRow(i18n.T("wizard.confirm.prompt"), prompt))
 		}
 
+		b.WriteString("\n")
+	}
+
+	// Embedding.
+	if emb := s.answers.Embedding(); emb != nil && emb.Enabled {
+		b.WriteString(formatRow(i18n.T("wizard.confirm.embedding"), fmt.Sprintf("%s — %s (%d dims)", emb.Driver, emb.Model, emb.Dims)))
+		if emb.SkipKey && emb.EnvVarName != "" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), fmt.Sprintf(i18n.T("wizard.confirm.emb_reuses"), emb.EnvVarName)))
+		} else if emb.APIKey != "" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), i18n.T("wizard.confirm.key.provided")))
+		} else if emb.Driver != "ollama" {
+			b.WriteString(formatRow(i18n.T("wizard.confirm.api_key"), i18n.T("wizard.confirm.key.skipped")))
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString(formatRow(i18n.T("wizard.confirm.embedding"), i18n.T("wizard.confirm.emb_disabled")))
+		b.WriteString("\n")
+	}
+
+	// Layered context.
+	if lc := s.answers.LayeredContext(); lc != nil && lc.Enabled {
+		b.WriteString(formatRow(i18n.T("wizard.confirm.layered"), fmt.Sprintf("recent=%d, archives=%d", lc.MaxRecentMessages, lc.MaxArchives)))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(formatRow(i18n.T("wizard.confirm.layered"), i18n.T("wizard.confirm.layered_disabled")))
+		b.WriteString("\n")
+	}
+
+	// MCP servers.
+	if servers := s.answers.MCPServers(); len(servers) > 0 {
+		for _, srv := range servers {
+			label := fmt.Sprintf("%s — %s", srv.Name, srv.Transport)
+			if srv.Transport == "stdio" {
+				label += fmt.Sprintf(" (%s)", srv.Command)
+			} else {
+				label += fmt.Sprintf(" (%s)", srv.URL)
+			}
+			b.WriteString(formatRow(i18n.T("wizard.confirm.mcp"), label))
+			if len(srv.TrustedTools) > 0 {
+				b.WriteString(formatRow(i18n.T("wizard.mcp.field.trusted"), strings.Join(srv.TrustedTools, ", ")))
+			}
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString(formatRow(i18n.T("wizard.confirm.mcp"), i18n.T("wizard.confirm.mcp_none")))
 		b.WriteString("\n")
 	}
 

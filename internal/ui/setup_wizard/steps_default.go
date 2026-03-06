@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	tea "github.com/charmbracelet/bubbletea"

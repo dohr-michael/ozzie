@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"fmt"
@@ -90,6 +90,55 @@ func Finalize(answers Answers) (string, error) {
 		}
 	}
 
+	// Encrypt embedding API key if present.
+	if emb := answers.Embedding(); emb != nil && emb.APIKey != "" && emb.EnvVarName != "" {
+		hasAnyKey = true
+
+		kr, err := secrets.NewKeyRing()
+		if err != nil {
+			return "", fmt.Errorf("load keyring: %w", err)
+		}
+		if kr == nil {
+			return "", fmt.Errorf("no keyring available after key generation")
+		}
+
+		encrypted, err := secrets.Encrypt(emb.APIKey, kr.CurrentRecipient())
+		if err != nil {
+			return "", fmt.Errorf("encrypt embedding api key: %w", err)
+		}
+
+		if err := secrets.SetEntry(dotenvPath, emb.EnvVarName, encrypted); err != nil {
+			return "", fmt.Errorf("write embedding api key to .env: %w", err)
+		}
+	}
+
+	// Encrypt MCP server env vars that are secrets.
+	for _, srv := range answers.MCPServers() {
+		for _, ev := range srv.EnvVars {
+			if !ev.IsSecret || ev.Value == "" {
+				continue
+			}
+			hasAnyKey = true
+
+			kr, err := secrets.NewKeyRing()
+			if err != nil {
+				return "", fmt.Errorf("load keyring: %w", err)
+			}
+			if kr == nil {
+				return "", fmt.Errorf("no keyring available after key generation")
+			}
+
+			encrypted, err := secrets.Encrypt(ev.Value, kr.CurrentRecipient())
+			if err != nil {
+				return "", fmt.Errorf("encrypt mcp env %s for %s: %w", ev.Name, srv.Name, err)
+			}
+
+			if err := secrets.SetEntry(dotenvPath, ev.Name, encrypted); err != nil {
+				return "", fmt.Errorf("write mcp env %s to .env for %s: %w", ev.Name, srv.Name, err)
+			}
+		}
+	}
+
 	// Write default .env if missing and no keys were written.
 	if !hasAnyKey {
 		if _, err := os.Stat(dotenvPath); os.IsNotExist(err) {
@@ -99,10 +148,10 @@ func Finalize(answers Answers) (string, error) {
 		}
 	}
 
-	return formatSuccessMessage(root, data, providers), nil
+	return formatSuccessMessage(root, data, providers, answers.Embedding(), answers.LayeredContext(), answers.MCPServers()), nil
 }
 
-func formatSuccessMessage(root string, data ConfigData, providers []ProviderEntry) string {
+func formatSuccessMessage(root string, data ConfigData, providers []ProviderEntry, emb *EmbeddingEntry, lc *LayeredContextEntry, mcpServers []MCPServerEntry) string {
 	var b strings.Builder
 
 	b.WriteString(i18n.T("wizard.final.ready"))
@@ -120,6 +169,36 @@ func formatSuccessMessage(root string, data ConfigData, providers []ProviderEntr
 			b.WriteString(fmt.Sprintf(i18n.T("wizard.final.key_later"), p.EnvVarName))
 		}
 		b.WriteString("\n")
+	}
+
+	// Embedding summary.
+	if emb != nil && emb.Enabled {
+		b.WriteString(fmt.Sprintf(i18n.T("wizard.final.embedding"), emb.Driver, emb.Model, emb.Dims))
+	} else {
+		b.WriteString(i18n.T("wizard.final.emb_disabled"))
+	}
+
+	// Layered context summary.
+	if lc != nil && lc.Enabled {
+		b.WriteString(fmt.Sprintf(i18n.T("wizard.final.layered"), lc.MaxRecentMessages, lc.MaxArchives))
+	} else {
+		b.WriteString(i18n.T("wizard.final.layered_disabled"))
+	}
+
+	// MCP servers summary.
+	if len(mcpServers) > 0 {
+		b.WriteString(fmt.Sprintf(i18n.T("wizard.final.mcp"), len(mcpServers)))
+		for _, srv := range mcpServers {
+			detail := srv.Transport
+			if srv.Transport == "stdio" {
+				detail += fmt.Sprintf(" (%s)", srv.Command)
+			} else {
+				detail += fmt.Sprintf(" (%s)", srv.URL)
+			}
+			b.WriteString(fmt.Sprintf("  %s: %s\n", srv.Name, detail))
+		}
+	} else {
+		b.WriteString(i18n.T("wizard.final.mcp_none"))
 	}
 
 	b.WriteString(i18n.T("wizard.final.run"))

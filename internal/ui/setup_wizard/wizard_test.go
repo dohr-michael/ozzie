@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"encoding/json"
@@ -629,9 +629,9 @@ type parsedConfig struct {
 	Events struct {
 		BufferSize int `json:"buffer_size"`
 	} `json:"events"`
-	Agent struct {
+	Agent *struct {
 		SystemPrompt string `json:"system_prompt"`
-	} `json:"agent"`
+	} `json:"agent,omitempty"`
 }
 
 type parsedConfigProvider struct {

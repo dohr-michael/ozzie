@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"os"
@@ -111,6 +111,7 @@ func (s *welcomeStep) handleResult(result components.InputResult) (Step, tea.Cmd
 	switch s.phase {
 	case welcomePhaseLanguage:
 		i18n.Lang = result.Selected
+		s.answers["preferred_language"] = result.Selected
 
 		if s.configExists {
 			s.phase = welcomePhaseAction
@@ -189,6 +190,47 @@ func (s *welcomeStep) prefillFromConfig() {
 
 	if cfg.Models.Default != "" {
 		s.answers["default_provider"] = cfg.Models.Default
+	}
+
+	if cfg.Embedding.IsEnabled() {
+		entry := EmbeddingEntry{
+			Enabled:    true,
+			Driver:     cfg.Embedding.Driver,
+			Model:      cfg.Embedding.Model,
+			BaseURL:    cfg.Embedding.BaseURL,
+			Dims:       cfg.Embedding.Dims,
+			EnvVarName: embeddingDriverEnvVars[cfg.Embedding.Driver],
+			SkipKey:    true, // don't re-prompt for existing keys
+		}
+		s.answers["embedding"] = &entry
+	}
+
+	if cfg.LayeredContext.IsEnabled() {
+		entry := LayeredContextEntry{
+			Enabled:           true,
+			MaxRecentMessages: cfg.LayeredContext.MaxRecentMessages,
+			MaxArchives:       cfg.LayeredContext.MaxArchives,
+		}
+		s.answers["layered_context"] = &entry
+	}
+
+	if len(cfg.MCP.Servers) > 0 {
+		var servers []MCPServerEntry
+		for name, srv := range cfg.MCP.Servers {
+			entry := MCPServerEntry{
+				Name:         name,
+				Transport:    srv.Transport,
+				Command:      srv.Command,
+				Args:         srv.Args,
+				URL:          srv.URL,
+				TrustedTools: srv.TrustedTools,
+			}
+			for k := range srv.Env {
+				entry.EnvVars = append(entry.EnvVars, MCPEnvVar{Name: k, IsSecret: false})
+			}
+			servers = append(servers, entry)
+		}
+		s.answers["mcp_servers"] = servers
 	}
 
 	if cfg.Gateway.Host != "" {

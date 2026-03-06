@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import tea "github.com/charmbracelet/bubbletea"
 
@@ -114,4 +114,71 @@ type ProviderEntry struct {
 	Capabilities []string
 	Tags         []string
 	SystemPrompt string
+}
+
+// EmbeddingEntry holds the configuration for the embedding model.
+type EmbeddingEntry struct {
+	Enabled    bool
+	Driver     string
+	Model      string
+	BaseURL    string
+	APIKey     string // plaintext, encrypted in finalize
+	EnvVarName string
+	SkipKey    bool
+	Dims       int
+}
+
+// Embedding returns the EmbeddingEntry stored in answers, or nil.
+func (a Answers) Embedding() *EmbeddingEntry {
+	if v, ok := a["embedding"]; ok {
+		if e, ok := v.(*EmbeddingEntry); ok {
+			return e
+		}
+	}
+	return nil
+}
+
+// LayeredContextEntry holds the configuration for layered context compression.
+type LayeredContextEntry struct {
+	Enabled           bool
+	MaxRecentMessages int
+	MaxArchives       int
+}
+
+// LayeredContext returns the LayeredContextEntry stored in answers, or nil.
+func (a Answers) LayeredContext() *LayeredContextEntry {
+	if v, ok := a["layered_context"]; ok {
+		if e, ok := v.(*LayeredContextEntry); ok {
+			return e
+		}
+	}
+	return nil
+}
+
+// MCPServerEntry holds the configuration for a single MCP server.
+type MCPServerEntry struct {
+	Name         string
+	Transport    string // "stdio", "sse", "http"
+	Command      string
+	Args         []string
+	URL          string
+	EnvVars      []MCPEnvVar
+	TrustedTools []string
+}
+
+// MCPEnvVar holds an environment variable for an MCP server.
+type MCPEnvVar struct {
+	Name     string
+	Value    string // empty = set later
+	IsSecret bool
+}
+
+// MCPServers returns the []MCPServerEntry stored in answers.
+func (a Answers) MCPServers() []MCPServerEntry {
+	if v, ok := a["mcp_servers"]; ok {
+		if s, ok := v.([]MCPServerEntry); ok {
+			return s
+		}
+	}
+	return nil
 }

@@ -32,6 +32,7 @@ type ActorDescription struct {
 // ContextMiddlewareConfig configures the dynamic context middleware.
 type ContextMiddlewareConfig struct {
 	CustomInstructions  string            // Layer 2: from config.Agent.SystemPrompt
+	PreferredLanguage   string            // Layer 2b: preferred response language (e.g. "en", "fr")
 	RuntimeInstruction  string            // Layer 1c: runtime environment (container/local + system tools)
 	AllToolDescriptions map[string]string // Layer 3: full catalog (name → desc)
 	SkillDescriptions   map[string]string // Layer 3b: skill name → description
@@ -66,6 +67,12 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		instruction.WriteString("## Additional Instructions\n\n")
 		instruction.WriteString(cfg.CustomInstructions)
 		instruction.WriteString("\n\n")
+	}
+
+	// Layer 2b: Preferred language
+	if cfg.PreferredLanguage != "" {
+		langName := preferredLanguageName(cfg.PreferredLanguage)
+		instruction.WriteString(fmt.Sprintf("## Language\n\nThe user prefers to be answered in %s. Always respond in %s unless explicitly asked otherwise.\n\n", langName, langName))
 	}
 
 	// Layer 3b: Available skills (limited to 5 for TierSmall)
@@ -332,4 +339,32 @@ func recentUserContext(messages []*schema.Message, maxN int) string {
 		userMsgs = append(userMsgs, content)
 	}
 	return strings.Join(userMsgs, " ")
+}
+
+// preferredLanguageName returns the display name for a language code.
+func preferredLanguageName(code string) string {
+	switch strings.ToLower(code) {
+	case "fr":
+		return "French"
+	case "en":
+		return "English"
+	case "de":
+		return "German"
+	case "es":
+		return "Spanish"
+	case "it":
+		return "Italian"
+	case "pt":
+		return "Portuguese"
+	case "nl":
+		return "Dutch"
+	case "ja":
+		return "Japanese"
+	case "zh":
+		return "Chinese"
+	case "ko":
+		return "Korean"
+	default:
+		return code
+	}
 }

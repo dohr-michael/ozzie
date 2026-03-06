@@ -329,6 +329,60 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
 	defer memoryRetriever.Close()
 
+	// Wire reloader → embedding hot-reload
+	var embFingerprint string
+	if cfg.Embedding.IsEnabled() {
+		embFingerprint = memory.EmbeddingFingerprint(cfg.Embedding)
+	}
+	reloader.OnReload(func(newCfg *config.Config) {
+		newFP := ""
+		if newCfg.Embedding.IsEnabled() {
+			newFP = memory.EmbeddingFingerprint(newCfg.Embedding)
+		}
+		if newFP == embFingerprint {
+			return
+		}
+		oldFP := embFingerprint
+		embFingerprint = newFP
+
+		if pipeline == nil {
+			// Was disabled at startup — can't hot-enable without restart
+			if newFP != "" {
+				slog.Warn("embedding config changed but was disabled at startup, restart gateway to apply")
+			}
+			return
+		}
+
+		if !newCfg.Embedding.IsEnabled() {
+			pipeline.Swap(nil, "")
+			memoryRetriever.SwapVector(nil)
+			slog.Info("embedding disabled via config reload")
+			return
+		}
+
+		// Recreate embedder + vector store
+		newEmbedder, err := memory.NewEmbedder(ctx, newCfg.Embedding, kr)
+		if err != nil {
+			slog.Error("embedding reload: create embedder failed", "error", err)
+			return
+		}
+		newVS, err := memory.NewVectorStore(ctx, memoryDir, newEmbedder)
+		if err != nil {
+			slog.Error("embedding reload: create vector store failed", "error", err)
+			return
+		}
+		newModel := newCfg.Embedding.Model
+		pipeline.Swap(newVS, newModel)
+		memoryRetriever.SwapVector(newVS)
+
+		go func() {
+			if _, err := memory.Reindex(ctx, memoryStore, newVS, newModel); err != nil {
+				slog.Warn("embedding reload reindex failed", "error", err)
+			}
+		}()
+		slog.Info("embedding reloaded", "old", oldFP, "new", newFP)
+	})
+
 	// Cross-task learning: extract reusable lessons from completed tasks
 	if pipeline != nil {
 		extractor := memory.NewExtractor(memory.ExtractorConfig{
@@ -503,6 +557,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Context middleware — injects dynamic context (instructions, tools, session, memories)
 	contextMw := agent.NewContextMiddleware(agent.ContextMiddlewareConfig{
 		CustomInstructions:  cfg.Agent.SystemPrompt,
+		PreferredLanguage:   cfg.Agent.PreferredLanguage,
 		RuntimeInstruction:  runtimeInstruction,
 		AllToolDescriptions: allToolDescs,
 		SkillDescriptions:   skillDescs,

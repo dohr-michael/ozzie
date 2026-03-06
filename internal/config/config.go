@@ -235,8 +235,9 @@ type CoordinatorConfig struct {
 
 // AgentConfig holds agent settings.
 type AgentConfig struct {
-	SystemPrompt string            `json:"system_prompt,omitempty"`
-	Coordinator  CoordinatorConfig `json:"coordinator"`
+	SystemPrompt      string            `json:"system_prompt,omitempty"`
+	PreferredLanguage string            `json:"preferred_language,omitempty"` // e.g. "en", "fr"
+	Coordinator       CoordinatorConfig `json:"coordinator"`
 }
 
 // Duration wraps time.Duration for JSON unmarshaling.

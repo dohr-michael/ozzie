@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"fmt"
@@ -639,15 +639,19 @@ func (s *providerStep) handleResult(result components.InputResult) (Step, tea.Cm
 
 	case phaseAddMore:
 		if result.Confirmed {
-			// Save current and start a new one.
-			s.providers = append(s.providers, s.current)
+			// Save current (if configured) and start a new one.
+			if s.current.Driver != "" {
+				s.providers = append(s.providers, s.current)
+			}
 			s.current = ProviderEntry{}
 			s.customModel = false
 			s.phase = phaseDriver
 			s.showPhase()
 		} else {
-			// Save current and finish.
-			s.providers = append(s.providers, s.current)
+			// Save current (if configured) and finish.
+			if s.current.Driver != "" {
+				s.providers = append(s.providers, s.current)
+			}
 			return s, func() tea.Msg { return StepDoneMsg{} }
 		}
 	}

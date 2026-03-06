@@ -1,4 +1,4 @@
-package wizard
+package setup_wizard
 
 import (
 	"fmt"
@@ -32,6 +32,9 @@ func New() *Wizard {
 			newWelcomeStep(),
 			newProviderStep(),
 			newDefaultStep(),
+			newEmbeddingStep(),
+			newLayeredStep(),
+			newMCPStep(),
 			newGatewayStep(),
 			newConfirmStep(),
 		},
