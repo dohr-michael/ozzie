@@ -603,7 +603,6 @@ func TestResolveEnvVarName(t *testing.T) {
 	}
 }
 
-
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && containsStr(s, substr)
 }
@@ -625,7 +624,7 @@ type parsedConfig struct {
 	} `json:"gateway"`
 	Models struct {
 		Default   string                          `json:"default"`
-		Providers map[string]parsedConfigProvider  `json:"providers"`
+		Providers map[string]parsedConfigProvider `json:"providers"`
 	} `json:"models"`
 	Events struct {
 		BufferSize int `json:"buffer_size"`
@@ -636,10 +635,10 @@ type parsedConfig struct {
 }
 
 type parsedConfigProvider struct {
-	Driver       string   `json:"driver"`
-	Model        string   `json:"model"`
-	BaseURL      string   `json:"base_url,omitempty"`
-	Auth         *struct {
+	Driver  string `json:"driver"`
+	Model   string `json:"model"`
+	BaseURL string `json:"base_url,omitempty"`
+	Auth    *struct {
 		APIKey string `json:"api_key"`
 	} `json:"auth,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`

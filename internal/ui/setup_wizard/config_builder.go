@@ -79,10 +79,10 @@ func BuildConfigData(answers Answers) ConfigData {
 // --- JSON serialization types ---
 
 type configJSON struct {
-	Gateway  gatewayJSON  `json:"gateway"`
-	Models   modelsJSON   `json:"models"`
-	Events   eventsJSON   `json:"events"`
-	Agent    agentJSON    `json:"agent"`
+	Gateway gatewayJSON `json:"gateway"`
+	Models  modelsJSON  `json:"models"`
+	Events  eventsJSON  `json:"events"`
+	Agent   agentJSON   `json:"agent"`
 }
 
 type gatewayJSON struct {
@@ -96,14 +96,14 @@ type modelsJSON struct {
 }
 
 type providerJSON struct {
-	Driver       string       `json:"driver"`
-	Model        string       `json:"model"`
-	BaseURL      string       `json:"base_url,omitempty"`
-	Auth         *authJSON    `json:"auth,omitempty"`
-	Capabilities []string     `json:"capabilities,omitempty"`
-	Tags         []string     `json:"tags,omitempty"`
-	PromptPrefix string       `json:"prompt_prefix,omitempty"`
-	MaxTokens    int          `json:"max_tokens"`
+	Driver       string    `json:"driver"`
+	Model        string    `json:"model"`
+	BaseURL      string    `json:"base_url,omitempty"`
+	Auth         *authJSON `json:"auth,omitempty"`
+	Capabilities []string  `json:"capabilities,omitempty"`
+	Tags         []string  `json:"tags,omitempty"`
+	PromptPrefix string    `json:"prompt_prefix,omitempty"`
+	MaxTokens    int       `json:"max_tokens"`
 }
 
 type authJSON struct {

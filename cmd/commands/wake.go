@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/dohr-michael/ozzie/internal/ui/setup_wizard"
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	_ "github.com/dohr-michael/ozzie/internal/ui/components" // register component translations
-	"github.com/dohr-michael/ozzie/internal/wizard"
 )
 
 // NewWakeCommand returns the onboarding subcommand.
@@ -23,7 +23,7 @@ func NewWakeCommand() *cli.Command {
 
 func runWake(_ context.Context, _ *cli.Command) error {
 	i18n.Lang = i18n.Detect()
-	w := wizard.New()
+	w := setup_wizard.New()
 	p := tea.NewProgram(w, tea.WithAltScreen())
 
 	model, err := p.Run()
@@ -31,7 +31,7 @@ func runWake(_ context.Context, _ *cli.Command) error {
 		return fmt.Errorf("wizard: %w", err)
 	}
 
-	wiz, ok := model.(*wizard.Wizard)
+	wiz, ok := model.(*setup_wizard.Wizard)
 	if !ok {
 		return fmt.Errorf("unexpected model type")
 	}
