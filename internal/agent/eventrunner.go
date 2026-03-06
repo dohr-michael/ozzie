@@ -182,7 +182,13 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 	for _, m := range history {
 		msg := m.ToSchemaMessage()
 		// Skip messages with empty content — APIs reject these.
-		if msg.Content == "" && msg.Role != schema.Assistant {
+		if msg.Content == "" {
+			continue
+		}
+		// Merge consecutive user messages to avoid confusing the LLM.
+		// This happens when previous responses were empty (not persisted).
+		if len(messages) > 0 && messages[len(messages)-1].Role == schema.User && msg.Role == schema.User {
+			messages[len(messages)-1].Content += "\n" + msg.Content
 			continue
 		}
 		messages = append(messages, msg)
@@ -252,12 +258,18 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 				return
 			}
 
-			// No activation — emit the buffered response
-			er.emitStreamStart(sessionID)
-			if content != "" {
-				er.emitStreamDelta(sessionID, content)
-				er.emitStreamEnd(sessionID)
+			// Empty response from buffered run — retry with streaming.
+			// Some models return empty in buffered mode; streaming often succeeds.
+			if content == "" {
+				slog.Warn("empty buffered response, retrying with streaming",
+					"session_id", sessionID)
+				continue
 			}
+
+			// Has content — emit the buffered response.
+			er.emitStreamStart(sessionID)
+			er.emitStreamDelta(sessionID, content)
+			er.emitStreamEnd(sessionID)
 			er.persistAndEmitResponse(sessionID, content)
 			return
 		}
@@ -349,6 +361,12 @@ func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator
 				er.emitStreamEnd(sessionID)
 			}
 		}
+	}
+
+	// Always emit StreamEnd to match the StreamStart emitted before runAgent.
+	// This ensures the TUI resets its streaming state even on empty responses.
+	if contentBuilder == "" {
+		er.emitStreamEnd(sessionID)
 	}
 
 	er.persistAndEmitResponse(sessionID, contentBuilder)
