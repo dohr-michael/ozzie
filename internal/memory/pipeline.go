@@ -24,6 +24,7 @@ type Pipeline struct {
 	modelName string
 	jobs      chan EmbedJob
 	wg        sync.WaitGroup
+	mu        sync.RWMutex // protects vector and modelName for hot-reload
 }
 
 // NewPipeline creates a new embedding pipeline.
@@ -71,15 +72,32 @@ func (p *Pipeline) Stop() {
 	p.wg.Wait()
 }
 
+// Swap atomically replaces the vector store and model name for hot-reload.
+// Pass nil to disable embedding (jobs will be silently dropped).
+func (p *Pipeline) Swap(vector *VectorStore, modelName string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.vector = vector
+	p.modelName = modelName
+}
+
 func (p *Pipeline) processJob(ctx context.Context, job EmbedJob) {
+	p.mu.RLock()
+	vector := p.vector
+	p.mu.RUnlock()
+
+	if vector == nil {
+		return // embedding disabled
+	}
+
 	if job.Delete {
-		if err := p.vector.Delete(ctx, job.ID); err != nil {
+		if err := vector.Delete(ctx, job.ID); err != nil {
 			slog.Warn("embedding pipeline: delete failed", "id", job.ID, "error", err)
 		}
 		return
 	}
 
-	if err := p.vector.Upsert(ctx, job.ID, job.Content, job.Meta); err != nil {
+	if err := vector.Upsert(ctx, job.ID, job.Content, job.Meta); err != nil {
 		slog.Warn("embedding pipeline: upsert failed", "id", job.ID, "error", err)
 		return
 	}
@@ -94,8 +112,12 @@ func (p *Pipeline) markIndexed(id string) {
 	if err != nil {
 		return
 	}
+	p.mu.RLock()
+	modelName := p.modelName
+	p.mu.RUnlock()
+
 	now := time.Now()
-	entry.EmbeddingModel = p.modelName
+	entry.EmbeddingModel = modelName
 	entry.IndexedAt = &now
 	if err := p.store.Update(entry, content); err != nil {
 		slog.Warn("embedding pipeline: failed to mark indexed", "id", id, "error", err)

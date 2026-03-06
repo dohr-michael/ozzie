@@ -20,7 +20,7 @@ type HybridRetriever struct {
 	store   Store
 	keyword *Retriever
 	vector  *VectorStore
-	mu      sync.Mutex     // serializes reinforcement updates
+	mu      sync.RWMutex   // protects vector field + serializes reinforcement updates
 	wg      sync.WaitGroup // tracks in-flight reinforcement goroutines
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -37,6 +37,14 @@ func NewHybridRetriever(store Store, vector *VectorStore) *HybridRetriever {
 		ctx:     ctx,
 		cancel:  cancel,
 	}
+}
+
+// SwapVector atomically replaces the vector store.
+// Pass nil to fall back to keyword-only retrieval.
+func (hr *HybridRetriever) SwapVector(vs *VectorStore) {
+	hr.mu.Lock()
+	defer hr.mu.Unlock()
+	hr.vector = vs
 }
 
 // Close cancels pending reinforcement goroutines and waits for completion.
@@ -57,8 +65,13 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 		limit = 5
 	}
 
+	// Snapshot the vector store pointer under read lock
+	hr.mu.RLock()
+	vector := hr.vector
+	hr.mu.RUnlock()
+
 	// Keyword-only fallback when vector store is not available
-	if hr.vector == nil {
+	if vector == nil {
 		results, err := hr.keyword.Retrieve(query, tags, limit)
 		if err != nil {
 			return nil, err
@@ -79,7 +92,7 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 		return nil, err
 	}
 
-	semanticResults, err := hr.vector.Query(context.Background(), query, fetchLimit)
+	semanticResults, err := vector.Query(context.Background(), query, fetchLimit)
 	if err != nil {
 		// Graceful degradation: reuse keyword results already fetched
 		results := keywordResults

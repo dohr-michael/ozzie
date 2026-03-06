@@ -15,8 +15,14 @@ import (
 	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
+// EmbeddingFingerprint returns a unique string identifying the embedding config.
+// Used to detect config changes on SIGHUP without unnecessary recreation.
+func EmbeddingFingerprint(cfg config.EmbeddingConfig) string {
+	return fmt.Sprintf("%s|%s|%s|%d", cfg.Driver, cfg.Model, cfg.BaseURL, cfg.Dims)
+}
+
 // NewEmbedder creates an Eino Embedder from the embedding config.
-// Supported drivers: "openai", "ollama".
+// Supported drivers: "openai", "ollama", "mistral", "gemini".
 // If kr is non-nil, ENC[age:...] auth values are decrypted transparently.
 func NewEmbedder(ctx context.Context, cfg config.EmbeddingConfig, kr *secrets.KeyRing) (embedding.Embedder, error) {
 	switch strings.ToLower(cfg.Driver) {
@@ -24,8 +30,12 @@ func NewEmbedder(ctx context.Context, cfg config.EmbeddingConfig, kr *secrets.Ke
 		return newOpenAIEmbedder(ctx, cfg, kr)
 	case "ollama":
 		return newOllamaEmbedder(ctx, cfg)
+	case "mistral":
+		return newMistralEmbedder(ctx, cfg, kr)
+	case "gemini":
+		return newGeminiEmbedder(ctx, cfg, kr)
 	default:
-		return nil, fmt.Errorf("unsupported embedding driver %q (supported: openai, ollama)", cfg.Driver)
+		return nil, fmt.Errorf("unsupported embedding driver %q (supported: openai, ollama, mistral, gemini)", cfg.Driver)
 	}
 }
 
@@ -62,6 +72,24 @@ func newOllamaEmbedder(ctx context.Context, cfg config.EmbeddingConfig) (embeddi
 	return einoollama.NewEmbedder(ctx, ecfg)
 }
 
+func newMistralEmbedder(ctx context.Context, cfg config.EmbeddingConfig, kr *secrets.KeyRing) (embedding.Embedder, error) {
+	apiKey := resolveEmbeddingAuth(cfg, kr)
+	if apiKey == "" {
+		return nil, fmt.Errorf("mistral embedding: API key not configured (set auth.api_key or MISTRAL_API_KEY)")
+	}
+
+	ecfg := &einoopenai.EmbeddingConfig{
+		APIKey: apiKey,
+		Model:  cfg.Model,
+	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.mistral.ai/v1"
+	}
+	ecfg.BaseURL = baseURL
+	return einoopenai.NewEmbedder(ctx, ecfg)
+}
+
 // resolveEmbeddingAuth resolves the API key for the embedding provider.
 // Resolution order: direct api_key → OPENAI_API_KEY env.
 // If kr is non-nil, ENC[age:...] values are decrypted transparently.
@@ -77,6 +105,10 @@ func resolveEmbeddingAuth(cfg config.EmbeddingConfig, kr *secrets.KeyRing) strin
 	switch strings.ToLower(cfg.Driver) {
 	case "openai":
 		return embeddingMaybeDecrypt(os.Getenv("OPENAI_API_KEY"), kr)
+	case "mistral":
+		return embeddingMaybeDecrypt(os.Getenv("MISTRAL_API_KEY"), kr)
+	case "gemini":
+		return embeddingMaybeDecrypt(os.Getenv("GOOGLE_API_KEY"), kr)
 	default:
 		return ""
 	}
