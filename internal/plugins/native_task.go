@@ -92,6 +92,10 @@ func SubmitTaskManifest() *PluginManifest {
 						Type:        "array",
 						Description: "Required model capabilities (e.g. [\"coding\", \"tool_use\"]). The task will run on an actor whose model supports ALL specified capabilities.",
 					},
+					"tool_constraints": {
+						Type:        "object",
+						Description: "Per-tool argument constraints. Map of tool name to constraint object with fields: allowed_commands, allowed_patterns, blocked_patterns, allowed_paths, allowed_domains.",
+					},
 				},
 			},
 		},
@@ -99,16 +103,17 @@ func SubmitTaskManifest() *PluginManifest {
 }
 
 type submitTaskInput struct {
-	Title                string            `json:"title"`
-	Description          string            `json:"description"`
-	Tools                []string          `json:"tools"`
-	WorkDir              string            `json:"work_dir,omitempty"`
-	Env                  map[string]string `json:"env,omitempty"`
-	Priority             string            `json:"priority"`
-	DependsOn            []string          `json:"depends_on"`
-	Skill                string            `json:"skill,omitempty"`
-	ActorTags            []string          `json:"actor_tags,omitempty"`
-	RequiredCapabilities []string          `json:"required_capabilities,omitempty"`
+	Title                string                            `json:"title"`
+	Description          string                            `json:"description"`
+	Tools                []string                          `json:"tools"`
+	WorkDir              string                            `json:"work_dir,omitempty"`
+	Env                  map[string]string                 `json:"env,omitempty"`
+	Priority             string                            `json:"priority"`
+	DependsOn            []string                          `json:"depends_on"`
+	Skill                string                            `json:"skill,omitempty"`
+	ActorTags            []string                          `json:"actor_tags,omitempty"`
+	RequiredCapabilities []string                          `json:"required_capabilities,omitempty"`
+	ToolConstraints      map[string]*events.ToolConstraint `json:"tool_constraints,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
@@ -155,6 +160,10 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		workDir = events.WorkDirFromContext(ctx)
 	}
 
+	// Merge tool constraints: session constraints + task-specific (intersection)
+	sessionConstraints := events.ToolConstraintsFromContext(ctx)
+	taskConstraints := events.MergeToolConstraints(sessionConstraints, input.ToolConstraints)
+
 	task := &tasks.Task{
 		SessionID:   sessionID,
 		Title:       input.Title,
@@ -169,6 +178,7 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 			Skill:                input.Skill,
 			RequiredTags:         input.ActorTags,
 			RequiredCapabilities: input.RequiredCapabilities,
+			ToolConstraints:      taskConstraints,
 		},
 	}
 
@@ -442,4 +452,3 @@ func (t *CancelTaskTool) InvokableRun(_ context.Context, argumentsInJSON string,
 }
 
 var _ tool.InvokableTool = (*CancelTaskTool)(nil)
-

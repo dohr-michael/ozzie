@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+
+	"github.com/dohr-michael/ozzie/internal/events"
 )
 
 // SessionStatus represents the lifecycle state of a session.
@@ -15,6 +17,10 @@ const (
 	SessionClosed SessionStatus = "closed"
 )
 
+// RoleToolLog is a message role for persisted tool call summaries.
+// These are displayed in TUI history but filtered out before sending to the LLM.
+const RoleToolLog = "tool_log"
+
 // TokenUsage tracks cumulative token consumption for a session.
 type TokenUsage struct {
 	Input  int `json:"input"`
@@ -23,21 +29,22 @@ type TokenUsage struct {
 
 // Session holds metadata about a conversation session.
 type Session struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name,omitempty"`
-	Title         string            `json:"title"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
-	Status        SessionStatus     `json:"status"`
-	Model         string            `json:"model,omitempty"`
-	MessageCount  int               `json:"message_count"`
-	TokenUsage    TokenUsage        `json:"token_usage"`
-	RootDir       string            `json:"root_dir,omitempty"`
-	Language      string            `json:"language,omitempty"`
-	Summary       string            `json:"summary,omitempty"`       // compressed context from older messages
-	SummaryUpTo   int               `json:"summary_up_to,omitempty"` // index (exclusive) of last summarized message
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	ApprovedTools []string          `json:"approved_tools,omitempty"` // dangerous tools approved for this session
+	ID              string                            `json:"id"`
+	Name            string                            `json:"name,omitempty"`
+	Title           string                            `json:"title"`
+	CreatedAt       time.Time                         `json:"created_at"`
+	UpdatedAt       time.Time                         `json:"updated_at"`
+	Status          SessionStatus                     `json:"status"`
+	Model           string                            `json:"model,omitempty"`
+	MessageCount    int                               `json:"message_count"`
+	TokenUsage      TokenUsage                        `json:"token_usage"`
+	RootDir         string                            `json:"root_dir,omitempty"`
+	Language        string                            `json:"language,omitempty"`
+	Summary         string                            `json:"summary,omitempty"`       // compressed context from older messages
+	SummaryUpTo     int                               `json:"summary_up_to,omitempty"` // index (exclusive) of last summarized message
+	Metadata        map[string]string                 `json:"metadata,omitempty"`
+	ApprovedTools   []string                          `json:"approved_tools,omitempty"`   // dangerous tools approved for this session
+	ToolConstraints map[string]*events.ToolConstraint `json:"tool_constraints,omitempty"` // per-tool argument constraints
 }
 
 // Message is a single turn in a conversation, serializable to JSONL.

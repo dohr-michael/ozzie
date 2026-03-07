@@ -185,6 +185,9 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		plugins.WrapRegistrySandbox(toolRegistry, sandboxPaths)
 	}
 
+	// Constraint guard — per-tool argument validation (between sandbox and dangerous)
+	plugins.WrapRegistryConstraints(toolRegistry)
+
 	// Wrap dangerous tools with confirmation for interactive gateway
 	plugins.WrapRegistryDangerous(toolRegistry, bus, toolPerms)
 
@@ -668,4 +671,3 @@ func resolveLogLevel(s string) slog.Level {
 		return slog.LevelInfo
 	}
 }
-

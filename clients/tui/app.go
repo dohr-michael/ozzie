@@ -7,10 +7,33 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/dohr-michael/ozzie/internal/ui/components"
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
+
+// AppOption configures optional App behavior (functional options).
+type AppOption func(*App)
+
+// WithInitialMessage auto-sends msg on Init (disables input zone).
+func WithInitialMessage(msg string) AppOption {
+	return func(a *App) { a.initialMessage = msg }
+}
+
+// WithAutoQuit exits after the first complete AssistantMessage.
+func WithAutoQuit() AppOption {
+	return func(a *App) { a.autoQuit = true }
+}
+
+// WithAcceptAll calls AcceptAllTools before sending the initial message.
+func WithAcceptAll() AppOption {
+	return func(a *App) { a.acceptAll = true }
+}
+
+// WithHistory sets history messages to display on resume.
+func WithHistory(msgs []HistoryMessage) AppOption {
+	return func(a *App) { a.history = msgs }
+}
 
 // App is the main TUI application model.
 // Architecture: terminal-streaming with tea.Println for flushed history
@@ -21,15 +44,23 @@ type App struct {
 	inputZone *components.InputZone
 
 	// Active interaction state (rendered in View)
-	activeTools []components.ToolCall
-	streaming   string
+	activeTools  []components.ToolCall
+	streaming    string
 	showThinking bool
 
 	// State
-	width            int
-	height           int
-	isStreaming       bool
-	quitting         bool
+	width       int
+	height      int
+	isStreaming bool
+	quitting    bool
+
+	// Compact mode (ask command)
+	initialMessage string
+	autoQuit       bool
+	acceptAll      bool
+
+	// Session history (resume mode)
+	history []HistoryMessage
 
 	// Current prompt state (token for response)
 	currentPromptToken string
@@ -40,23 +71,81 @@ type App struct {
 }
 
 // NewApp creates a new TUI application.
-func NewApp(client *wsclient.Client, sessionID string) *App {
-	return &App{
+func NewApp(client *wsclient.Client, sessionID string, opts ...AppOption) *App {
+	a := &App{
 		header:    components.NewHeader(),
 		inputZone: components.NewInputZone(),
 		client:    client,
 		sessionID: sessionID,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Init initializes the application.
 func (a *App) Init() tea.Cmd {
-	return tea.Batch(
+	if a.initialMessage != "" {
+		return tea.Batch(
+			tea.ClearScreen,
+			a.inputZone.Init(),
+			a.initCompact(),
+		)
+	}
+	cmds := []tea.Cmd{
 		tea.ClearScreen,
 		a.inputZone.Init(),
 		a.inputZone.Focus(),
-		tea.Println(components.RenderWelcome()),
-	)
+	}
+
+	if len(a.history) > 0 {
+		cmds = append(cmds, tea.Println(components.RenderWelcome()))
+		for _, m := range a.history {
+			switch m.Role {
+			case "user":
+				cmds = append(cmds, tea.Println("\n"+components.RenderUserMessage(m.Content, a.width)))
+			case "assistant":
+				cmds = append(cmds, tea.Println("\n"+components.RenderAssistantMessage(m.Content, a.width)))
+			case "tool_log":
+				cmds = append(cmds, tea.Println(components.RenderToolLog(m.Content)))
+			default:
+				cmds = append(cmds, tea.Println(components.RenderAssistantMessage(m.Content, a.width)))
+			}
+		}
+	} else {
+		cmds = append(cmds, tea.Println(components.RenderWelcome()))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// initCompact sends AcceptAllTools (if needed) then the initial message.
+func (a *App) initCompact() tea.Cmd {
+	a.inputZone.SetDisabled(true)
+	a.showThinking = true
+	a.isStreaming = true
+	a.header.SetStreaming(true)
+
+	msg := a.initialMessage
+	client := a.client
+	accept := a.acceptAll
+
+	printCmd := tea.Println("\n" + components.RenderUserMessage(msg, a.width))
+
+	sendCmd := func() tea.Msg {
+		if accept {
+			if err := client.AcceptAllTools(); err != nil {
+				return sendErrorMsg{err: err}
+			}
+		}
+		if err := client.SendMessage(msg); err != nil {
+			return sendErrorMsg{err: err}
+		}
+		return nil
+	}
+
+	return tea.Batch(printCmd, sendCmd)
 }
 
 // Update handles messages and updates state.
@@ -123,6 +212,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if msg.Content != "" {
 			cmds = append(cmds, tea.Println("\n"+components.RenderAssistantMessage(msg.Content, a.width)))
 		}
+
+		if a.autoQuit {
+			a.quitting = true
+			cmds = append(cmds, tea.Quit)
+			return a, tea.Batch(cmds...)
+		}
+
 		cmds = append(cmds, a.inputZone.Focus())
 		return a, tea.Batch(cmds...)
 

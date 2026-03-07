@@ -215,6 +215,54 @@ func (c *Client) AcceptAllTools() error {
 	return nil
 }
 
+// HistoryMessage is a message returned by LoadMessages.
+type HistoryMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+	Ts      string `json:"ts"`
+}
+
+// LoadMessages fetches the last N messages from the session history.
+func (c *Client) LoadMessages(limit int) ([]HistoryMessage, error) {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	params, _ := json.Marshal(map[string]int{"limit": limit})
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: string(wsprotocol.MethodLoadMessages),
+		Params: params,
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return nil, fmt.Errorf("marshal load_messages: %w", err)
+	}
+
+	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
+		return nil, fmt.Errorf("send load_messages: %w", err)
+	}
+
+	resp, err := c.ReadFrame()
+	if err != nil {
+		return nil, fmt.Errorf("read load_messages response: %w", err)
+	}
+
+	if resp.OK != nil && !*resp.OK {
+		return nil, fmt.Errorf("load_messages failed: %s", resp.Error)
+	}
+
+	var msgs []HistoryMessage
+	if resp.Payload != nil {
+		if err := json.Unmarshal(resp.Payload, &msgs); err != nil {
+			return nil, fmt.Errorf("unmarshal messages: %w", err)
+		}
+	}
+
+	return msgs, nil
+}
+
 // ReadFrame reads the next frame from the connection.
 func (c *Client) ReadFrame() (wsprotocol.Frame, error) {
 	_, data, err := c.conn.Read(c.ctx)

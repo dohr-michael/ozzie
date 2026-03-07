@@ -90,6 +90,10 @@ func ScheduleTaskManifest() *PluginManifest {
 						Type:        "integer",
 						Description: "Maximum number of runs before auto-disabling (0 = unlimited)",
 					},
+					"tool_constraints": {
+						Type:        "object",
+						Description: "Per-tool argument constraints. Keys are tool names, values are constraint objects with fields: allowed_commands (binary allowlist), allowed_patterns (regex allowlist), blocked_patterns (regex denylist), allowed_paths (glob allowlist), allowed_domains (domain allowlist).",
+					},
 				},
 			},
 		},
@@ -97,16 +101,17 @@ func ScheduleTaskManifest() *PluginManifest {
 }
 
 type scheduleTaskInput struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Cron        string            `json:"cron"`
-	Interval    string            `json:"interval"`
-	OnEvent     string            `json:"on_event"`
-	Tools       []string          `json:"tools"`
-	WorkDir     string            `json:"work_dir"`
-	Env         map[string]string `json:"env"`
-	Cooldown    string            `json:"cooldown"`
-	MaxRuns     int               `json:"max_runs"`
+	Title           string                            `json:"title"`
+	Description     string                            `json:"description"`
+	Cron            string                            `json:"cron"`
+	Interval        string                            `json:"interval"`
+	OnEvent         string                            `json:"on_event"`
+	Tools           []string                          `json:"tools"`
+	WorkDir         string                            `json:"work_dir"`
+	Env             map[string]string                 `json:"env"`
+	Cooldown        string                            `json:"cooldown"`
+	MaxRuns         int                               `json:"max_runs"`
+	ToolConstraints map[string]*events.ToolConstraint `json:"tool_constraints,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
@@ -153,11 +158,12 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		MaxRuns:     input.MaxRuns,
 		Enabled:     true,
 		TaskTemplate: &scheduler.TaskTemplate{
-			Title:       input.Title,
-			Description: input.Description,
-			Tools:       input.Tools,
-			WorkDir:     input.WorkDir,
-			Env:         input.Env,
+			Title:           input.Title,
+			Description:     input.Description,
+			Tools:           input.Tools,
+			WorkDir:         input.WorkDir,
+			Env:             input.Env,
+			ToolConstraints: input.ToolConstraints,
 		},
 	}
 

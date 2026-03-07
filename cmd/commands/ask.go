@@ -1,18 +1,16 @@
 package commands
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/urfave/cli/v3"
 
+	"github.com/dohr-michael/ozzie/clients/tui"
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
-	"github.com/dohr-michael/ozzie/internal/events"
 )
 
 // NewAskCommand returns the ask subcommand.
@@ -42,6 +40,11 @@ func NewAskCommand() *cli.Command {
 				Usage: "Response timeout in seconds",
 				Value: 120,
 			},
+			&cli.StringFlag{
+				Name:    "working-dir",
+				Aliases: []string{"w"},
+				Usage:   "Working directory for the session (default: current directory)",
+			},
 		},
 		Action: runAsk,
 	}
@@ -57,6 +60,11 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	sessionFlag := cmd.String("session")
 	acceptAll := cmd.Bool("dangerously-accept-all")
 
+	workDir := cmd.String("working-dir")
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
 	timeoutSecs := cmd.Int("timeout")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
@@ -67,11 +75,9 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	}
 	defer client.Close()
 
-	// Open or resume session
-	cwd, _ := os.Getwd()
 	sid, err := client.OpenSession(wsclient.OpenSessionOpts{
 		SessionID: sessionFlag,
-		RootDir:   cwd,
+		RootDir:   workDir,
 	})
 	if err != nil {
 		return fmt.Errorf("open session: %w", err)
@@ -80,120 +86,32 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 		fmt.Fprintf(os.Stderr, "session: %s\n", sid)
 	}
 
-	// Enable accept-all mode if requested
+	opts := []tui.AppOption{
+		tui.WithInitialMessage(message),
+		tui.WithAutoQuit(),
+	}
 	if acceptAll {
-		if err := client.AcceptAllTools(); err != nil {
-			return fmt.Errorf("accept all tools: %w", err)
-		}
+		opts = append(opts, tui.WithAcceptAll())
 	}
 
-	if err := client.SendMessage(message); err != nil {
-		return fmt.Errorf("send message: %w", err)
+	model := tui.NewApp(client, sid, opts...)
+	p := tea.NewProgram(model)
+
+	// Simple read loop (no reconnection for single-shot).
+	go func() {
+		for {
+			frame, err := client.ReadFrame()
+			if err != nil {
+				return
+			}
+			if msg := tui.Project(frame); msg != nil {
+				p.Send(msg)
+			}
+		}
+	}()
+
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("tui: %w", err)
 	}
-
-	// Read frames until we get the final assistant.message
-	streaming := false
-	for {
-		frame, err := client.ReadFrame()
-		if err != nil {
-			if ctx.Err() != nil {
-				return fmt.Errorf("timeout waiting for response")
-			}
-			return fmt.Errorf("read frame: %w", err)
-		}
-
-		if frame.Event == "" {
-			continue
-		}
-
-		switch events.EventType(frame.Event) {
-		case events.EventAssistantStream:
-			var evt events.Event
-			if err := json.Unmarshal(frame.Payload, &evt); err != nil {
-				continue
-			}
-			payload, ok := events.GetAssistantStreamPayload(evt)
-			if !ok {
-				continue
-			}
-
-			switch payload.Phase {
-			case events.StreamPhaseStart:
-				streaming = true
-			case events.StreamPhaseDelta:
-				fmt.Fprint(os.Stdout, payload.Content)
-			case events.StreamPhaseEnd:
-				if streaming {
-					fmt.Fprintln(os.Stdout)
-				}
-			}
-
-		case events.EventPromptRequest:
-			var evt events.Event
-			if err := json.Unmarshal(frame.Payload, &evt); err != nil {
-				continue
-			}
-			payload, ok := events.GetPromptRequestPayload(evt)
-			if !ok {
-				continue
-			}
-
-			scanner := bufio.NewScanner(os.Stdin)
-
-			if payload.Type == events.PromptTypeSelect && len(payload.Options) > 0 {
-				// Select prompt — show numbered options
-				fmt.Fprintf(os.Stderr, "\n%s\n", payload.Label)
-				for i, opt := range payload.Options {
-					fmt.Fprintf(os.Stderr, "  %d) %s\n", i+1, opt.Label)
-				}
-				fmt.Fprintf(os.Stderr, "Choice [1-%d]: ", len(payload.Options))
-
-				selectedValue := "deny"
-				if scanner.Scan() {
-					answer := strings.TrimSpace(scanner.Text())
-					for i, opt := range payload.Options {
-						if answer == fmt.Sprintf("%d", i+1) {
-							selectedValue = opt.Value
-							break
-						}
-					}
-				}
-
-				if err := client.RespondToPromptWithValue(payload.Token, selectedValue); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
-				}
-			} else {
-				// Confirm prompt — [y/N]
-				fmt.Fprintf(os.Stderr, "\n%s [y/N] ", payload.Label)
-				cancelled := true
-				if scanner.Scan() {
-					answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-					cancelled = answer != "y" && answer != "yes"
-				}
-
-				if err := client.RespondToPrompt(payload.Token, cancelled); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: send prompt response: %v\n", err)
-				}
-			}
-
-		case events.EventAssistantMessage:
-			var evt events.Event
-			if err := json.Unmarshal(frame.Payload, &evt); err != nil {
-				continue
-			}
-			payload, ok := events.GetAssistantMessagePayload(evt)
-			if !ok {
-				continue
-			}
-
-			if payload.Error != "" {
-				return fmt.Errorf("agent error: %s", payload.Error)
-			}
-
-			if !streaming && payload.Content != "" {
-				fmt.Fprintln(os.Stdout, payload.Content)
-			}
-			return nil
-		}
-	}
+	return nil
 }

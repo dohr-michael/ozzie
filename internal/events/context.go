@@ -62,6 +62,104 @@ func TaskEnvFromContext(ctx context.Context) map[string]string {
 	return env
 }
 
+type toolConstraintsKey struct{}
+
+// ToolConstraint defines argument-level restrictions for a specific tool.
+// Constraints are dynamic (per-session, per-task) and carried in the Go context.
+type ToolConstraint struct {
+	AllowedCommands []string `json:"allowed_commands,omitempty"` // binary allowlist (run_command)
+	AllowedPatterns []string `json:"allowed_patterns,omitempty"` // regex on full command string
+	BlockedPatterns []string `json:"blocked_patterns,omitempty"` // regex denylist (additive)
+	AllowedPaths    []string `json:"allowed_paths,omitempty"`    // glob allowlist for paths
+	AllowedDomains  []string `json:"allowed_domains,omitempty"`  // domain allowlist (web_fetch)
+}
+
+// ContextWithToolConstraints returns a context carrying per-tool constraints.
+func ContextWithToolConstraints(ctx context.Context, constraints map[string]*ToolConstraint) context.Context {
+	if len(constraints) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, toolConstraintsKey{}, constraints)
+}
+
+// ToolConstraintsFromContext extracts tool constraints from the context, or nil if absent.
+func ToolConstraintsFromContext(ctx context.Context) map[string]*ToolConstraint {
+	c, _ := ctx.Value(toolConstraintsKey{}).(map[string]*ToolConstraint)
+	return c
+}
+
+// MergeToolConstraints returns the intersection (most restrictive) of two constraint maps.
+// Task-specific constraints override session constraints for the same tool.
+// Nil constraints are treated as "no restriction" (pass-through).
+func MergeToolConstraints(session, task map[string]*ToolConstraint) map[string]*ToolConstraint {
+	if len(session) == 0 {
+		return task
+	}
+	if len(task) == 0 {
+		return session
+	}
+	merged := make(map[string]*ToolConstraint, len(session)+len(task))
+	for k, v := range session {
+		merged[k] = v
+	}
+	for k, v := range task {
+		if existing, ok := merged[k]; ok {
+			merged[k] = mergeConstraint(existing, v)
+		} else {
+			merged[k] = v
+		}
+	}
+	return merged
+}
+
+// mergeConstraint merges two constraints for the same tool (intersection — most restrictive wins).
+func mergeConstraint(a, b *ToolConstraint) *ToolConstraint {
+	m := &ToolConstraint{}
+	// For allowlists: if both set, keep the shorter (more restrictive).
+	// If only one set, keep it (it's a restriction vs. none).
+	m.AllowedCommands = intersectOrKeep(a.AllowedCommands, b.AllowedCommands)
+	m.AllowedPatterns = mergeSlice(a.AllowedPatterns, b.AllowedPatterns)
+	m.BlockedPatterns = mergeSlice(a.BlockedPatterns, b.BlockedPatterns)
+	m.AllowedPaths = intersectOrKeep(a.AllowedPaths, b.AllowedPaths)
+	m.AllowedDomains = intersectOrKeep(a.AllowedDomains, b.AllowedDomains)
+	return m
+}
+
+// intersectOrKeep returns the intersection if both are set, or whichever is set.
+func intersectOrKeep(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	set := make(map[string]bool, len(b))
+	for _, v := range b {
+		set[v] = true
+	}
+	var result []string
+	for _, v := range a {
+		if set[v] {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+// mergeSlice concatenates two slices (additive for deny/pattern lists).
+func mergeSlice(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	result := make([]string, 0, len(a)+len(b))
+	result = append(result, a...)
+	result = append(result, b...)
+	return result
+}
+
 type taskIDKey struct{}
 
 // ContextWithTaskID returns a context carrying the current task ID.

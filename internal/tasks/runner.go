@@ -105,6 +105,9 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 	if len(r.task.Config.Env) > 0 {
 		ctx = events.ContextWithTaskEnv(ctx, r.task.Config.Env)
 	}
+	if len(r.task.Config.ToolConstraints) > 0 {
+		ctx = events.ContextWithToolConstraints(ctx, r.task.Config.ToolConstraints)
+	}
 
 	// Seed pre-approved tools into permissions (from schedule or submit_task)
 	if r.perms != nil && r.task.SessionID != "" && len(r.task.Config.ApprovedTools) > 0 {

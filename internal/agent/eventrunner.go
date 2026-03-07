@@ -100,6 +100,7 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 	er.unsubscribe = cfg.EventBus.Subscribe(er.handleEvent,
 		events.EventUserMessage,
 		events.EventTaskCompleted,
+		events.EventToolCall,
 	)
 
 	return er
@@ -114,6 +115,10 @@ func (er *EventRunner) handleEvent(event events.Event) {
 	case events.EventTaskCompleted:
 		if payload, ok := events.GetTaskCompletedPayload(event); ok && event.SessionID != "" {
 			go er.handleTaskCompleted(event.SessionID, payload)
+		}
+	case events.EventToolCall:
+		if payload, ok := events.GetToolCallPayload(event); ok && event.SessionID != "" {
+			er.persistToolLog(event.SessionID, payload)
 		}
 	}
 }
@@ -161,6 +166,10 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 
 	messages := make([]*schema.Message, 0, len(history))
 	for _, m := range history {
+		// Skip tool log entries — they are for TUI history display only.
+		if m.Role == sessions.RoleToolLog {
+			continue
+		}
 		msg := m.ToSchemaMessage()
 		// Skip messages with empty content — APIs reject these.
 		if msg.Content == "" {
@@ -285,11 +294,18 @@ func (er *EventRunner) runAgentBuffered(sessionID string, runner *adk.Runner, me
 	return er.consumeIteratorBuffered(sessionID, iter)
 }
 
-// withSessionWorkDir propagates the session's RootDir as WorkDir in the context
-// so that filesystem tools (list_files, read, etc.) resolve paths correctly.
+// withSessionContext propagates the session's RootDir as WorkDir and
+// ToolConstraints into the context.
 func (er *EventRunner) withSessionWorkDir(ctx context.Context, sessionID string) context.Context {
-	if sess, err := er.store.Get(sessionID); err == nil && sess.RootDir != "" {
+	sess, err := er.store.Get(sessionID)
+	if err != nil {
+		return ctx
+	}
+	if sess.RootDir != "" {
 		ctx = events.ContextWithWorkDir(ctx, sess.RootDir)
+	}
+	if len(sess.ToolConstraints) > 0 {
+		ctx = events.ContextWithToolConstraints(ctx, sess.ToolConstraints)
 	}
 	return ctx
 }
@@ -506,6 +522,31 @@ func (er *EventRunner) handleTaskCompleted(sessionID string, payload events.Task
 	if err := er.store.AppendMessage(sessionID, msg); err != nil {
 		slog.Error("persist task completed notification", "error", err, "session_id", sessionID)
 	}
+}
+
+// persistToolLog saves a compact summary of a completed/failed tool call.
+func (er *EventRunner) persistToolLog(sessionID string, p events.ToolCallPayload) {
+	if p.Status != events.ToolStatusCompleted && p.Status != events.ToolStatusFailed {
+		return
+	}
+	summary := p.Name
+	if p.Error != "" {
+		summary += " ✗ " + truncate(p.Error, 100)
+	} else if p.Result != "" {
+		summary += " → " + truncate(p.Result, 200)
+	}
+	msg := sessions.Message{Role: sessions.RoleToolLog, Content: summary, Ts: time.Now()}
+	if err := er.store.AppendMessage(sessionID, msg); err != nil {
+		slog.Error("persist tool log", "error", err, "session_id", sessionID)
+	}
+}
+
+// truncate shortens s to maxLen, appending "…" if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
 }
 
 // Close stops the event runner.

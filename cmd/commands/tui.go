@@ -29,6 +29,11 @@ func NewTUICommand() *cli.Command {
 				Aliases: []string{"s"},
 				Usage:   "Session ID to resume (empty = new session)",
 			},
+			&cli.StringFlag{
+				Name:    "working-dir",
+				Aliases: []string{"w"},
+				Usage:   "Working directory for the session (default: current directory)",
+			},
 		},
 		Action: runTUI,
 	}
@@ -38,6 +43,11 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 	gatewayURL := cmd.String("gateway")
 	sessionFlag := cmd.String("session")
 
+	workDir := cmd.String("working-dir")
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
 	ctx := context.Background()
 
 	client, err := wsclient.Dial(ctx, gatewayURL)
@@ -45,21 +55,32 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("connect to gateway: %w", err)
 	}
 
-	cwd, _ := os.Getwd()
 	sid, err := client.OpenSession(wsclient.OpenSessionOpts{
 		SessionID: sessionFlag,
-		RootDir:   cwd,
+		RootDir:   workDir,
 	})
 	if err != nil {
 		client.Close()
 		return fmt.Errorf("open session: %w", err)
 	}
 
-	model := tui.NewApp(client, sid)
+	var opts []tui.AppOption
+	if sessionFlag != "" {
+		msgs, err := client.LoadMessages(10)
+		if err == nil && len(msgs) > 0 {
+			history := make([]tui.HistoryMessage, len(msgs))
+			for i, m := range msgs {
+				history[i] = tui.HistoryMessage{Role: m.Role, Content: m.Content}
+			}
+			opts = append(opts, tui.WithHistory(history))
+		}
+	}
+
+	model := tui.NewApp(client, sid, opts...)
 	p := tea.NewProgram(model)
 
 	// Goroutine: read WS frames with reconnection.
-	go readLoop(ctx, p, client, gatewayURL, sid, cwd)
+	go readLoop(ctx, p, client, gatewayURL, sid, workDir)
 
 	if _, err := p.Run(); err != nil {
 		client.Close()

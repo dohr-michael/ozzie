@@ -97,6 +97,11 @@ func RenderAssistantMessage(content string, width int) string {
 	return RenderMarkdownWithWidth(content, width-2)
 }
 
+// RenderToolLog renders a compact tool call summary from history (dim, one line).
+func RenderToolLog(content string) string {
+	return ToolBulletStyle.Render("⏺ ") + ToolArgsStyle.Render(content)
+}
+
 // RenderStreamingText renders in-progress streaming text with a cursor.
 func RenderStreamingText(content string) string {
 	return content + SpinnerStyle.Render("▌")

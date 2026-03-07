@@ -415,6 +415,30 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 		}
 		c.sendOK(ctx, frame.ID, map[string]string{"status": "accepted"})
 
+	case MethodLoadMessages:
+		var params struct {
+			Limit int `json:"limit"`
+		}
+		if frame.Params != nil {
+			_ = json.Unmarshal(frame.Params, &params)
+		}
+		if params.Limit <= 0 || params.Limit > 50 {
+			params.Limit = 10
+		}
+		if c.sessionID == "" {
+			c.sendError(ctx, frame.ID, "no session open")
+			return
+		}
+		msgs, err := c.hub.store.LoadMessages(c.sessionID)
+		if err != nil {
+			c.sendError(ctx, frame.ID, "load messages: "+err.Error())
+			return
+		}
+		if len(msgs) > params.Limit {
+			msgs = msgs[len(msgs)-params.Limit:]
+		}
+		c.sendOK(ctx, frame.ID, msgs)
+
 	default:
 		c.sendError(ctx, frame.ID, "unknown method: "+frame.Method)
 	}

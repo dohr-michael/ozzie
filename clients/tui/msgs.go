@@ -96,6 +96,12 @@ type LLMTelemetryMsg struct {
 	TokensOut int
 }
 
+// HistoryMessage represents a message from session history for display on resume.
+type HistoryMessage struct {
+	Role    string
+	Content string
+}
+
 // sendErrorMsg carries an error from an async WS send.
 type sendErrorMsg struct {
 	err error
