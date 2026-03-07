@@ -2,12 +2,21 @@ package tasks
 
 import "context"
 
+// ActorInfo describes one available actor for task scheduling.
+type ActorInfo struct {
+	ProviderName string   `json:"provider_name"`
+	Tags         []string `json:"tags,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+}
+
 // TaskSubmitter is the interface for submitting and managing tasks.
 // Implemented by actors.ActorPool.
 type TaskSubmitter interface {
 	Submit(t *Task) error
 	Cancel(taskID string, reason string) error
 	Store() Store
+	// AvailableActors returns a deduplicated summary of actor tags and capabilities.
+	AvailableActors() []ActorInfo
 }
 
 // InlineExecutor is implemented by pools that can execute tasks synchronously

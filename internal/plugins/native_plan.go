@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -33,7 +34,7 @@ func PlanTaskManifest() *PluginManifest {
 		Tools: []ToolSpec{
 			{
 				Name:        "plan_task",
-				Description: "Create a structured execution plan with dependent sub-tasks. Each step becomes an async task. Use depends_on to declare dependencies between steps and control execution order.",
+				Description: "Create a structured execution plan with dependent sub-tasks. Each step becomes an async task. Use depends_on to declare dependencies between steps and control execution order. IMPORTANT: Only use plan_task when you genuinely need multiple PARALLEL or DEPENDENT steps. For simple sequential tasks, prefer submit_task or direct tool calls instead.",
 				Parameters: map[string]ParamSpec{
 					"title": {
 						Type:        "string",
@@ -77,7 +78,7 @@ func PlanTaskManifest() *PluginManifest {
 								},
 								"actor_tags": {
 									Type:        "array",
-									Description: "Tags to match actors for this step (e.g. [\"coder\"]).",
+									Description: "Tags to match actors for this step (e.g. [\"self-hosted\"]).",
 									Items:       &ParamSpec{Type: "string"},
 								},
 								"required_capabilities": {
@@ -123,8 +124,16 @@ type planTaskEntry struct {
 }
 
 // Info returns the tool info for Eino registration.
+// Descriptions for actor_tags and required_capabilities are dynamically enriched
+// with available actors from the pool.
 func (t *PlanTaskTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return toolSpecToToolInfo(&PlanTaskManifest().Tools[0]), nil
+	manifest := PlanTaskManifest()
+	spec := &manifest.Tools[0]
+	// Enrich step-level actor_tags / required_capabilities descriptions
+	if spec.Parameters["steps"].Items != nil {
+		enrichActorParamDescriptions(&ToolSpec{Parameters: spec.Parameters["steps"].Items.Properties}, t.pool.AvailableActors())
+	}
+	return toolSpecToToolInfo(spec), nil
 }
 
 // InvokableRun creates a plan with dependent sub-tasks.
@@ -138,6 +147,15 @@ func (t *PlanTaskTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	}
 	if len(input.Steps) == 0 {
 		return "", fmt.Errorf("plan_task: at least one step is required")
+	}
+
+	// Resolve relative work_dir to absolute so sub-agents find the directory
+	if input.WorkDir != "" && !filepath.IsAbs(input.WorkDir) {
+		abs, err := filepath.Abs(input.WorkDir)
+		if err != nil {
+			return "", fmt.Errorf("plan_task: resolve work_dir: %w", err)
+		}
+		input.WorkDir = abs
 	}
 
 	// Validate depends_on indices

@@ -505,9 +505,9 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		slog.Warn("failed to register trigger_schedule tool", "error", err)
 	}
 
-	// ToolSet: all native/built-in tools are always active,
-	// only WASM plugin tools require dynamic activation.
-	// Must be computed AFTER all native tools are registered.
+	// ToolSet: all native tools are always active (core).
+	// Only MCP tools require on-demand activation via activate_tools.
+	// Gemini Flash doesn't handle the activate-then-use pattern reliably.
 	coreTools := toolRegistry.NativeToolNames()
 	toolSet := agent.NewToolSet(coreTools, toolRegistry.ToolNames())
 
@@ -526,12 +526,11 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	}
 	toolSet.RegisterCore("activate_skill")
 
-	// Register run_workflow (core tool — executes skill workflow DAGs)
+	// Register run_workflow (on-demand — activated via activate_skill or explicitly)
 	runWorkflowTool := plugins.NewRunWorkflowTool(skillExecutor)
 	if err := toolRegistry.RegisterNative("run_workflow", runWorkflowTool, plugins.RunWorkflowManifest()); err != nil {
 		slog.Warn("failed to register run_workflow tool", "error", err)
 	}
-	toolSet.RegisterCore("run_workflow")
 
 	slog.Info("tools loaded", "count", len(toolRegistry.ToolNames()))
 

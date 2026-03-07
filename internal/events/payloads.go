@@ -301,8 +301,10 @@ type TaskCreatedPayload struct {
 func (TaskCreatedPayload) EventType() EventType { return EventTaskCreated }
 
 type TaskStartedPayload struct {
-	TaskID string `json:"task_id"`
-	Title  string `json:"title"`
+	TaskID       string `json:"task_id"`
+	Title        string `json:"title"`
+	ActorID      string `json:"actor_id,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
 }
 
 func (TaskStartedPayload) EventType() EventType { return EventTaskStarted }
@@ -320,6 +322,8 @@ func (TaskProgressPayload) EventType() EventType { return EventTaskProgress }
 type TaskCompletedPayload struct {
 	TaskID        string        `json:"task_id"`
 	Title         string        `json:"title"`
+	ActorID       string        `json:"actor_id,omitempty"`
+	ProviderName  string        `json:"provider_name,omitempty"`
 	OutputSummary string        `json:"output_summary,omitempty"`
 	Duration      time.Duration `json:"duration,omitempty"`
 	TokensInput   int           `json:"tokens_input,omitempty"`
@@ -329,11 +333,13 @@ type TaskCompletedPayload struct {
 func (TaskCompletedPayload) EventType() EventType { return EventTaskCompleted }
 
 type TaskFailedPayload struct {
-	TaskID     string `json:"task_id"`
-	Title      string `json:"title"`
-	Error      string `json:"error"`
-	RetryCount int    `json:"retry_count"`
-	WillRetry  bool   `json:"will_retry"`
+	TaskID       string `json:"task_id"`
+	Title        string `json:"title"`
+	ActorID      string `json:"actor_id,omitempty"`
+	ProviderName string `json:"provider_name,omitempty"`
+	Error        string `json:"error"`
+	RetryCount   int    `json:"retry_count"`
+	WillRetry    bool   `json:"will_retry"`
 }
 
 func (TaskFailedPayload) EventType() EventType { return EventTaskFailed }

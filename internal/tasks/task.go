@@ -80,6 +80,8 @@ type Task struct {
 	Tags         []string     `json:"tags,omitempty"`
 	RetryCount   int          `json:"retry_count"`
 	MaxRetries   int          `json:"max_retries"`
+	ActorID      string       `json:"actor_id,omitempty"`
+	ProviderName string       `json:"provider_name,omitempty"`
 }
 
 // Checkpoint records a point-in-time snapshot of task progress.

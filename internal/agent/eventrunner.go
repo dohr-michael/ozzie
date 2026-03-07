@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -215,8 +217,8 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		}
 	}
 
-	// Retry loop: up to 2 attempts (initial + retry after tool activation)
-	for attempt := 0; attempt < 2; attempt++ {
+	// Retry loop: up to 3 attempts (initial buffered + retry after tool activation + streaming)
+	for attempt := 0; attempt < 3; attempt++ {
 		activeNames := er.toolSet.ActiveToolNames(sessionID)
 		tools := er.registry.ToolsByNames(activeNames)
 
@@ -242,8 +244,19 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 				continue
 			}
 
-			// No activation — surface any error from the buffered run.
+			// No explicit activation — check if the LLM tried to call an
+			// inactive tool directly (without activate_tools first).
+			// If so, auto-activate the tool and retry.
 			if runErr != nil {
+				if toolName := extractMissingToolName(runErr.Error()); toolName != "" {
+					if er.toolSet.IsKnown(toolName) {
+						er.toolSet.Activate(sessionID, toolName)
+						slog.Info("auto-activated tool called by LLM",
+							"tool", toolName,
+							"session_id", sessionID)
+						continue
+					}
+				}
 				er.emitError(sessionID, runErr.Error())
 				return
 			}
@@ -588,4 +601,20 @@ func (er *EventRunner) emitStreamEnd(sessionID string) {
 	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantStreamPayload{
 		Phase: events.StreamPhaseEnd,
 	}, sessionID))
+}
+
+// toolNotFoundRe matches Eino ADK errors like "tool submit_task not found in toolsNode indexes".
+var toolNotFoundRe = regexp.MustCompile(`tool (\S+) not found in toolsNode`)
+
+// extractMissingToolName returns the tool name from an Eino "tool not found" error,
+// or "" if the error is unrelated.
+func extractMissingToolName(errMsg string) string {
+	if !strings.Contains(errMsg, "not found in toolsNode") {
+		return ""
+	}
+	m := toolNotFoundRe.FindStringSubmatch(errMsg)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }

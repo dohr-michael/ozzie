@@ -127,8 +127,10 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 	}
 
 	r.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskStartedPayload{
-		TaskID: task.ID,
-		Title:  task.Title,
+		TaskID:       task.ID,
+		Title:        task.Title,
+		ActorID:      task.ActorID,
+		ProviderName: task.ProviderName,
 	}, task.SessionID))
 
 	// Skill shortcut: execute directly without agent reasoning
@@ -172,9 +174,18 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, memoryContext))
 
-	slog.Debug("task agent instruction",
+	toolNames := make([]string, len(tools))
+	for i, t := range tools {
+		if info, _ := t.Info(ctx); info != nil {
+			toolNames[i] = info.Name
+		}
+	}
+	slog.Info("task agent setup",
 		"task_id", task.ID,
-		"instruction_length", len(instruction),
+		"actor_id", task.ActorID,
+		"provider", task.ProviderName,
+		"tools", toolNames,
+		"instruction_len", len(instruction),
 	)
 
 	runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
@@ -297,6 +308,8 @@ func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string
 	r.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskCompletedPayload{
 		TaskID:        task.ID,
 		Title:         task.Title,
+		ActorID:       task.ActorID,
+		ProviderName:  task.ProviderName,
 		OutputSummary: truncate(output, 200),
 		Duration:      now.Sub(startedAt),
 	}, task.SessionID))
@@ -324,11 +337,13 @@ func (r *TaskRunner) failTask(task *Task, startedAt time.Time, taskErr error) er
 	})
 
 	r.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskFailedPayload{
-		TaskID:     task.ID,
-		Title:      task.Title,
-		Error:      taskErr.Error(),
-		RetryCount: task.RetryCount,
-		WillRetry:  willRetry,
+		TaskID:       task.ID,
+		Title:        task.Title,
+		ActorID:      task.ActorID,
+		ProviderName: task.ProviderName,
+		Error:        taskErr.Error(),
+		RetryCount:   task.RetryCount,
+		WillRetry:    willRetry,
 	}, task.SessionID))
 
 	_ = startedAt // used in event Duration if needed

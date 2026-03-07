@@ -427,6 +427,222 @@ func TestPriorityRank(t *testing.T) {
 	}
 }
 
+// --- Dependency resolution tests ---
+
+func TestDependencyResolution(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	// Create parent task (completed)
+	parent := &tasks.Task{
+		Title:       "parent-task",
+		Description: "The parent",
+	}
+	if err := pool.Submit(parent); err != nil {
+		t.Fatalf("Submit parent: %v", err)
+	}
+	parent.Status = tasks.TaskCompleted
+	if err := pool.store.Update(parent); err != nil {
+		t.Fatalf("Update parent: %v", err)
+	}
+
+	// Create child task with dependency on parent
+	child := &tasks.Task{
+		Title:       "child-task",
+		Description: "Depends on parent",
+		DependsOn:   []string{parent.ID},
+	}
+	if err := pool.Submit(child); err != nil {
+		t.Fatalf("Submit child: %v", err)
+	}
+
+	// Verify dependency is resolved
+	pool.mu.Lock()
+	resolved := pool.dependenciesResolved(child)
+	pool.mu.Unlock()
+
+	if !resolved {
+		t.Error("expected dependencies to be resolved (parent is completed)")
+	}
+}
+
+func TestDependencyResolution_NotCompleted(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	// Create parent task (still running)
+	parent := &tasks.Task{
+		Title:       "parent-task",
+		Description: "The parent",
+	}
+	if err := pool.Submit(parent); err != nil {
+		t.Fatalf("Submit parent: %v", err)
+	}
+	parent.Status = tasks.TaskRunning
+	if err := pool.store.Update(parent); err != nil {
+		t.Fatalf("Update parent: %v", err)
+	}
+
+	child := &tasks.Task{
+		Title:       "child-task",
+		Description: "Depends on running parent",
+		DependsOn:   []string{parent.ID},
+	}
+	if err := pool.Submit(child); err != nil {
+		t.Fatalf("Submit child: %v", err)
+	}
+
+	pool.mu.Lock()
+	resolved := pool.dependenciesResolved(child)
+	pool.mu.Unlock()
+
+	if resolved {
+		t.Error("expected dependencies NOT to be resolved (parent is running)")
+	}
+}
+
+func TestDependencyResolution_Failed(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+
+	// Create parent task (failed)
+	parent := &tasks.Task{
+		Title:       "parent-task",
+		Description: "The parent",
+	}
+	if err := pool.Submit(parent); err != nil {
+		t.Fatalf("Submit parent: %v", err)
+	}
+	parent.Status = tasks.TaskFailed
+	if err := pool.store.Update(parent); err != nil {
+		t.Fatalf("Update parent: %v", err)
+	}
+
+	child := &tasks.Task{
+		Title:       "child-task",
+		Description: "Depends on failed parent",
+		DependsOn:   []string{parent.ID},
+	}
+	if err := pool.Submit(child); err != nil {
+		t.Fatalf("Submit child: %v", err)
+	}
+
+	pool.mu.Lock()
+	resolved := pool.dependenciesResolved(child)
+	pool.mu.Unlock()
+
+	if resolved {
+		t.Error("expected dependencies NOT to be resolved (parent failed)")
+	}
+}
+
+func TestSchedulePicksUpResolvedDeps(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 2},
+	})
+
+	// Create and complete parent task
+	parent := &tasks.Task{
+		Title:       "parent-task",
+		Description: "The parent",
+	}
+	if err := pool.Submit(parent); err != nil {
+		t.Fatalf("Submit parent: %v", err)
+	}
+	parent.Status = tasks.TaskCompleted
+	if err := pool.store.Update(parent); err != nil {
+		t.Fatalf("Update parent: %v", err)
+	}
+
+	// Create child with dependency
+	child := &tasks.Task{
+		Title:       "child-task",
+		Description: "Depends on parent",
+		DependsOn:   []string{parent.ID},
+	}
+	if err := pool.Submit(child); err != nil {
+		t.Fatalf("Submit child: %v", err)
+	}
+
+	// Verify the scheduling logic: deps resolved + idle actor available
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+
+	resolved := pool.dependenciesResolved(child)
+	if !resolved {
+		t.Fatal("expected child deps to be resolved")
+	}
+
+	actor := pool.findIdleActor("", child.Tags, child.Config.RequiredCapabilities)
+	if actor == nil {
+		t.Fatal("expected to find an idle actor for the child task")
+	}
+}
+
+func TestScheduleCancelsUnresolvableDeps(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 2},
+	})
+	pool.ctx = t.Context()
+
+	// Create parent task that has failed
+	parent := &tasks.Task{
+		Title:       "parent-task",
+		Description: "This task failed",
+	}
+	if err := pool.Submit(parent); err != nil {
+		t.Fatalf("Submit parent: %v", err)
+	}
+	parent.Status = tasks.TaskFailed
+	if err := pool.store.Update(parent); err != nil {
+		t.Fatalf("Update parent: %v", err)
+	}
+
+	// Create child with dependency on failed parent
+	child := &tasks.Task{
+		Title:       "child-task",
+		Description: "Depends on failed parent",
+		DependsOn:   []string{parent.ID},
+	}
+	if err := pool.Submit(child); err != nil {
+		t.Fatalf("Submit child: %v", err)
+	}
+
+	// Run schedule — child should be auto-cancelled
+	pool.schedule()
+
+	got, err := pool.store.Get(child.ID)
+	if err != nil {
+		t.Fatalf("Get child: %v", err)
+	}
+	if got.Status != tasks.TaskCancelled {
+		t.Errorf("child status: got %s, want cancelled", got.Status)
+	}
+}
+
+func TestEventDrivenSchedulerWake(t *testing.T) {
+	pool := newTestPool(t, map[string]config.ProviderConfig{
+		"claude": {MaxConcurrent: 1},
+	})
+	pool.Start()
+	defer pool.Stop()
+
+	// Publish a task completed event — should wake the scheduler
+	pool.bus.Publish(events.NewTypedEvent(events.SourceTask, events.TaskCompletedPayload{
+		TaskID: "test-123",
+		Title:  "test",
+	}))
+
+	// Give the subscriber goroutine time to process
+	time.Sleep(100 * time.Millisecond)
+
+	// If we got here without deadlock, the event-driven wake works.
+	// The scheduler will run schedule() which won't find any pending tasks — that's fine.
+}
+
 // --- Inline execution tests ---
 
 func TestShouldInline_SingleActor(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -47,7 +48,7 @@ func SubmitTaskManifest() *PluginManifest {
 		Tools: []ToolSpec{
 			{
 				Name:        "submit_task",
-				Description: "Submit a task for asynchronous background execution by a sub-agent. Returns the task ID immediately. Use check_task to monitor progress.",
+				Description: "Submit a task for asynchronous background execution by a sub-agent. Returns the task ID immediately. Use check_task to monitor progress. Prefer this over plan_task for single tasks or simple sequential work.",
 				Parameters: map[string]ParamSpec{
 					"title": {
 						Type:        "string",
@@ -86,7 +87,7 @@ func SubmitTaskManifest() *PluginManifest {
 					},
 					"actor_tags": {
 						Type:        "array",
-						Description: "Tags to match actors (e.g. [\"coder\"]). The task will run on an actor that has ALL specified tags.",
+						Description: "Tags to match actors (e.g. [\"self-hosted\"]). The task will run on an actor that has ALL specified tags.",
 					},
 					"required_capabilities": {
 						Type:        "array",
@@ -117,8 +118,13 @@ type submitTaskInput struct {
 }
 
 // Info returns the tool info for Eino registration.
+// Descriptions for actor_tags and required_capabilities are dynamically enriched
+// with available actors from the pool, so the LLM knows what to target.
 func (t *SubmitTaskTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return toolSpecToToolInfo(&SubmitTaskManifest().Tools[0]), nil
+	manifest := SubmitTaskManifest()
+	spec := &manifest.Tools[0]
+	enrichActorParamDescriptions(spec, t.pool.AvailableActors())
+	return toolSpecToToolInfo(spec), nil
 }
 
 // InvokableRun submits a task and returns the task ID.
@@ -158,6 +164,15 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	workDir := input.WorkDir
 	if workDir == "" {
 		workDir = events.WorkDirFromContext(ctx)
+	}
+
+	// Resolve relative work_dir to absolute so sub-agents find the directory
+	if workDir != "" && !filepath.IsAbs(workDir) {
+		abs, err := filepath.Abs(workDir)
+		if err != nil {
+			return "", fmt.Errorf("submit_task: resolve work_dir: %w", err)
+		}
+		workDir = abs
 	}
 
 	// Merge tool constraints: session constraints + task-specific (intersection)
@@ -317,12 +332,14 @@ type checkTaskInput struct {
 }
 
 type checkTaskOutput struct {
-	ID       string             `json:"id"`
-	Title    string             `json:"title"`
-	Status   tasks.TaskStatus   `json:"status"`
-	Progress tasks.TaskProgress `json:"progress"`
-	Output   string             `json:"output,omitempty"`
-	Error    string             `json:"error,omitempty"`
+	ID           string             `json:"id"`
+	Title        string             `json:"title"`
+	Status       tasks.TaskStatus   `json:"status"`
+	Progress     tasks.TaskProgress `json:"progress"`
+	ActorID      string             `json:"actor_id,omitempty"`
+	ProviderName string             `json:"provider_name,omitempty"`
+	Output       string             `json:"output,omitempty"`
+	Error        string             `json:"error,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
@@ -346,10 +363,12 @@ func (t *CheckTaskTool) InvokableRun(_ context.Context, argumentsInJSON string, 
 	}
 
 	out := checkTaskOutput{
-		ID:       task.ID,
-		Title:    task.Title,
-		Status:   task.Status,
-		Progress: task.Progress,
+		ID:           task.ID,
+		Title:        task.Title,
+		Status:       task.Status,
+		Progress:     task.Progress,
+		ActorID:      task.ActorID,
+		ProviderName: task.ProviderName,
 	}
 
 	if task.Status == tasks.TaskCompleted {

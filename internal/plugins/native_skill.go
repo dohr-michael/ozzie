@@ -118,6 +118,15 @@ func (t *ActivateSkillTool) InvokableRun(ctx context.Context, argumentsInJSON st
 		}
 	}
 
+	// Auto-activate run_workflow if the skill has a workflow DAG
+	if sessionID != "" && hasWorkflow {
+		if t.activator.IsKnown("run_workflow") {
+			if t.activator.Activate(sessionID, "run_workflow") {
+				out.ActivatedTools = append(out.ActivatedTools, "run_workflow")
+			}
+		}
+	}
+
 	// List resources in scripts/, references/, assets/
 	out.Resources = listResources(dir)
 

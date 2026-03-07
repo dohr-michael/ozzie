@@ -106,9 +106,27 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 	}
 }
 
-// Start launches the scheduler loop.
+// Start launches the scheduler loop and subscribes to task completion events.
 func (p *ActorPool) Start() {
 	p.ctx, p.cancel = context.WithCancel(context.Background())
+
+	// Subscribe to task completed/failed events to wake the scheduler immediately
+	// when a dependency might have been resolved.
+	ch, unsub := p.bus.SubscribeChan(16, events.EventTaskCompleted, events.EventTaskFailed)
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		defer unsub()
+		for {
+			select {
+			case <-p.ctx.Done():
+				return
+			case <-ch:
+				p.wakeScheduler()
+			}
+		}
+	}()
+
 	p.wg.Add(1)
 	go p.scheduleLoop()
 	slog.Info("actor pool started", "actors", len(p.actors))
@@ -268,6 +286,7 @@ func (p *ActorPool) scheduleLoop() {
 }
 
 // schedule assigns pending tasks to idle actors.
+// It also cancels tasks whose dependencies can never be satisfied (failed/cancelled).
 func (p *ActorPool) schedule() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -277,6 +296,26 @@ func (p *ActorPool) schedule() {
 	// List returns sorted by UpdatedAt DESC, iterate in reverse for oldest first
 	for i := len(pending) - 1; i >= 0; i-- {
 		t := pending[i]
+
+		// Cancel tasks with unresolvable dependencies (dep failed/cancelled)
+		if reason := p.unresolvableDep(t); reason != "" {
+			slog.Info("cancelling task with unresolvable dependency", "task_id", t.ID, "reason", reason)
+			now := time.Now()
+			t.Status = tasks.TaskCancelled
+			t.CompletedAt = &now
+			_ = p.store.Update(t)
+			_ = p.store.AppendCheckpoint(t.ID, tasks.Checkpoint{
+				Ts:      now,
+				Type:    "cancelled",
+				Summary: reason,
+			})
+			p.bus.Publish(events.NewTypedEventWithSession(events.SourceTask, events.TaskCancelledPayload{
+				TaskID: t.ID,
+				Reason: reason,
+			}, t.SessionID))
+			continue
+		}
+
 		if !p.dependenciesResolved(t) {
 			continue
 		}
@@ -435,7 +474,11 @@ func (p *ActorPool) startTask(t *tasks.Task, actor *Actor) {
 
 // executeTask runs a single task using the TaskRunner.
 func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor, preemptCh chan struct{}) {
-	slog.Info("actor executing task", "actor", actor.ID, "task_id", t.ID, "title", t.Title)
+	slog.Info("actor executing task", "actor", actor.ID, "task_id", t.ID, "title", t.Title, "provider", actor.ProviderName)
+
+	// Tag the task with actor info for traceability
+	t.ActorID = actor.ID
+	t.ProviderName = actor.ProviderName
 
 	if p.models == nil {
 		slog.Error("no model registry configured", "task_id", t.ID)
@@ -518,6 +561,24 @@ func (p *ActorPool) failTaskDirect(t *tasks.Task, taskErr error) error {
 	return p.store.Update(t)
 }
 
+// unresolvableDep returns a non-empty reason if any dependency of the task has
+// failed or been cancelled (meaning this task can never be scheduled).
+func (p *ActorPool) unresolvableDep(t *tasks.Task) string {
+	for _, depID := range t.DependsOn {
+		dep, err := p.store.Get(depID)
+		if err != nil {
+			continue // don't cancel on store errors, just skip
+		}
+		if dep.Status == tasks.TaskFailed {
+			return fmt.Sprintf("dependency %s (%s) failed", depID, dep.Title)
+		}
+		if dep.Status == tasks.TaskCancelled {
+			return fmt.Sprintf("dependency %s (%s) cancelled", depID, dep.Title)
+		}
+	}
+	return ""
+}
+
 // dependenciesResolved checks whether all dependencies of a task are completed.
 func (p *ActorPool) dependenciesResolved(t *tasks.Task) bool {
 	if len(t.DependsOn) == 0 {
@@ -526,9 +587,11 @@ func (p *ActorPool) dependenciesResolved(t *tasks.Task) bool {
 	for _, depID := range t.DependsOn {
 		dep, err := p.store.Get(depID)
 		if err != nil {
+			slog.Debug("dependency check: store error", "task_id", t.ID, "dep_id", depID, "error", err)
 			return false
 		}
 		if dep.Status != tasks.TaskCompleted {
+			slog.Debug("dependency not resolved", "task_id", t.ID, "dep_id", depID, "dep_status", dep.Status)
 			return false
 		}
 	}
@@ -610,6 +673,29 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 }
 
 var _ tasks.InlineExecutor = (*ActorPool)(nil)
+
+// AvailableActors returns a deduplicated summary of actor tags and capabilities,
+// grouped by provider name.
+func (p *ActorPool) AvailableActors() []tasks.ActorInfo {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	seen := make(map[string]struct{})
+	var infos []tasks.ActorInfo
+
+	for _, a := range p.actors {
+		if _, ok := seen[a.ProviderName]; ok {
+			continue
+		}
+		seen[a.ProviderName] = struct{}{}
+		infos = append(infos, tasks.ActorInfo{
+			ProviderName: a.ProviderName,
+			Tags:         a.Tags,
+			Capabilities: a.Capabilities,
+		})
+	}
+	return infos
+}
 
 // priorityRank maps task priority to a numeric rank (lower = less important).
 func priorityRank(p tasks.TaskPriority) int {

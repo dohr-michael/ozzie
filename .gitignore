@@ -1,11 +1,13 @@
 # Build
 build/
 bin/
+.bin/
 dev_home/
 dev_working_dir/
 e2e/target/
 e2e/.bin/
 e2e/reports/**/*.md
+tests/reports/
 local-memo
 
 # Environment

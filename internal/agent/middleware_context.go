@@ -217,14 +217,11 @@ func buildToolSection(activeNames []string, allDescs map[string]string, tier Mod
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Active Tools (ready to use)\n\n")
-	for _, name := range sorted {
-		if desc, ok := allDescs[name]; ok && desc != "" {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, desc))
-		} else {
-			sb.WriteString(fmt.Sprintf("- **%s**\n", name))
-		}
-	}
+
+	// Active tools: names only — full descriptions are already in the API tool schemas.
+	sb.WriteString("## Active Tools\n\n")
+	sb.WriteString(strings.Join(sorted, ", "))
+	sb.WriteString("\n")
 
 	// TierSmall: skip inactive tools section to save tokens
 	if tier == TierSmall {
@@ -239,15 +236,11 @@ func buildToolSection(activeNames []string, allDescs map[string]string, tier Mod
 	}
 	sort.Strings(inactive)
 
+	// Inactive tools: compact name list — use activate_tools(names) to enable.
 	if len(inactive) > 0 {
-		sb.WriteString("\n## Available Tools (call activate_tools first)\n\n")
-		for _, name := range inactive {
-			if desc := allDescs[name]; desc != "" {
-				sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, desc))
-			} else {
-				sb.WriteString(fmt.Sprintf("- **%s**\n", name))
-			}
-		}
+		sb.WriteString("\n## Additional Tools (call activate_tools to enable)\n\n")
+		sb.WriteString(strings.Join(inactive, ", "))
+		sb.WriteString("\n")
 	}
 
 	return sb.String()

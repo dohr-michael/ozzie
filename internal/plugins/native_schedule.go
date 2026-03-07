@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -148,6 +149,15 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	}
 	if triggerCount > 1 {
 		return "", fmt.Errorf("schedule_task: cron, interval, and on_event are mutually exclusive")
+	}
+
+	// Resolve relative work_dir to absolute so sub-agents find the directory
+	if input.WorkDir != "" && !filepath.IsAbs(input.WorkDir) {
+		abs, err := filepath.Abs(input.WorkDir)
+		if err != nil {
+			return "", fmt.Errorf("schedule_task: resolve work_dir: %w", err)
+		}
+		input.WorkDir = abs
 	}
 
 	entry := &scheduler.ScheduleEntry{
