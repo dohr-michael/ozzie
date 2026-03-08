@@ -4,7 +4,13 @@ builds:
   - id: ozzie
     main: ./cmd/ozzie
     binary: ozzie
-    env: [CGO_ENABLED=0]
+    env:
+      - CGO_ENABLED=1
+      - CGO_CFLAGS=-DSQLITE_ENABLE_FTS5
+      - >-
+        {{- if eq .Os "linux" }}
+          {{- if eq .Arch "arm64" }}CC=aarch64-linux-gnu-gcc{{- end }}
+        {{- end }}
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     ldflags:

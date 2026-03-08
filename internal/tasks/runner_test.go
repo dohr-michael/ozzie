@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/memory"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
 func TestFormatContextBlock_Empty(t *testing.T) {

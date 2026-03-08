@@ -12,7 +12,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/memory"
+	"github.com/dohr-michael/ozzie/internal/membridge"
+	"github.com/dohr-michael/ozzie/pkg/memory"
+	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 )
 
@@ -59,17 +61,26 @@ func NewMemoryCommand() *cli.Command {
 				Usage:  "Rebuild vector embeddings for all memories",
 				Action: runMemoryReindex,
 			},
+			{
+				Name:   "consolidate",
+				Usage:  "Merge similar memories using LLM summarization",
+				Action: runMemoryConsolidate,
+			},
 		},
 		DefaultCommand: "list",
 	}
 }
 
-func newMemoryStore() *memory.FileStore {
-	return memory.NewFileStore(filepath.Join(config.OzziePath(), "memory"))
+func newMemoryStore() (*memory.SQLiteStore, error) {
+	return memory.NewSQLiteStore(filepath.Join(config.OzziePath(), "memory"))
 }
 
 func runMemoryList(_ context.Context, cmd *cli.Command) error {
-	store := newMemoryStore()
+	store, err := newMemoryStore()
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
 
 	entries, err := store.List()
 	if err != nil {
@@ -108,10 +119,14 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("usage: ozzie memory search <query>")
 	}
 
-	store := newMemoryStore()
+	store, err := newMemoryStore()
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
 
 	// Use hybrid retriever if embeddings are enabled
-	var vectorStore *memory.VectorStore
+	var vectorStore memory.VectorStorer
 	configPath := cmd.String("config")
 	kr, _ := secrets.NewKeyRing()
 	var loadOpts []config.LoadOption
@@ -120,11 +135,14 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 	}
 	cfg, cfgErr := config.Load(configPath, loadOpts...)
 	if cfgErr == nil && cfg.Embedding.IsEnabled() {
-		embedder, err := memory.NewEmbedder(ctx, cfg.Embedding, kr)
-		if err == nil {
-			memoryDir := filepath.Join(config.OzziePath(), "memory")
-			vs, err := memory.NewVectorStore(ctx, memoryDir, embedder)
-			if err == nil {
+		embedder, embErr := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
+		if embErr == nil {
+			dims := cfg.Embedding.Dims
+			if dims <= 0 {
+				dims = 1536
+			}
+			vs, vsErr := memory.NewSQLiteVectorStore(store.DB(), embedder, dims)
+			if vsErr == nil {
 				vectorStore = vs
 			}
 		}
@@ -166,7 +184,11 @@ func runMemoryShow(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("usage: ozzie memory show <id>")
 	}
 
-	store := newMemoryStore()
+	store, err := newMemoryStore()
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
 
 	entry, content, err := store.Get(id)
 	if err != nil {
@@ -207,7 +229,11 @@ func runMemoryForget(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("usage: ozzie memory forget <id>")
 	}
 
-	store := newMemoryStore()
+	store, err := newMemoryStore()
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
 
 	if err := store.Delete(id); err != nil {
 		return fmt.Errorf("forget: %w", err)
@@ -233,15 +259,23 @@ func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("embedding is not enabled in config (set embedding.enabled = true)")
 	}
 
-	embedder, err := memory.NewEmbedder(ctx, cfg.Embedding, kr)
+	embedder, err := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
 	if err != nil {
 		return fmt.Errorf("create embedder: %w", err)
 	}
 
 	memoryDir := filepath.Join(config.OzziePath(), "memory")
-	store := memory.NewFileStore(memoryDir)
+	store, err := memory.NewSQLiteStore(memoryDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
 
-	vectorStore, err := memory.NewVectorStore(ctx, memoryDir, embedder)
+	dims := cfg.Embedding.Dims
+	if dims <= 0 {
+		dims = 1536
+	}
+	vectorStore, err := memory.NewSQLiteVectorStore(store.DB(), embedder, dims)
 	if err != nil {
 		return fmt.Errorf("create vector store: %w", err)
 	}
@@ -254,5 +288,66 @@ func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 
 	fmt.Printf("Reindex complete: %d/%d indexed, %d skipped, %d errors\n",
 		stats.Indexed, stats.Total, stats.Skipped, stats.Errors)
+	return nil
+}
+
+func runMemoryConsolidate(ctx context.Context, cmd *cli.Command) error {
+	configPath := cmd.String("config")
+	kr, _ := secrets.NewKeyRing()
+	var loadOpts []config.LoadOption
+	if kr != nil {
+		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
+	}
+	cfg, err := config.Load(configPath, loadOpts...)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	if !cfg.Embedding.IsEnabled() {
+		return fmt.Errorf("embedding is not enabled (required for consolidation)")
+	}
+
+	memoryDir := filepath.Join(config.OzziePath(), "memory")
+	store, err := memory.NewSQLiteStore(memoryDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
+
+	embedder, err := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
+	if err != nil {
+		return fmt.Errorf("create embedder: %w", err)
+	}
+
+	dims := cfg.Embedding.Dims
+	if dims <= 0 {
+		dims = 1536
+	}
+	vectorStore, err := memory.NewSQLiteVectorStore(store.DB(), embedder, dims)
+	if err != nil {
+		return fmt.Errorf("create vector store: %w", err)
+	}
+
+	// Load primary chat model for LLM-based merge
+	registry := models.NewRegistry(cfg.Models, kr)
+	chatModel, modelErr := registry.Default(ctx)
+	if modelErr != nil {
+		return fmt.Errorf("load chat model: %w", modelErr)
+	}
+
+	consolidator := memory.NewConsolidator(memory.ConsolidatorConfig{
+		Store:      store,
+		Vector:     vectorStore,
+		Summarizer: &extractorLLMAdapter{chatModel: chatModel},
+	})
+
+	slog.Info("starting memory consolidation")
+	stats, err := consolidator.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("consolidate: %w", err)
+	}
+
+	fmt.Printf("Consolidation complete: checked %d, merged %d groups, %d errors\n",
+		stats.Checked, stats.Merged, stats.Errors)
 	return nil
 }

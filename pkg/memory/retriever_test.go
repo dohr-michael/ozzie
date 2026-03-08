@@ -1,17 +1,81 @@
 package memory
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
 
-func createTestStore(t *testing.T) *FileStore {
-	t.Helper()
-	dir := t.TempDir()
-	return NewFileStore(dir)
+// inMemoryStore is a minimal Store for retriever tests (no CGo needed).
+type inMemoryStore struct {
+	entries []*MemoryEntry
+	content map[string]string
 }
 
-func seedMemories(t *testing.T, store *FileStore) {
+func newInMemoryStore() *inMemoryStore {
+	return &inMemoryStore{content: make(map[string]string)}
+}
+
+func (s *inMemoryStore) Create(entry *MemoryEntry, content string) error {
+	if entry.ID == "" {
+		entry.ID = generateMemoryID()
+	}
+	now := time.Now()
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = now
+	}
+	if entry.UpdatedAt.IsZero() {
+		entry.UpdatedAt = now
+	}
+	if entry.LastUsedAt.IsZero() {
+		entry.LastUsedAt = now
+	}
+	if entry.Confidence == 0 {
+		entry.Confidence = 0.8
+	}
+	s.entries = append(s.entries, entry)
+	s.content[entry.ID] = content
+	return nil
+}
+
+func (s *inMemoryStore) Get(id string) (*MemoryEntry, string, error) {
+	for _, e := range s.entries {
+		if e.ID == id {
+			return e, s.content[id], nil
+		}
+	}
+	return nil, "", fmt.Errorf("memory %q not found", id)
+}
+
+func (s *inMemoryStore) Update(entry *MemoryEntry, content string) error {
+	for i, e := range s.entries {
+		if e.ID == entry.ID {
+			s.entries[i] = entry
+			s.content[entry.ID] = content
+			return nil
+		}
+	}
+	return fmt.Errorf("memory %q not found", entry.ID)
+}
+
+func (s *inMemoryStore) Delete(id string) error {
+	for i, e := range s.entries {
+		if e.ID == id {
+			s.entries = append(s.entries[:i], s.entries[i+1:]...)
+			delete(s.content, id)
+			return nil
+		}
+	}
+	return fmt.Errorf("memory %q not found", id)
+}
+
+func (s *inMemoryStore) List() ([]*MemoryEntry, error) {
+	out := make([]*MemoryEntry, len(s.entries))
+	copy(out, s.entries)
+	return out, nil
+}
+
+func seedMemories(t *testing.T, store Store) {
 	t.Helper()
 
 	now := time.Now()
@@ -62,7 +126,7 @@ func seedMemories(t *testing.T, store *FileStore) {
 }
 
 func TestRetriever_BasicQuery(t *testing.T) {
-	store := createTestStore(t)
+	store := newInMemoryStore()
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
@@ -82,7 +146,7 @@ func TestRetriever_BasicQuery(t *testing.T) {
 }
 
 func TestRetriever_TagFilter(t *testing.T) {
-	store := createTestStore(t)
+	store := newInMemoryStore()
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
@@ -108,7 +172,7 @@ func TestRetriever_TagFilter(t *testing.T) {
 }
 
 func TestRetriever_LimitResults(t *testing.T) {
-	store := createTestStore(t)
+	store := newInMemoryStore()
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
@@ -123,7 +187,7 @@ func TestRetriever_LimitResults(t *testing.T) {
 }
 
 func TestRetriever_EmptyQuery(t *testing.T) {
-	store := createTestStore(t)
+	store := newInMemoryStore()
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
@@ -139,7 +203,7 @@ func TestRetriever_EmptyQuery(t *testing.T) {
 }
 
 func TestRetriever_EmptyStore(t *testing.T) {
-	store := createTestStore(t)
+	store := newInMemoryStore()
 
 	r := NewRetriever(store)
 	results, err := r.Retrieve("test query", nil, 5)

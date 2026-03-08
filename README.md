@@ -33,7 +33,7 @@ executable code. Ozzie takes a different approach:
   and automatic task retry on failure
 - **Agent autonomy** — Coordinator pattern (explore → plan → validate → execute), async task delegation, ephemeral
   sub-agents, cron/event scheduler
-- **Semantic memory** — Hybrid retrieval (keyword + vector embeddings), cross-task learning, automatic memory extraction
+- **Semantic memory** — Importable library (`pkg/memory/`), hybrid retrieval (keyword + vector), cross-task learning, automatic extraction
 - **3-level plugin architecture** — Communication (senses), Tools (hands), Skills (expertise) — each with distinct
   isolation boundaries
 - **MCP client & server** — Connect external MCP servers (with `trusted_tools` and per-tool danger control); expose
@@ -77,7 +77,7 @@ executable code. Ozzie takes a different approach:
 cp configs/config.example.jsonc configs/config.jsonc
 export ANTHROPIC_API_KEY="sk-..."
 
-# Build & run
+# Build & run (CGo required for SQLite FTS5)
 make build
 ./build/ozzie gateway
 
@@ -88,8 +88,8 @@ make build
 ### Docker
 
 ```bash
-# Build
-go build -o build/ozzie ./cmd/ozzie
+# Build (CGo required for SQLite FTS5)
+CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build -o build/ozzie ./cmd/ozzie
 docker build -t ozzie .
 
 # Run (mount Docker socket for container-based tasks)
@@ -129,12 +129,13 @@ Tasks run in isolated sub-agents with their own tool sets, crash recovery, and h
 
 ### Memory
 
-Ozzie maintains a persistent semantic memory system:
+Ozzie maintains a persistent semantic memory system in `pkg/memory/` (importable library):
 
-- **Hybrid retrieval** — Keyword scoring (tag match, title match, recency) blended with vector cosine similarity
+- **Hybrid retrieval** — Keyword scoring (30%) blended with sqlite-vec vector cosine similarity (70%)
 - **Async embedding pipeline** — Memory storage returns immediately; vector indexing happens in background
 - **Cross-task learning** — Sub-agents automatically receive relevant memories at startup (deterministic injection)
 - **Auto-extraction** — Completed tasks are analyzed to extract reusable lessons (preferences, facts, procedures)
+- **Build requirement** — Requires `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5"` (SQLite CGo dependency via mattn/go-sqlite3)
 
 ### Skills
 
@@ -313,10 +314,13 @@ make run-ask        # Build and run ask with a test message
 Every change must pass all three — no exceptions:
 
 ```bash
-go build ./...              # compile
-~/go/bin/staticcheck ./...  # lint
-go test ./...               # tests
+CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build ./...   # compile
+~/go/bin/staticcheck ./...                           # lint
+CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test ./...     # tests
 ```
+
+> **Note:** `CGO_CFLAGS` is required for SQLite FTS5 support (used by `pkg/memory/`).
+> Without it, memory-related tests fail and the binary cannot create FTS5 virtual tables at runtime.
 
 ### Plugin development with Claude Code
 

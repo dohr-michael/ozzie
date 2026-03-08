@@ -22,6 +22,9 @@ jobs:
 
       - name: Build
         run: go build ./...
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-DSQLITE_ENABLE_FTS5"
 
       - name: Lint
         run: |
@@ -30,6 +33,9 @@ jobs:
 
       - name: Test
         run: go test ./...
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-DSQLITE_ENABLE_FTS5"
 
   snapshot:
     needs: quality
@@ -43,6 +49,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - uses: docker/setup-buildx-action@v3
 

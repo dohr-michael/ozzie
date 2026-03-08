@@ -1,4 +1,4 @@
-package memory
+package membridge
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
 // TaskOutputReader reads the output of a completed task.
@@ -17,35 +18,25 @@ type TaskOutputReader interface {
 	ReadOutput(taskID string) (string, error)
 }
 
-// LLMSummarizer generates a text summary from a prompt.
-type LLMSummarizer interface {
-	Summarize(ctx context.Context, prompt string) (string, error)
-}
-
-// DedupRetriever checks for existing similar memories before storing.
-type DedupRetriever interface {
-	Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error)
-}
-
 // ExtractorConfig configures the cross-task learning extractor.
 type ExtractorConfig struct {
-	Store      Store
-	Pipeline   *Pipeline
+	Store      memory.Store
+	Pipeline   *memory.Pipeline
 	TaskReader TaskOutputReader
-	Summarizer LLMSummarizer
+	Summarizer memory.LLMSummarizer
 	Bus        *events.Bus
-	Retriever  DedupRetriever // optional: dedup check before storing (nil = no dedup)
+	Retriever  memory.MemoryRetriever // optional: dedup check before storing (nil = no dedup)
 }
 
 // Extractor listens for task.completed events and extracts reusable lessons
 // from task output via an LLM, storing them as memories.
 type Extractor struct {
-	store       Store
-	pipeline    *Pipeline
+	store       memory.Store
+	pipeline    *memory.Pipeline
 	taskReader  TaskOutputReader
-	summarizer  LLMSummarizer
+	summarizer  memory.LLMSummarizer
 	bus         *events.Bus
-	retriever   DedupRetriever
+	retriever   memory.MemoryRetriever
 	ctx         context.Context
 	cancel      context.CancelFunc
 	unsubscribe func()
@@ -129,10 +120,9 @@ func (e *Extractor) extractLessons(taskID, title string) {
 		if e.isDuplicate(lesson.Title, lesson.Content) {
 			continue
 		}
-		entry := &MemoryEntry{
-			ID:         generateMemoryID(),
+		entry := &memory.MemoryEntry{
 			Title:      lesson.Title,
-			Type:       MemoryProcedure,
+			Type:       memory.MemoryProcedure,
 			Source:     "task:" + taskID,
 			Tags:       lesson.Tags,
 			CreatedAt:  now,
@@ -145,10 +135,10 @@ func (e *Extractor) extractLessons(taskID, title string) {
 			continue
 		}
 		if e.pipeline != nil {
-			e.pipeline.Enqueue(EmbedJob{
+			e.pipeline.Enqueue(memory.EmbedJob{
 				ID:      entry.ID,
-				Content: BuildEmbedText(entry, lesson.Content),
-				Meta:    BuildEmbedMeta(entry),
+				Content: memory.BuildEmbedText(entry, lesson.Content),
+				Meta:    memory.BuildEmbedMeta(entry),
 			})
 		}
 		slog.Info("memory extractor: stored lesson", "task_id", taskID, "title", lesson.Title)

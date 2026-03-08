@@ -71,14 +71,14 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 	// Subshell detection: when command restrictions are active, block subshell
 	// syntax that could bypass them ($(...), backticks, <(...)).
 	if (len(tc.AllowedCommands) > 0 || len(tc.AllowedPatterns) > 0) && args.Command != "" {
-		if containsSubshell(args.Command) {
+		if containsSubshellAST(args.Command) {
 			return fmt.Errorf("subshell/process substitution not allowed with command restrictions")
 		}
 	}
 
-	// AllowedCommands: check ALL binaries in chained commands (&&, ||, ;, |)
+	// AllowedCommands: check ALL binaries in chained commands (AST-based)
 	if len(tc.AllowedCommands) > 0 && args.Command != "" {
-		for _, binary := range extractAllBinaries(args.Command) {
+		for _, binary := range extractAllBinariesAST(args.Command) {
 			if !stringInSlice(binary, tc.AllowedCommands) {
 				return fmt.Errorf("command %q not in allowed list %v", binary, tc.AllowedCommands)
 			}
@@ -103,9 +103,13 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 		}
 	}
 
-	// AllowedPaths: glob match on extracted paths
+	// AllowedPaths: glob match on extracted paths (AST + JSON)
 	if len(tc.AllowedPaths) > 0 {
-		paths := extractAllPaths(args.Command, argsJSON)
+		var paths []string
+		if args.Command != "" {
+			paths = append(paths, extractCommandPathsAST(args.Command)...)
+		}
+		paths = append(paths, extractToolPaths(argsJSON)...)
 		for _, p := range paths {
 			if !matchesAnyGlob(p, tc.AllowedPaths) {
 				return fmt.Errorf("path %q not in allowed paths %v", p, tc.AllowedPaths)
@@ -126,10 +130,6 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 // shellChainSplitter splits a command on shell chaining operators (&&, ||, ;, |).
 // It returns the individual sub-command strings.
 var shellChainSplitter = regexp.MustCompile(`\s*(?:&&|\|\||\||;)\s*`)
-
-// subshellPattern detects subshell/process substitution syntax that can bypass
-// command restrictions: $(...), `...`, <(...).
-var subshellPattern = regexp.MustCompile("\\$\\(|`|<\\(")
 
 // extractBinary returns the first token (binary name) from a command string.
 // Handles env prefixes like "VAR=val cmd" and leading whitespace.
@@ -154,9 +154,10 @@ func extractBinary(command string) string {
 	return filepath.Base(fields[0])
 }
 
-// extractAllBinaries splits a command on shell chaining operators (&&, ||, ;, |)
+// extractAllBinariesRegex splits a command on shell chaining operators (&&, ||, ;, |)
 // and returns the binary name from each sub-command.
-func extractAllBinaries(command string) []string {
+// Deprecated: use extractAllBinariesAST instead for better accuracy.
+func extractAllBinariesRegex(command string) []string {
 	segments := shellChainSplitter.Split(command, -1)
 	var binaries []string
 	for _, seg := range segments {
@@ -179,12 +180,6 @@ func splitSubCommands(command string) []string {
 		}
 	}
 	return result
-}
-
-// containsSubshell returns true if the command contains subshell or process
-// substitution syntax ($(...), backticks, <(...)).
-func containsSubshell(command string) bool {
-	return subshellPattern.MatchString(command)
 }
 
 // stringInSlice checks if s is in the slice.
@@ -267,16 +262,6 @@ func matchesDomain(rawURL string, domains []string) bool {
 		}
 	}
 	return false
-}
-
-// extractAllPaths extracts paths from both the command string and JSON args.
-func extractAllPaths(command, argsJSON string) []string {
-	var paths []string
-	if command != "" {
-		paths = append(paths, extractCommandPaths(command)...)
-	}
-	paths = append(paths, extractToolPaths(argsJSON)...)
-	return paths
 }
 
 var _ tool.InvokableTool = (*ConstraintGuard)(nil)

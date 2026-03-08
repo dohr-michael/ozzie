@@ -18,7 +18,7 @@ type ReindexStats struct {
 // Reindex rebuilds vector embeddings for all memories in the store.
 // It skips entries that are already indexed with the same model and not stale.
 // It respects context cancellation and logs progress every 10 items.
-func Reindex(ctx context.Context, store Store, vector *VectorStore, modelName string) (*ReindexStats, error) {
+func Reindex(ctx context.Context, store Store, vector VectorStorer, modelName string) (*ReindexStats, error) {
 	entries, err := store.List()
 	if err != nil {
 		return nil, fmt.Errorf("reindex: list memories: %w", err)

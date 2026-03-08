@@ -19,7 +19,7 @@ const (
 type HybridRetriever struct {
 	store   Store
 	keyword *Retriever
-	vector  *VectorStore
+	vector  VectorStorer
 	mu      sync.RWMutex   // protects vector field + serializes reinforcement updates
 	wg      sync.WaitGroup // tracks in-flight reinforcement goroutines
 	ctx     context.Context
@@ -28,7 +28,7 @@ type HybridRetriever struct {
 
 // NewHybridRetriever creates a hybrid retriever.
 // vector may be nil, in which case only keyword retrieval is used.
-func NewHybridRetriever(store Store, vector *VectorStore) *HybridRetriever {
+func NewHybridRetriever(store Store, vector VectorStorer) *HybridRetriever {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &HybridRetriever{
 		store:   store,
@@ -41,7 +41,7 @@ func NewHybridRetriever(store Store, vector *VectorStore) *HybridRetriever {
 
 // SwapVector atomically replaces the vector store.
 // Pass nil to fall back to keyword-only retrieval.
-func (hr *HybridRetriever) SwapVector(vs *VectorStore) {
+func (hr *HybridRetriever) SwapVector(vs VectorStorer) {
 	hr.mu.Lock()
 	defer hr.mu.Unlock()
 	hr.vector = vs
@@ -140,8 +140,7 @@ func (hr *HybridRetriever) mergeResults(keywordResults []RetrievedMemory, semant
 		merged[r.Entry.ID] = &scored{keywordScore: norm}
 	}
 
-	// Semantic scores from chromem-go are already cosine similarity in [-1,1]
-	// Normalize to [0,1] range
+	// Semantic scores are cosine similarity in [-1,1], normalize to [0,1]
 	for _, r := range semanticResults {
 		sim := float64(r.Similarity+1) / 2 // map [-1,1] → [0,1]
 		if s, ok := merged[r.ID]; ok {
@@ -204,7 +203,7 @@ func (hr *HybridRetriever) reinforceResults(results []RetrievedMemory) {
 			continue
 		}
 		// Apply decay before reinforcement
-		entry.Confidence = ApplyDecay(entry.Confidence, entry.LastUsedAt, now)
+		entry.Confidence = ApplyDecay(entry.Confidence, entry.LastUsedAt, now, entry.Importance)
 		// Then reinforce
 		entry.Confidence = min(entry.Confidence+0.05, 1.0)
 		entry.LastUsedAt = now

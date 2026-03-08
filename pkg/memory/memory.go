@@ -9,22 +9,24 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	decayGracePeriod = 7 * 24 * time.Hour // no decay for 7 days after last use
-	decayRate        = 0.01               // per week after grace period
-	decayFloor       = 0.1                // never below 0.1
-)
-
-// ApplyDecay reduces confidence based on time since last use.
-// Grace period of 7 days, then -0.01 per week. Floor at 0.1.
-func ApplyDecay(confidence float64, lastUsedAt time.Time, now time.Time) float64 {
+// ApplyDecay reduces confidence based on time since last use and importance level.
+// Each importance level has its own grace period, decay rate, and floor.
+// Passing "" or an unrecognized level defaults to ImportanceNormal.
+func ApplyDecay(confidence float64, lastUsedAt time.Time, now time.Time, importance ImportanceLevel) float64 {
+	if importance == ImportanceCore {
+		return confidence // core memories never decay
+	}
+	cfg, ok := decayConfigs[importance]
+	if !ok {
+		cfg = decayConfigs[ImportanceNormal]
+	}
 	idle := now.Sub(lastUsedAt)
-	if idle <= decayGracePeriod {
+	if idle <= cfg.GracePeriod {
 		return confidence
 	}
-	weeksIdle := (idle - decayGracePeriod).Hours() / (7 * 24)
-	decayed := confidence - decayRate*weeksIdle
-	return math.Max(decayed, decayFloor)
+	weeksIdle := (idle - cfg.GracePeriod).Hours() / (7 * 24)
+	decayed := confidence - cfg.Rate*weeksIdle
+	return math.Max(decayed, cfg.Floor)
 }
 
 // MemoryType categorizes a memory entry.
@@ -39,20 +41,25 @@ const (
 
 // MemoryEntry holds metadata for a single memory.
 type MemoryEntry struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Source     string     `json:"source"`
-	Type       MemoryType `json:"type"`
-	Tags       []string   `json:"tags,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	LastUsedAt time.Time  `json:"last_used_at"`
-	Confidence float64    `json:"confidence"`
+	ID         string          `json:"id"`
+	Title      string          `json:"title"`
+	Source     string          `json:"source"`
+	Type       MemoryType      `json:"type"`
+	Tags       []string        `json:"tags,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+	LastUsedAt time.Time       `json:"last_used_at"`
+	Confidence float64         `json:"confidence"`
+	Importance ImportanceLevel `json:"importance,omitempty"`
 
 	// Embedding tracking — set after successful vector indexing.
 	// Empty EmbeddingModel means the entry has never been indexed.
 	EmbeddingModel string     `json:"embedding_model,omitempty"`
 	IndexedAt      *time.Time `json:"indexed_at,omitempty"`
+
+	// MergedInto references the target memory when this entry was consolidated.
+	// Non-empty means this entry has been merged and should be excluded from queries.
+	MergedInto string `json:"merged_into,omitempty"`
 }
 
 // IsIndexed returns true if this entry has been indexed with embeddings.

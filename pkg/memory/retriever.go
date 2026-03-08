@@ -14,6 +14,11 @@ type RetrievedMemory struct {
 	Score   float64
 }
 
+// MemoryRetriever retrieves relevant memories for context injection or dedup.
+type MemoryRetriever interface {
+	Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error)
+}
+
 // Retriever performs keyword-based memory retrieval with scoring.
 type Retriever struct {
 	store Store

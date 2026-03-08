@@ -1,4 +1,4 @@
-package memory
+package membridge
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
 // waitFor polls condition until it returns true or timeout expires.
@@ -94,13 +95,69 @@ type mockDedupRetriever struct {
 	title string
 }
 
-func (m *mockDedupRetriever) Retrieve(_ string, _ []string, _ int) ([]RetrievedMemory, error) {
+func (m *mockDedupRetriever) Retrieve(_ string, _ []string, _ int) ([]memory.RetrievedMemory, error) {
 	if m.score == 0 {
 		return nil, nil
 	}
-	return []RetrievedMemory{
-		{Entry: &MemoryEntry{ID: "existing", Title: m.title}, Score: m.score},
+	return []memory.RetrievedMemory{
+		{Entry: &memory.MemoryEntry{ID: "existing", Title: m.title}, Score: m.score},
 	}, nil
+}
+
+// memoryStoreStub is a simple in-memory Store for testing.
+type memoryStoreStub struct {
+	entries  []*memory.MemoryEntry
+	contents map[string]string
+}
+
+func newMemoryStoreStub() *memoryStoreStub {
+	return &memoryStoreStub{contents: make(map[string]string)}
+}
+
+func (s *memoryStoreStub) Create(entry *memory.MemoryEntry, content string) error {
+	if entry.ID == "" {
+		entry.ID = "mem_stub"
+	}
+	s.entries = append(s.entries, entry)
+	s.contents[entry.ID] = content
+	return nil
+}
+
+func (s *memoryStoreStub) Get(id string) (*memory.MemoryEntry, string, error) {
+	for _, e := range s.entries {
+		if e.ID == id {
+			return e, s.contents[id], nil
+		}
+	}
+	return nil, "", nil
+}
+
+func (s *memoryStoreStub) Update(entry *memory.MemoryEntry, content string) error {
+	for i, e := range s.entries {
+		if e.ID == entry.ID {
+			s.entries[i] = entry
+			s.contents[entry.ID] = content
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *memoryStoreStub) Delete(id string) error {
+	for i, e := range s.entries {
+		if e.ID == id {
+			s.entries = append(s.entries[:i], s.entries[i+1:]...)
+			delete(s.contents, id)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *memoryStoreStub) List() ([]*memory.MemoryEntry, error) {
+	result := make([]*memory.MemoryEntry, len(s.entries))
+	copy(result, s.entries)
+	return result, nil
 }
 
 func TestExtractor_DedupSkipsDuplicate(t *testing.T) {
@@ -293,7 +350,7 @@ func TestExtractor_ExtractsAndStoresLessons(t *testing.T) {
 	if entry.Title != "JWT auth pattern" {
 		t.Errorf("unexpected title: %s", entry.Title)
 	}
-	if entry.Type != MemoryProcedure {
+	if entry.Type != memory.MemoryProcedure {
 		t.Errorf("expected type=procedure, got %s", entry.Type)
 	}
 	if entry.Source != "task:task-123" {

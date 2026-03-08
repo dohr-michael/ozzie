@@ -45,9 +45,10 @@ func init() {
 	}
 }
 
-// matchDestructivePattern checks a command string against the denylist.
+// matchDestructivePatternRegex checks a command string against the regex denylist.
 // Returns the matched rule, or nil if the command is safe.
-func matchDestructivePattern(command string) *destructiveRule {
+// Deprecated: use validateCommandAST instead for better accuracy.
+func matchDestructivePatternRegex(command string) *destructiveRule {
 	for i := range destructivePatterns {
 		if destructivePatterns[i].pattern.MatchString(command) {
 			return &destructivePatterns[i]
@@ -60,8 +61,9 @@ func matchDestructivePattern(command string) *destructiveRule {
 // absolute paths (/...), home-relative (~/...), and relative with parent traversal (../).
 var pathTokenPattern = regexp.MustCompile(`(?:^|\s)((?:/|~/|\.\./)[\w./_~-]*)`)
 
-// extractCommandPaths extracts path-like tokens from a shell command string.
-func extractCommandPaths(command string) []string {
+// extractCommandPathsRegex extracts path-like tokens from a shell command string.
+// Deprecated: use extractCommandPathsAST instead for better accuracy.
+func extractCommandPathsRegex(command string) []string {
 	matches := pathTokenPattern.FindAllStringSubmatch(command, -1)
 	if len(matches) == 0 {
 		return nil

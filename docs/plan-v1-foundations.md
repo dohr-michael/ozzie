@@ -2,25 +2,14 @@
 
 > Insights from Gastown applied to Ozzie.
 > See `docs/references/gastown-analysis.md` for the full Gastown reference.
+>
+> **Status (2026-03-08): ALL FOUNDATIONS IMPLEMENTED.** See below for completion notes.
 
-## Current State (Phase 1a — done)
+## Current State: ALL DONE
 
-Working E2E: `ozzie gateway` -> `ozzie ask "hello"` -> streamed LLM response.
-
-**What exists:**
-- Event bus (in-memory, ring buffer, typed payloads)
-- Model registry (Anthropic, OpenAI, Ollama)
-- Gateway + WebSocket hub
-- Agent (Eino ADK + EventRunner + ReAct loop)
-- Plugin system (WASM Extism + native tools + manifests)
-- MCP server
-- Config (JSONC + env templating)
-
-**What's stubbed (doc.go only):**
-- `internal/sessions/` — session management
-- `internal/storage/` — persistent storage
-- `internal/scheduler/` — task scheduling
-- `clients/tui/` — terminal UI
+All 5 foundations are implemented and functional. Working E2E with full feature set:
+sessions, skills DAG, prompt composition, event persistence, cost tracking, TUI,
+scheduler, memory, MCP consumer/server, 5 LLM drivers, dangerous tool approval.
 
 ---
 

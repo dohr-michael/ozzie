@@ -17,9 +17,17 @@ type EmbedJob struct {
 	Delete  bool
 }
 
+// VectorStorer defines the interface for vector storage backends.
+type VectorStorer interface {
+	Upsert(ctx context.Context, id, content string, meta map[string]string) error
+	Delete(ctx context.Context, id string) error
+	Query(ctx context.Context, queryText string, nResults int) ([]VectorResult, error)
+	Count() int
+}
+
 // Pipeline processes embedding jobs asynchronously via a single worker goroutine.
 type Pipeline struct {
-	vector    *VectorStore
+	vector    VectorStorer
 	store     Store
 	modelName string
 	jobs      chan EmbedJob
@@ -31,7 +39,7 @@ type Pipeline struct {
 // store is used to persist indexing metadata on entries after successful embedding.
 // modelName identifies the embedding model (e.g. "text-embedding-3-small") for staleness detection.
 // queueSize controls the buffered channel capacity (default: 100).
-func NewPipeline(vector *VectorStore, store Store, modelName string, queueSize int) *Pipeline {
+func NewPipeline(vector VectorStorer, store Store, modelName string, queueSize int) *Pipeline {
 	if queueSize <= 0 {
 		queueSize = 100
 	}
@@ -74,7 +82,7 @@ func (p *Pipeline) Stop() {
 
 // Swap atomically replaces the vector store and model name for hot-reload.
 // Pass nil to disable embedding (jobs will be silently dropped).
-func (p *Pipeline) Swap(vector *VectorStore, modelName string) {
+func (p *Pipeline) Swap(vector VectorStorer, modelName string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.vector = vector

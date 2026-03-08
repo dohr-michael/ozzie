@@ -33,7 +33,7 @@ func TestMatchDestructivePattern(t *testing.T) {
 		{"su root", "switch user"},
 	}
 	for _, tc := range blocked {
-		rule := matchDestructivePattern(tc.cmd)
+		rule := matchDestructivePatternRegex(tc.cmd)
 		if rule == nil {
 			t.Errorf("expected %q to be blocked (%s), got nil", tc.cmd, tc.reason)
 			continue
@@ -53,7 +53,7 @@ func TestMatchDestructivePattern(t *testing.T) {
 		"chmod 644 foo.txt", // no -R
 	}
 	for _, cmd := range allowed {
-		if rule := matchDestructivePattern(cmd); rule != nil {
+		if rule := matchDestructivePatternRegex(cmd); rule != nil {
 			t.Errorf("expected %q to be allowed, got blocked: %s", cmd, rule.reason)
 		}
 	}
@@ -74,14 +74,14 @@ func TestExtractCommandPaths(t *testing.T) {
 		{"echo hello", nil},
 	}
 	for _, tc := range tests {
-		paths := extractCommandPaths(tc.cmd)
+		paths := extractCommandPathsRegex(tc.cmd)
 		if len(paths) != len(tc.expect) {
-			t.Errorf("extractCommandPaths(%q): got %v, want %v", tc.cmd, paths, tc.expect)
+			t.Errorf("extractCommandPathsRegex(%q): got %v, want %v", tc.cmd, paths, tc.expect)
 			continue
 		}
 		for i, p := range paths {
 			if p != tc.expect[i] {
-				t.Errorf("extractCommandPaths(%q)[%d]: got %q, want %q", tc.cmd, i, p, tc.expect[i])
+				t.Errorf("extractCommandPathsRegex(%q)[%d]: got %q, want %q", tc.cmd, i, p, tc.expect[i])
 			}
 		}
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/memory"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 

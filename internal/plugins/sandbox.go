@@ -90,10 +90,10 @@ func (s *SandboxGuard) validateExec(workDir, argsJSON string) error {
 		return fmt.Errorf("sandbox: %s: parse args: %w", s.toolName, err)
 	}
 
-	// 1. Denylist — only for tools with a raw command string
+	// 1. Denylist — AST-based validation for raw command strings
 	if args.Command != "" {
-		if rule := matchDestructivePattern(args.Command); rule != nil {
-			return fmt.Errorf("sandbox: %s: blocked destructive command (%s)", s.toolName, rule.reason)
+		if err := validateCommandAST(args.Command); err != nil {
+			return fmt.Errorf("sandbox: %s: %w", s.toolName, err)
 		}
 	}
 
@@ -109,9 +109,9 @@ func (s *SandboxGuard) validateExec(workDir, argsJSON string) error {
 		}
 	}
 
-	// Check paths in the raw command string
+	// Check paths in the raw command string (AST-based)
 	if args.Command != "" {
-		for _, p := range extractCommandPaths(args.Command) {
+		for _, p := range extractCommandPathsAST(args.Command) {
 			if err := validatePathInWorkDir(workDir, p, s.allowedPaths); err != nil {
 				return fmt.Errorf("sandbox: %s: command path %s", s.toolName, err)
 			}

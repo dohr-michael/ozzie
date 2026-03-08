@@ -352,14 +352,14 @@ func TestExtractAllBinaries(t *testing.T) {
 		{"", nil},
 	}
 	for _, tt := range tests {
-		got := extractAllBinaries(tt.command)
+		got := extractAllBinariesRegex(tt.command)
 		if len(got) != len(tt.expected) {
-			t.Errorf("extractAllBinaries(%q) = %v, want %v", tt.command, got, tt.expected)
+			t.Errorf("extractAllBinariesRegex(%q) = %v, want %v", tt.command, got, tt.expected)
 			continue
 		}
 		for i, b := range got {
 			if b != tt.expected[i] {
-				t.Errorf("extractAllBinaries(%q)[%d] = %q, want %q", tt.command, i, b, tt.expected[i])
+				t.Errorf("extractAllBinariesRegex(%q)[%d] = %q, want %q", tt.command, i, b, tt.expected[i])
 			}
 		}
 	}

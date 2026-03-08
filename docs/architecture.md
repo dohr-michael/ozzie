@@ -48,8 +48,11 @@ agent, skills) from consumers (logging, persistence, UI streaming).
 | `internal/gateway/ws/` | WebSocket hub, client management, protocol frames | `events`, `sessions` |
 | `internal/agent/` | Eino ADK agent, EventRunner, prompt composition | `events`, `sessions`, `config` |
 | `internal/callbacks/` | Eino callbacks → event bus bridge | `events` |
-| `internal/plugins/` | Plugin system (WASM + native), manifest, tool registry | — |
+| `internal/plugins/` | Plugin system (WASM + native), manifest, tool registry, AST sandbox | — |
 | `internal/skills/` | Skill system (simple + workflow DAG), skill-as-tool | `agent`, `events`, `models`, `plugins` |
+| `pkg/memory/` | Semantic memory library (SQLite + FTS5 + sqlite-vec, hybrid retrieval, consolidation) | — |
+| `pkg/memory/tools/` | Memory tools (store, query, forget — Eino InvokableTool) | `pkg/memory` |
+| `internal/membridge/` | Memory wiring (embedder factory, cross-task extractor) | `pkg/memory`, `config`, `events`, `models` |
 | `internal/sessions/` | Session metadata + JSONL message persistence | — |
 | `internal/storage/` | Low-level storage abstractions | — |
 | `internal/mcp/` | Model Context Protocol client | — |
@@ -283,6 +286,150 @@ The system prompt is composed from 5 layers:
 Layer 1 is set as the ADK `Instruction`. Layers 2-5 are dynamically composed
 by `PromptComposer` and prepended as a system message before the conversation
 history.
+
+## Memory System
+
+Ozzie's long-term memory lives in `pkg/memory/` as an importable library. It uses
+**SQLite** as the single source of truth, with two query backends:
+
+```
+┌──────────────────────────────────────────┐
+│       pkg/memory/  (importable lib)      │
+│                                          │
+│  SQLiteStore (memory.db)                 │
+│  ┌─────────┐  ┌──────────┐  ┌────────┐  │
+│  │  CRUD   │  │  FTS5    │  │ vec0   │  │
+│  │ (SQL)   │  │ (search) │  │(vector)│  │
+│  └─────────┘  └──────────┘  └────────┘  │
+│                                          │
+│  pkg/memory/tools/                       │
+│  ┌────────┐  ┌───────┐  ┌────────┐      │
+│  │ store  │  │ query │  │ forget │      │
+│  └────────┘  └───────┘  └────────┘      │
+└──────────┬───────────────────────────────┘
+           │  markdown sync
+           ▼
+    entries/<id>.md  (read-only mirror)
+
+  internal/membridge/
+  ├── embedder.go       (factory: config → Eino Embedder)
+  └── extractor.go      (cross-task memory extraction)
+```
+
+### Build requirements
+
+Memory uses `mattn/go-sqlite3` (CGo) with FTS5 and `sqlite-vec`. Build requires:
+
+```bash
+CGO_ENABLED=1 CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build ./...
+```
+
+Without `CGO_CFLAGS`, FTS5 virtual tables fail at runtime. This applies to build,
+test, and CI pipelines. Cross-compilation requires a C cross-compiler for the
+target platform.
+
+### Storage
+
+- **SQLite** (`memory.db`) with WAL mode, FTS5 for full-text search, sqlite-vec
+  for vector similarity (via `github.com/asg017/sqlite-vec-go-bindings/cgo`)
+- **Markdown files** (`entries/<id>.md`) are written on every Create/Update/Delete
+  as a human-readable mirror — SQLite is authoritative
+- **Hybrid retrieval**: `HybridRetriever` combines FTS5 keyword search (30%) with
+  sqlite-vec vector search (70%) when embeddings are enabled
+
+### Multi-level Decay
+
+Each memory has an `importance` level that controls confidence decay over time:
+
+| Level | Grace Period | Decay Rate | Floor |
+|-------|-------------|------------|-------|
+| `core` | ∞ | 0 | 1.0 |
+| `important` | 30 days | 0.005/week | 0.3 |
+| `normal` | 7 days | 0.01/week | 0.1 |
+| `ephemeral` | 1 day | 0.05/week | 0.1 |
+
+### Consolidation
+
+The `Consolidator` finds semantically similar memories (cosine similarity ≥ 0.85
+via sqlite-vec), then uses an LLM to merge them into a single consolidated entry.
+Source entries are marked with `merged_into` and excluded from queries but remain
+auditable. Triggered via `ozzie memory consolidate`.
+
+### Embedding Pipeline
+
+The `Pipeline` processes embedding jobs asynchronously. When a memory is stored or
+updated, an `EmbedJob` is enqueued. The pipeline calls the configured embedding
+model, then upserts the vector into sqlite-vec. Deletion jobs remove the vector.
+
+## Command Sandbox
+
+The sandbox validates shell commands before execution using **AST-based analysis**
+via `mvdan.cc/sh/v3`.
+
+### Architecture
+
+```
+User command string
+        │
+        ▼
+  syntax.Parse() → AST
+        │
+        ▼
+  syntax.Walk() traversal
+        │
+        ├── CallExpr → check binary + flags against denylist
+        ├── Stmt     → check redirect targets (>/dev/sd*)
+        ├── FuncDecl → detect fork bombs (self-recursive)
+        └── CmdSubst/Subshell/ProcSubst → recursive descent
+```
+
+### Declarative Denylist
+
+Commands are blocked via a map-based denylist rather than regex patterns:
+
+- **Always blocked**: `mkfs*`, `fdisk`, `sudo`, `doas`, `pkexec`, `su`, `eval`,
+  `source`, `.`
+- **Blocked with specific flags**: `rm -r/-f`, `chmod -R`, `chown -R`,
+  `find -delete/-exec/-execdir`, `dd of=`
+
+### Bypass Coverage
+
+The AST approach covers ~90% of known bypasses vs ~60% with the previous regex:
+
+| Bypass | How it's caught |
+|--------|----------------|
+| `rm /tmp/foo; rm -rf /` | Each `Stmt` checked independently |
+| `rm -r -f /` | All args inspected: flags `{r, f}` |
+| `$(rm -rf /)` | Walk descends into `CmdSubst` |
+| `(rm -rf /)` | Walk descends into `Subshell` |
+| `find / -delete` | Arg values checked alongside flags |
+| `eval "rm -rf /"` | `eval` always blocked |
+| `$cmd args` | Detected as dynamic command (`ParamExp`) |
+| `grep "rm -rf" logfile` | AST knows it's an argument to grep |
+
+## Known Issues (Code Review 2026-03-08)
+
+### Security
+- **No WS/HTTP authentication** — Any local process can connect and control Ozzie
+- **Origin check disabled** — `InsecureSkipVerify: true` in WS accept options
+- **Template injection** — Env var expansion before JSON parsing can break config structure
+- **Session ID entropy** — Truncated to 8 hex chars (~4B combinations)
+
+### Concurrency
+- **Event bus ordering** — `go sub.handler(event)` spawns one goroutine per subscriber per event, breaking delivery order
+- **SubscribeChan panic** — Close after unsubscribe races with in-flight goroutines
+- **Hub SetTaskHandler** — Written without lock, read concurrently in handleRequest
+- **ActorPool preemption** — Force-take after 5s without cancelling the preempted task
+- **Goroutine leaks** — Scheduler Stop(), Extractor Stop(), preemption timeout goroutines not awaited
+
+### Code Quality
+- **`runGateway` god function** — 600+ lines in `cmd/commands/gateway.go`
+- **Duplicate code** — consumeRunnerOutput (tasks/skills), preApproveDangerousTools (task/schedule), WS client boilerplate
+- **eventrunner.go untested** — 620 lines, 0 tests, most critical file in the agent package
+
+See `local-memo/code-review-2026-03-08.md` for the complete review.
+
+---
 
 ## Configuration
 

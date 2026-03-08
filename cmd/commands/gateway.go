@@ -28,7 +28,9 @@ import (
 	"github.com/dohr-michael/ozzie/internal/gateway"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
 	"github.com/dohr-michael/ozzie/internal/layered"
-	"github.com/dohr-michael/ozzie/internal/memory"
+	"github.com/dohr-michael/ozzie/internal/membridge"
+	"github.com/dohr-michael/ozzie/pkg/memory"
+	memtools "github.com/dohr-michael/ozzie/pkg/memory/tools"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
@@ -287,18 +289,26 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Skill executor for direct skill tasks
 	skillExecutor := skills.NewPoolSkillExecutor(skillRegistry, skillRunCfg)
 
-	// Memory store + optional vector embedding (before pool — retriever is passed to actors)
+	// Memory store (SQLite) + optional vector embedding
 	memoryDir := filepath.Join(config.OzziePath(), "memory")
-	memoryStore := memory.NewFileStore(memoryDir)
+	memoryStore, err := memory.NewSQLiteStore(memoryDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer memoryStore.Close()
 
-	var vectorStore *memory.VectorStore
+	var vectorStore memory.VectorStorer
 	var pipeline *memory.Pipeline
 	if cfg.Embedding.IsEnabled() {
-		embedder, embedErr := memory.NewEmbedder(ctx, cfg.Embedding, kr)
+		embedder, embedErr := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
 		if embedErr != nil {
 			slog.Warn("embedding disabled: failed to create embedder", "error", embedErr)
 		} else {
-			vs, vsErr := memory.NewVectorStore(ctx, memoryDir, embedder)
+			dims := cfg.Embedding.Dims
+			if dims <= 0 {
+				dims = 1536 // default for most models
+			}
+			vs, vsErr := memory.NewSQLiteVectorStore(memoryStore.DB(), embedder, dims)
 			if vsErr != nil {
 				slog.Warn("embedding disabled: failed to create vector store", "error", vsErr)
 			} else {
@@ -329,12 +339,12 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	// Wire reloader → embedding hot-reload
 	var embFingerprint string
 	if cfg.Embedding.IsEnabled() {
-		embFingerprint = memory.EmbeddingFingerprint(cfg.Embedding)
+		embFingerprint = membridge.EmbeddingFingerprint(cfg.Embedding)
 	}
 	reloader.OnReload(func(newCfg *config.Config) {
 		newFP := ""
 		if newCfg.Embedding.IsEnabled() {
-			newFP = memory.EmbeddingFingerprint(newCfg.Embedding)
+			newFP = membridge.EmbeddingFingerprint(newCfg.Embedding)
 		}
 		if newFP == embFingerprint {
 			return
@@ -358,12 +368,16 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 		}
 
 		// Recreate embedder + vector store
-		newEmbedder, err := memory.NewEmbedder(ctx, newCfg.Embedding, kr)
+		newEmbedder, err := membridge.NewEmbedder(ctx, newCfg.Embedding, kr)
 		if err != nil {
 			slog.Error("embedding reload: create embedder failed", "error", err)
 			return
 		}
-		newVS, err := memory.NewVectorStore(ctx, memoryDir, newEmbedder)
+		newDims := newCfg.Embedding.Dims
+		if newDims <= 0 {
+			newDims = 1536
+		}
+		newVS, err := memory.NewSQLiteVectorStore(memoryStore.DB(), newEmbedder, newDims)
 		if err != nil {
 			slog.Error("embedding reload: create vector store failed", "error", err)
 			return
@@ -382,7 +396,7 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 
 	// Cross-task learning: extract reusable lessons from completed tasks
 	if pipeline != nil {
-		extractor := memory.NewExtractor(memory.ExtractorConfig{
+		extractor := membridge.NewExtractor(membridge.ExtractorConfig{
 			Store:      memoryStore,
 			Pipeline:   pipeline,
 			TaskReader: taskStore,
@@ -443,17 +457,17 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	defer sched.Stop()
 
 	// Register memory tools
-	storeMemTool := plugins.NewStoreMemoryTool(memoryStore, pipeline)
+	storeMemTool := memtools.NewStoreMemoryTool(memoryStore, pipeline)
 	if err := toolRegistry.RegisterNative("store_memory", storeMemTool, plugins.StoreMemoryManifest()); err != nil {
 		slog.Warn("failed to register store_memory tool", "error", err)
 	}
 
-	queryMemTool := plugins.NewQueryMemoriesTool(memoryRetriever)
+	queryMemTool := memtools.NewQueryMemoriesTool(memoryRetriever)
 	if err := toolRegistry.RegisterNative("query_memories", queryMemTool, plugins.QueryMemoriesManifest()); err != nil {
 		slog.Warn("failed to register query_memories tool", "error", err)
 	}
 
-	forgetMemTool := plugins.NewForgetMemoryTool(memoryStore, pipeline)
+	forgetMemTool := memtools.NewForgetMemoryTool(memoryStore, pipeline)
 	if err := toolRegistry.RegisterNative("forget_memory", forgetMemTool, plugins.ForgetMemoryManifest()); err != nil {
 		slog.Warn("failed to register forget_memory tool", "error", err)
 	}
