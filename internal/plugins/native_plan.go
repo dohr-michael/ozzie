@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -255,7 +256,7 @@ func (t *PlanTaskTool) runInline(ctx context.Context, inliner tasks.InlineExecut
 		results[i] = entry
 	}
 
-	planID := "plan_" + taskIDs[0][5:] // strip "task_" prefix
+	planID := "plan_" + strings.TrimPrefix(taskIDs[0], "task_")
 
 	result, err := json.Marshal(inlinePlanResult{
 		PlanID: planID,
@@ -315,7 +316,7 @@ func (t *PlanTaskTool) runAsync(_ context.Context, input planTaskInput, sessionI
 	}
 
 	// Use first task ID as plan ID prefix
-	planID := "plan_" + taskIDs[0][5:] // strip "task_" prefix
+	planID := "plan_" + strings.TrimPrefix(taskIDs[0], "task_")
 
 	result, err := json.Marshal(planTaskResult{
 		PlanID: planID,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // DefaultCooldown is the minimum interval between two triggers of the same entry.
@@ -33,7 +34,6 @@ type Entry struct {
 // runtimeEntry is the unified internal representation for all schedule entries.
 type runtimeEntry struct {
 	id          string
-	name        string
 	source      string // "skill" or "dynamic"
 	sessionID   string
 	title       string
@@ -132,13 +132,20 @@ func (s *Scheduler) AddEntry(se *ScheduleEntry) error {
 		return fmt.Errorf("interval must be at least 5 seconds")
 	}
 
+	// Persist if store is available (generates ID if empty)
+	if s.store != nil && se.Source == "dynamic" {
+		if err := s.store.Create(se); err != nil {
+			return fmt.Errorf("persist schedule: %w", err)
+		}
+	}
+
+	// Generate ID if not set (no store, or non-dynamic source)
 	if se.ID == "" {
-		se.ID = GenerateScheduleID()
+		se.ID = names.GenerateID("sched", func(string) bool { return false })
 	}
 
 	re := &runtimeEntry{
 		id:          se.ID,
-		name:        se.Name,
 		source:      se.Source,
 		sessionID:   se.SessionID,
 		title:       se.Title,
@@ -163,13 +170,6 @@ func (s *Scheduler) AddEntry(se *ScheduleEntry) error {
 
 	if re.cooldown == 0 {
 		re.cooldown = DefaultCooldown
-	}
-
-	// Persist if store is available
-	if s.store != nil && se.Source == "dynamic" {
-		if err := s.store.Create(se); err != nil {
-			return fmt.Errorf("persist schedule: %w", err)
-		}
 	}
 
 	s.mu.Lock()
@@ -229,7 +229,6 @@ func (s *Scheduler) ListEntries() []*ScheduleEntry {
 func runtimeToScheduleEntry(re *runtimeEntry) *ScheduleEntry {
 	se := &ScheduleEntry{
 		ID:           re.id,
-		Name:         re.name,
 		Source:       re.source,
 		SessionID:    re.sessionID,
 		Title:        re.title,
@@ -302,7 +301,6 @@ func (s *Scheduler) loadPersistedEntries() {
 
 		re := &runtimeEntry{
 			id:          se.ID,
-			name:        se.Name,
 			source:      se.Source,
 			sessionID:   se.SessionID,
 			title:       se.Title,

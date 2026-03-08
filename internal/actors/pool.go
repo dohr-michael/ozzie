@@ -148,9 +148,6 @@ func (p *ActorPool) Store() tasks.Store {
 
 // Submit creates a task and wakes the scheduler.
 func (p *ActorPool) Submit(t *tasks.Task) error {
-	if t.ID == "" {
-		t.ID = tasks.GenerateTaskID()
-	}
 	if t.Status == "" {
 		t.Status = tasks.TaskPending
 	}
@@ -609,9 +606,6 @@ func (p *ActorPool) ShouldInline() bool {
 // and delegates to a TaskRunner.
 func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, error) {
 	// Apply defaults (same as Submit)
-	if t.ID == "" {
-		t.ID = tasks.GenerateTaskID()
-	}
 	if t.Status == "" {
 		t.Status = tasks.TaskPending
 	}

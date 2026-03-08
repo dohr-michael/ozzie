@@ -14,16 +14,16 @@ func Generate() string {
 }
 
 // GenerateUnique returns a name that does not collide according to the exists function.
-// It tries the base name, then appends _2, _3 ... _99. If all collide, it generates
-// a new base name (up to 10 rounds). Ultimate fallback: "name_" + 6 random hex chars.
+// It tries the base name, then appends _0002, _0003 ... _9999. If all collide, it
+// generates a new base name (up to 10 rounds). Ultimate fallback: "name_" + 6 random hex chars.
 func GenerateUnique(exists func(string) bool) string {
 	for round := 0; round < 10; round++ {
 		base := Generate()
 		if !exists(base) {
 			return base
 		}
-		for suffix := 2; suffix <= 99; suffix++ {
-			candidate := fmt.Sprintf("%s_%d", base, suffix)
+		for suffix := 2; suffix <= 9999; suffix++ {
+			candidate := fmt.Sprintf("%s_%04d", base, suffix)
 			if !exists(candidate) {
 				return candidate
 			}

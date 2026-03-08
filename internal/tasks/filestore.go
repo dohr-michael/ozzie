@@ -1,11 +1,12 @@
 package tasks
 
 import (
+	"os"
 	"sort"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/names"
 	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // FileStore persists tasks as directories with meta.json + checkpoints.jsonl + output.md.
@@ -24,23 +25,21 @@ func (fs *FileStore) Create(t *Task) error {
 	defer fs.ds.Unlock()
 
 	if t.ID == "" {
-		t.ID = GenerateTaskID()
-	}
-
-	if t.Name == "" {
-		t.Name = names.GenerateUnique(fs.ds.NameExists)
+		t.ID = names.GenerateID("task", func(candidate string) bool {
+			_, err := os.Stat(fs.ds.Dir(candidate))
+			return err == nil
+		})
 	}
 
 	now := time.Now()
 	t.CreatedAt = now
 	t.UpdatedAt = now
 
-	dirName := t.ID + "_" + t.Name
-	if err := fs.ds.EnsureDir(dirName); err != nil {
+	if err := fs.ds.EnsureDir(t.ID); err != nil {
 		return err
 	}
 
-	return fs.ds.WriteMeta(dirName, t)
+	return fs.ds.WriteMeta(t.ID, t)
 }
 
 // Get reads task metadata by ID or name.

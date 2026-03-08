@@ -42,7 +42,7 @@ func TestGenerate_Distribution(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		names[Generate()] = true
 	}
-	// With 50*74 = 3700 combos, 200 draws should yield at least 150 unique.
+	// With 50*200+ = 10000+ combos, 200 draws should yield at least 100 unique.
 	if len(names) < 100 {
 		t.Fatalf("poor distribution: only %d unique names in 200 draws", len(names))
 	}
@@ -69,9 +69,9 @@ func TestGenerateUnique_WithCollision(t *testing.T) {
 	if name == "" {
 		t.Fatal("expected non-empty name")
 	}
-	// Should have a _2 suffix since the base name collided.
-	if !strings.HasSuffix(name, "_2") {
-		t.Fatalf("expected _2 suffix, got %q", name)
+	// Should have a _0002 suffix since the base name collided.
+	if !strings.HasSuffix(name, "_0002") {
+		t.Fatalf("expected _0002 suffix, got %q", name)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestListSizes(t *testing.T) {
 	if len(left) < 50 {
 		t.Fatalf("expected at least 50 adjectives, got %d", len(left))
 	}
-	if len(right) < 70 {
-		t.Fatalf("expected at least 70 nouns, got %d", len(right))
+	if len(right) < 150 {
+		t.Fatalf("expected at least 150 nouns, got %d", len(right))
 	}
 }

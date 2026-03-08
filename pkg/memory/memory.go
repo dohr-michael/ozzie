@@ -3,10 +3,7 @@ package memory
 
 import (
 	"math"
-	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ApplyDecay reduces confidence based on time since last use and importance level.
@@ -79,8 +76,3 @@ func (e *MemoryEntry) IsStale(currentModel string) bool {
 	return e.IndexedAt.Before(e.UpdatedAt)
 }
 
-// generateMemoryID creates a unique memory identifier.
-func generateMemoryID() string {
-	u := uuid.New().String()
-	return "mem_" + strings.ReplaceAll(u[:8], "-", "")
-}

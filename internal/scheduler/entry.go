@@ -1,10 +1,7 @@
 package scheduler
 
 import (
-	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 )
@@ -19,7 +16,6 @@ type EventTrigger struct {
 // ScheduleEntry represents a persistent schedule entry (skill-based or dynamic).
 type ScheduleEntry struct {
 	ID           string        `json:"id"`
-	Name         string        `json:"name,omitempty"`
 	Source       string        `json:"source"` // "skill" or "dynamic"
 	SessionID    string        `json:"session_id,omitempty"`
 	Title        string        `json:"title"`
@@ -56,8 +52,3 @@ type SkillScheduleInfo struct {
 	OnEvent *EventTrigger
 }
 
-// GenerateScheduleID creates a unique schedule identifier with "sched_" prefix.
-func GenerateScheduleID() string {
-	u := uuid.New().String()
-	return "sched_" + strings.ReplaceAll(u[:8], "-", "")
-}

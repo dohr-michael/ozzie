@@ -182,46 +182,47 @@ func TestResolve_ExactMatch(t *testing.T) {
 	base := t.TempDir()
 	ds := NewDirStore(base, "task")
 
-	// Create a legacy dir (ID only)
-	if err := ds.EnsureDir("task_abc123"); err != nil {
+	// New format: ID is the full directory name
+	if err := ds.EnsureDir("task_cosmic_asimov"); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := ds.Resolve("task_abc123")
+	got, err := ds.Resolve("task_cosmic_asimov")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "task_abc123" {
-		t.Fatalf("Resolve = %q, want %q", got, "task_abc123")
+	if got != "task_cosmic_asimov" {
+		t.Fatalf("Resolve = %q, want %q", got, "task_cosmic_asimov")
 	}
 }
 
-func TestResolve_IDPrefix(t *testing.T) {
+func TestResolve_NameOnly(t *testing.T) {
 	base := t.TempDir()
 	ds := NewDirStore(base, "task")
 
-	if err := ds.EnsureDir("task_abc123_cosmic_asimov"); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ds.Resolve("task_abc123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "task_abc123_cosmic_asimov" {
-		t.Fatalf("Resolve = %q, want %q", got, "task_abc123_cosmic_asimov")
-	}
-}
-
-func TestResolve_NameSuffix(t *testing.T) {
-	base := t.TempDir()
-	ds := NewDirStore(base, "task")
-
-	if err := ds.EnsureDir("task_abc123_cosmic_asimov"); err != nil {
+	if err := ds.EnsureDir("task_cosmic_asimov"); err != nil {
 		t.Fatal(err)
 	}
 
 	got, err := ds.Resolve("cosmic_asimov")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "task_cosmic_asimov" {
+		t.Fatalf("Resolve = %q, want %q", got, "task_cosmic_asimov")
+	}
+}
+
+func TestResolve_LegacyIDPrefix(t *testing.T) {
+	base := t.TempDir()
+	ds := NewDirStore(base, "task")
+
+	// Legacy format: id_hex_name
+	if err := ds.EnsureDir("task_abc123_cosmic_asimov"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ds.Resolve("task_abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,41 +238,6 @@ func TestResolve_NotFound(t *testing.T) {
 	_, err := ds.Resolve("nonexistent")
 	if err == nil {
 		t.Fatal("expected error for non-existent ref")
-	}
-}
-
-func TestNameExists(t *testing.T) {
-	base := t.TempDir()
-	ds := NewDirStore(base, "task")
-
-	if err := ds.EnsureDir("task_abc123_cosmic_asimov"); err != nil {
-		t.Fatal(err)
-	}
-
-	if !ds.NameExists("cosmic_asimov") {
-		t.Fatal("expected NameExists to return true")
-	}
-	if ds.NameExists("stellar_deckard") {
-		t.Fatal("expected NameExists to return false")
-	}
-}
-
-func TestExtractName(t *testing.T) {
-	tests := []struct {
-		dir  string
-		want string
-	}{
-		{"task_abc123_cosmic_asimov", "cosmic_asimov"},
-		{"sess_12345678_stellar_deckard", "stellar_deckard"},
-		{"sched_abcdef01_quantum_lem_2", "quantum_lem_2"},
-		{"task_abc123", ""},
-		{"noprefix", ""},
-	}
-	for _, tt := range tests {
-		got := extractName(tt.dir)
-		if got != tt.want {
-			t.Errorf("extractName(%q) = %q, want %q", tt.dir, got, tt.want)
-		}
 	}
 }
 

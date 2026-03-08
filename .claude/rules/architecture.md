@@ -21,6 +21,7 @@ internal/callbacks/ → Eino callbacks → event bus bridge
 internal/plugins/   → native tools, WASM plugins, MCP client, dangerous wrapper, sandbox
 internal/tasks/     → async task runner + pool
 internal/actors/    → capacity-aware actor pool
+pkg/names/          → friendly ID generation (SF-themed, importable)
 pkg/memory/         → semantic memory library (hybrid keyword + vector, importable)
 pkg/memory/tools/   → memory tools (store, query, forget — Eino InvokableTool)
 internal/membridge/ → memory wiring (embedder factory, cross-task extractor)

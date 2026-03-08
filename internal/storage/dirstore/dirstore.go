@@ -194,12 +194,12 @@ func (ds *DirStore) ReadFileContent(id, filename string) ([]byte, error) {
 	return data, nil
 }
 
-// Resolve maps a reference (exact dir name, ID prefix, or friendly name) to the
+// Resolve maps a reference (exact dir name, name-only, or legacy ID prefix) to the
 // actual directory name. Caller must hold at least an RLock.
 //
-//  1. Fast path: exact match (e.g. "task_abc_cosmic_asimov" or legacy "task_abc").
-//  2. ID prefix: dir starts with ref + "_" (e.g. ref="task_abc" matches "task_abc_cosmic_asimov").
-//  3. Name suffix: the part after the id prefix matches ref (e.g. ref="cosmic_asimov").
+//  1. Fast path: exact match (e.g. "sess_cosmic_asimov").
+//  2. Name-only lookup: "cosmic_asimov" → "sess_cosmic_asimov".
+//  3. Backward compat: legacy dirs "sess_hex_name" matched by prefix scan.
 //  4. Not found: error.
 func (ds *DirStore) Resolve(ref string) (string, error) {
 	// 1. Exact match
@@ -214,61 +214,18 @@ func (ds *DirStore) Resolve(ref string) (string, error) {
 	}
 
 	for _, d := range dirs {
-		// 2. ID prefix lookup: dir starts with ref_
+		// 2. Name-only: "cosmic_asimov" → "sess_cosmic_asimov"
+		if strings.HasSuffix(d, "_"+ref) {
+			return d, nil
+		}
+	}
+
+	for _, d := range dirs {
+		// 3. Backward compat: legacy ID prefix ("sess_a1b2c3d4" → "sess_a1b2c3d4_name")
 		if strings.HasPrefix(d, ref+"_") {
 			return d, nil
 		}
 	}
 
-	for _, d := range dirs {
-		// 3. Name suffix lookup: extract name part (everything after id prefix).
-		// Dir format: {prefix}_{uuid}_{name} — we find the name by looking for the
-		// portion after the id-like prefix. We split on "_" and look for the name.
-		if name := extractName(d); name == ref {
-			return d, nil
-		}
-	}
-
 	return "", fmt.Errorf("%s not found: %s", ds.entityName, ref)
-}
-
-// NameExists returns true if any directory contains the given friendly name.
-// Caller must hold at least an RLock.
-func (ds *DirStore) NameExists(name string) bool {
-	dirs, err := ds.ListDirs()
-	if err != nil {
-		return false
-	}
-
-	for _, d := range dirs {
-		if extractName(d) == name {
-			return true
-		}
-	}
-	return false
-}
-
-// extractName extracts the friendly name from a directory name formatted as
-// "{prefix}_{hex}_{adjective}_{noun}" or "{prefix}_{hex}_{adjective}_{noun}_{n}".
-// The id portion is assumed to be everything up to and including the first 8+ hex chars
-// segment after the prefix. We use a simple heuristic: the id is the first token
-// (e.g. "task", "sess", "sched") + "_" + next token (the uuid part). The rest is the name.
-func extractName(dir string) string {
-	// Pattern: prefix_hex8_name... → split into max 3 on first two "_"
-	// Examples:
-	//   "task_a1b2c3d4_cosmic_asimov"   → name = "cosmic_asimov"
-	//   "sess_12345678_stellar_deckard"  → name = "stellar_deckard"
-	//   "sched_abcdef01_quantum_lem_2"   → name = "quantum_lem_2"
-	//
-	// Strategy: first underscore separates prefix, second separates hex id, rest is name.
-	first := strings.IndexByte(dir, '_')
-	if first < 0 {
-		return ""
-	}
-	second := strings.IndexByte(dir[first+1:], '_')
-	if second < 0 {
-		return ""
-	}
-	name := dir[first+1+second+1:]
-	return name
 }

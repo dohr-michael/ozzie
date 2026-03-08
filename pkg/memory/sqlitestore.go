@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // SQLiteStore implements Store using SQLite with FTS5 for full-text search.
@@ -92,7 +94,11 @@ func (s *SQLiteStore) Create(entry *MemoryEntry, content string) error {
 	defer s.mu.Unlock()
 
 	if entry.ID == "" {
-		entry.ID = generateMemoryID()
+		entry.ID = names.GenerateID("mem", func(candidate string) bool {
+			var exists bool
+			_ = s.db.QueryRow("SELECT 1 FROM memories WHERE id = ?", candidate).Scan(&exists)
+			return exists
+		})
 	}
 	now := time.Now()
 	if entry.CreatedAt.IsZero() {

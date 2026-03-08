@@ -2,14 +2,12 @@ package sessions
 
 import (
 	"fmt"
+	"os"
 	"sort"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
-	"github.com/dohr-michael/ozzie/internal/names"
 	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // FileStore persists sessions as directories with meta.json + messages.jsonl.
@@ -22,31 +20,28 @@ func NewFileStore(baseDir string) *FileStore {
 	return &FileStore{ds: dirstore.NewDirStore(baseDir, "session")}
 }
 
-func generateSessionID() string {
-	u := uuid.New().String()
-	return "sess_" + strings.ReplaceAll(u[:8], "-", "")
-}
-
 // Create initialises a new session directory with meta.json.
 func (fs *FileStore) Create() (*Session, error) {
 	fs.ds.Lock()
 	defer fs.ds.Unlock()
 
 	now := time.Now()
+	id := names.GenerateID("sess", func(candidate string) bool {
+		_, err := os.Stat(fs.ds.Dir(candidate))
+		return err == nil
+	})
 	s := &Session{
-		ID:        generateSessionID(),
-		Name:      names.GenerateUnique(fs.ds.NameExists),
+		ID:        id,
 		CreatedAt: now,
 		UpdatedAt: now,
 		Status:    SessionActive,
 	}
 
-	dirName := s.ID + "_" + s.Name
-	if err := fs.ds.EnsureDir(dirName); err != nil {
+	if err := fs.ds.EnsureDir(id); err != nil {
 		return nil, err
 	}
 
-	if err := fs.ds.WriteMeta(dirName, s); err != nil {
+	if err := fs.ds.WriteMeta(id, s); err != nil {
 		return nil, err
 	}
 

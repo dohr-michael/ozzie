@@ -40,6 +40,7 @@ Working E2E: `ozzie gateway` → `ozzie ask "hello"` → streamed LLM response w
 | Agent             | `internal/agent/` (Eino ADK + EventRunner + AgentFactory) |
 | Tool system       | `internal/plugins/` (native tools, WASM, MCP, dangerous wrapper, sandbox) |
 | Tasks             | `internal/tasks/` (runner, pool) + `internal/actors/` (capacity pool) |
+| Names             | `pkg/names/` (friendly ID generation, SF-themed)        |
 | Memory (lib)      | `pkg/memory/` (SQLite + FTS5 + sqlite-vec, hybrid retrieval, consolidation) |
 | Memory tools      | `pkg/memory/tools/` (store, query, forget — Eino InvokableTool) |
 | Memory bridge     | `internal/membridge/` (embedder factory, cross-task extractor) |
@@ -58,5 +59,6 @@ Working E2E: `ozzie gateway` → `ozzie ask "hello"` → streamed LLM response w
 - **Dangerous tool approval** — `DangerousToolWrapper` prompts user with 3 options (allow once / always for session / deny). Approvals persisted in `Session.ApprovedTools`, restored on reconnect. Pre-approval via `submit_task` and schedules.
 - **MCP servers** — External MCP servers configured in `config.mcp.servers`. Tools are `dangerous: true` by default. `trusted_tools` bypasses confirmation for specific tools. `allowed_tools` / `denied_tools` for whitelisting/blacklisting.
 - **Model drivers** — 5 drivers: `anthropic`, `openai`, `gemini`, `mistral`, `ollama`. Lazy-init via `Registry`. Auth resolution: config → env var → driver default. Gemini uses `google.golang.org/genai` SDK.
+- **Entity IDs** — Human-readable IDs via `pkg/names`: `sess_cosmic_asimov`, `task_stellar_deckard`. The name **is** the ID (no separate hex UUID). `names.GenerateID(prefix, exists)` guarantees uniqueness with `_XXXX` counter suffix. `names.DisplayName(id)` extracts the readable part. SF-themed: ~50 adjectives × ~200 nouns (~10k base combinations).
 - **Memory** — SQLite (mattn/go-sqlite3) with FTS5 full-text search + sqlite-vec for vector similarity. Markdown files synced as read-only mirror. Multi-level decay (core/important/normal/ephemeral). LLM-based consolidation. Build requires `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5"`. Library in `pkg/memory/` (importable), wiring in `internal/membridge/`.
 - **Sandbox** — AST-based command validation via `mvdan.cc/sh/v3`. Declarative denylist replaces regex patterns. Covers ~90% of known bypasses.

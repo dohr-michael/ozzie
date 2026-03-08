@@ -2,10 +2,7 @@
 package tasks
 
 import (
-	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/sessions"
@@ -62,7 +59,6 @@ type TaskResult struct {
 // Task represents an async unit of work.
 type Task struct {
 	ID           string       `json:"id"`
-	Name         string       `json:"name,omitempty"`
 	SessionID    string       `json:"session_id,omitempty"`
 	ParentTaskID string       `json:"parent_task_id,omitempty"`
 	DependsOn    []string     `json:"depends_on,omitempty"`
@@ -92,8 +88,3 @@ type Checkpoint struct {
 	Summary string    `json:"summary"`
 }
 
-// GenerateTaskID creates a unique task identifier.
-func GenerateTaskID() string {
-	u := uuid.New().String()
-	return "task_" + strings.ReplaceAll(u[:8], "-", "")
-}

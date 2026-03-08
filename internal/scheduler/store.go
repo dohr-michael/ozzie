@@ -2,11 +2,12 @@ package scheduler
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/names"
 	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // ScheduleStore persists schedule entries as directories with meta.json.
@@ -25,21 +26,19 @@ func (s *ScheduleStore) Create(entry *ScheduleEntry) error {
 	defer s.ds.Unlock()
 
 	if entry.ID == "" {
-		entry.ID = GenerateScheduleID()
-	}
-
-	if entry.Name == "" {
-		entry.Name = names.GenerateUnique(s.ds.NameExists)
+		entry.ID = names.GenerateID("sched", func(candidate string) bool {
+			_, err := os.Stat(s.ds.Dir(candidate))
+			return err == nil
+		})
 	}
 
 	entry.CreatedAt = time.Now()
 
-	dirName := entry.ID + "_" + entry.Name
-	if err := s.ds.EnsureDir(dirName); err != nil {
+	if err := s.ds.EnsureDir(entry.ID); err != nil {
 		return err
 	}
 
-	return s.ds.WriteMeta(dirName, entry)
+	return s.ds.WriteMeta(entry.ID, entry)
 }
 
 // Get reads a schedule entry by ID or name.

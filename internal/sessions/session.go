@@ -30,7 +30,6 @@ type TokenUsage struct {
 // Session holds metadata about a conversation session.
 type Session struct {
 	ID              string                            `json:"id"`
-	Name            string                            `json:"name,omitempty"`
 	Title           string                            `json:"title"`
 	CreatedAt       time.Time                         `json:"created_at"`
 	UpdatedAt       time.Time                         `json:"updated_at"`

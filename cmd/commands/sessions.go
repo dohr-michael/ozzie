@@ -12,6 +12,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // NewSessionsCommand returns the sessions subcommand.
@@ -70,10 +71,7 @@ func runSessionsList(_ context.Context, cmd *cli.Command) error {
 		if title == "" {
 			title = "-"
 		}
-		displayName := s.Name
-		if displayName == "" {
-			displayName = s.ID
-		}
+		displayName := names.DisplayName(s.ID)
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n",
 			displayName,
 			s.Status,

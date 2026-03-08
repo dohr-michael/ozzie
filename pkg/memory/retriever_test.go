@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // inMemoryStore is a minimal Store for retriever tests (no CGo needed).
@@ -18,7 +20,7 @@ func newInMemoryStore() *inMemoryStore {
 
 func (s *inMemoryStore) Create(entry *MemoryEntry, content string) error {
 	if entry.ID == "" {
-		entry.ID = generateMemoryID()
+		entry.ID = names.GenerateID("mem", func(string) bool { return false })
 	}
 	now := time.Now()
 	if entry.CreatedAt.IsZero() {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
 // NewTasksCommand returns the tasks subcommand.
@@ -78,10 +79,7 @@ func runTasksList(_ context.Context, cmd *cli.Command) error {
 		} else if t.Status == tasks.TaskCompleted {
 			progress = "100%"
 		}
-		displayName := t.Name
-		if displayName == "" {
-			displayName = t.ID
-		}
+		displayName := names.DisplayName(t.ID)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			displayName,
 			t.Status,
@@ -110,9 +108,6 @@ func runTasksShow(_ context.Context, cmd *cli.Command) error {
 	}
 
 	fmt.Printf("ID:          %s\n", t.ID)
-	if t.Name != "" {
-		fmt.Printf("Name:        %s\n", t.Name)
-	}
 	fmt.Printf("Title:       %s\n", t.Title)
 	fmt.Printf("Status:      %s\n", t.Status)
 	fmt.Printf("Priority:    %s\n", t.Priority)
@@ -167,10 +162,7 @@ func runTasksCancel(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("get task: %w", err)
 	}
 
-	displayName := t.Name
-	if displayName == "" {
-		displayName = t.ID
-	}
+	displayName := names.DisplayName(t.ID)
 
 	if t.Status == tasks.TaskCompleted || t.Status == tasks.TaskCancelled {
 		fmt.Printf("Task %s is already %s.\n", displayName, t.Status)
