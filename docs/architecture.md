@@ -44,13 +44,14 @@ agent, skills) from consumers (logging, persistence, UI streaming).
 | `internal/config/` | JSONC config loader, env templating, defaults | — |
 | `internal/events/` | Event bus, typed payloads, ring buffer, resume tokens | — |
 | `internal/models/` | LLM model registry (Anthropic, OpenAI, Ollama via Eino) | `config` |
-| `internal/gateway/` | HTTP server (chi), routes | `events`, `gateway/ws`, `sessions` |
+| `internal/auth/` | Authentication (local token, middleware) | `secrets`, `config` |
+| `internal/gateway/` | HTTP server (chi), routes | `events`, `gateway/ws`, `sessions`, `auth` |
 | `internal/gateway/ws/` | WebSocket hub, client management, protocol frames | `events`, `sessions` |
 | `internal/agent/` | Eino ADK agent, EventRunner, prompt composition | `events`, `sessions`, `config` |
 | `internal/callbacks/` | Eino callbacks → event bus bridge | `events` |
 | `internal/plugins/` | Plugin system (WASM + native), manifest, tool registry, AST sandbox | — |
 | `internal/skills/` | Skill system (simple + workflow DAG), skill-as-tool | `agent`, `events`, `models`, `plugins` |
-| `pkg/memory/` | Semantic memory library (SQLite + FTS5 + sqlite-vec, hybrid retrieval, consolidation) | — |
+| `pkg/memory/` | Semantic memory library (SQLite + FTS5 + brute-force cosine, hybrid retrieval, consolidation) | — |
 | `pkg/memory/tools/` | Memory tools (store, query, forget — Eino InvokableTool) | `pkg/memory` |
 | `internal/membridge/` | Memory wiring (embedder factory, cross-task extractor) | `pkg/memory`, `config`, `events`, `models` |
 | `internal/sessions/` | Session metadata + JSONL message persistence | — |
@@ -316,26 +317,14 @@ Ozzie's long-term memory lives in `pkg/memory/` as an importable library. It use
   └── extractor.go      (cross-task memory extraction)
 ```
 
-### Build requirements
-
-Memory uses `mattn/go-sqlite3` (CGo) with FTS5 and `sqlite-vec`. Build requires:
-
-```bash
-CGO_ENABLED=1 CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build ./...
-```
-
-Without `CGO_CFLAGS`, FTS5 virtual tables fail at runtime. This applies to build,
-test, and CI pipelines. Cross-compilation requires a C cross-compiler for the
-target platform.
-
 ### Storage
 
-- **SQLite** (`memory.db`) with WAL mode, FTS5 for full-text search, sqlite-vec
-  for vector similarity (via `github.com/asg017/sqlite-vec-go-bindings/cgo`)
+- **SQLite** (`memory.db`) via `modernc.org/sqlite` (pure Go, no CGo) with WAL mode,
+  FTS5 for full-text search, brute-force cosine similarity for vectors
 - **Markdown files** (`entries/<id>.md`) are written on every Create/Update/Delete
   as a human-readable mirror — SQLite is authoritative
 - **Hybrid retrieval**: `HybridRetriever` combines FTS5 keyword search (30%) with
-  sqlite-vec vector search (70%) when embeddings are enabled
+  cosine similarity vector search (70%) when embeddings are enabled
 
 ### Multi-level Decay
 
@@ -350,8 +339,8 @@ Each memory has an `importance` level that controls confidence decay over time:
 
 ### Consolidation
 
-The `Consolidator` finds semantically similar memories (cosine similarity ≥ 0.85
-via sqlite-vec), then uses an LLM to merge them into a single consolidated entry.
+The `Consolidator` finds semantically similar memories (cosine similarity ≥ 0.85),
+then uses an LLM to merge them into a single consolidated entry.
 Source entries are marked with `merged_into` and excluded from queries but remain
 auditable. Triggered via `ozzie memory consolidate`.
 
@@ -359,7 +348,7 @@ auditable. Triggered via `ozzie memory consolidate`.
 
 The `Pipeline` processes embedding jobs asynchronously. When a memory is stored or
 updated, an `EmbedJob` is enqueued. The pipeline calls the configured embedding
-model, then upserts the vector into sqlite-vec. Deletion jobs remove the vector.
+model, then upserts the vector into the embeddings table. Deletion jobs remove the vector.
 
 ## Command Sandbox
 
@@ -407,13 +396,44 @@ The AST approach covers ~90% of known bypasses vs ~60% with the previous regex:
 | `$cmd args` | Detected as dynamic command (`ParamExp`) |
 | `grep "rm -rf" logfile` | AST knows it's an argument to grep |
 
+## Authentication
+
+Ozzie uses a **local token** scheme for loopback authentication:
+
+1. The gateway generates a 32-byte random token at startup
+2. The token is encrypted with the age keyring (`ENC[age:...]`) and written to `$OZZIE_PATH/.local_token`
+3. CLI clients (`ozzie ask`, `ozzie tui`) read and decrypt the token, then send it as `Authorization: Bearer <token>`
+4. The gateway validates the token using `crypto/subtle.ConstantTimeCompare` (constant-time)
+5. The token is cleaned up on gateway shutdown
+
+The `internal/auth/` package provides:
+- `Authenticator` interface — extensible for future device pairing (Ed25519)
+- `LocalAuth` — local token implementation (generate, encrypt, validate)
+- `Middleware` — chi HTTP middleware (nil = insecure passthrough)
+
+Route protection:
+- `/api/health` — always public
+- `/api/ws`, `/api/events`, `/api/sessions`, `/api/tasks` — behind auth middleware
+
+WebSocket origin check:
+- Auth enabled: `OriginPatterns: ["localhost:*", "127.0.0.1:*", "[::1]:*"]`
+- `--insecure` flag: `InsecureSkipVerify: true` (dev mode only)
+
+```
+$OZZIE_PATH/
+├── .local_token     # ENC[age:...] blob, rotated per gateway restart
+├── .age/
+│   └── current.key  # age private key (clients decrypt token with this)
+└── devices/         # (future) paired device public keys
+```
+
 ## Known Issues (Code Review 2026-03-08)
 
 ### Security
-- **No WS/HTTP authentication** — Any local process can connect and control Ozzie
-- **Origin check disabled** — `InsecureSkipVerify: true` in WS accept options
+- ~~**No WS/HTTP authentication** — Any local process can connect and control Ozzie~~ — **FIXED**: Local token auth via `internal/auth/`
+- ~~**Origin check disabled** — `InsecureSkipVerify: true` in WS accept options~~ — **FIXED**: Origin patterns restricted to localhost
 - **Template injection** — Env var expansion before JSON parsing can break config structure
-- **Session ID entropy** — Truncated to 8 hex chars (~4B combinations)
+- ~~**Session ID entropy** — Truncated to 8 hex chars (~4B combinations)~~ — **FIXED**: Human-readable names via `pkg/names`
 
 ### Concurrency
 - **Event bus ordering** — `go sub.handler(event)` spawns one goroutine per subscriber per event, breaking delivery order
@@ -444,10 +464,14 @@ Directory structure:
 ~/.ozzie/
 ├── config.jsonc      # Main configuration
 ├── .env              # Environment variables
+├── .local_token      # Auth token (ENC[age:...], rotated per restart)
+├── .age/             # Age keyring
+│   └── current.key   # Active age private key
 ├── SOUL.md           # Custom persona (optional)
 ├── logs/             # Application logs
 ├── sessions/         # Session data (meta.json + messages.jsonl)
 ├── skills/           # Skill definitions (.jsonc)
+├── devices/          # (future) Paired device public keys
 └── plugins/          # Plugin manifests and WASM files
 ```
 

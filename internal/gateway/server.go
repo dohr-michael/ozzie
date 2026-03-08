@@ -14,6 +14,7 @@ import (
 
 	"filippo.io/age"
 
+	"github.com/dohr-michael/ozzie/internal/auth"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
 	"github.com/dohr-michael/ozzie/internal/plugins"
@@ -32,8 +33,9 @@ type Server struct {
 }
 
 // NewServer creates a new gateway server.
-func NewServer(bus *events.Bus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions) *Server {
-	hub := ws.NewHub(bus, store, perms)
+func NewServer(bus *events.Bus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions, authenticator auth.Authenticator) *Server {
+	insecure := authenticator == nil
+	hub := ws.NewHub(bus, store, perms, insecure)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -47,14 +49,17 @@ func NewServer(bus *events.Bus, store sessions.Store, host string, port int, per
 		port:  port,
 	}
 
-	// Routes
+	// Health always public
 	r.Get("/api/health", s.handleHealth)
-	r.Get("/api/ws", hub.ServeWS)
-	r.Get("/api/events", s.handleEvents)
-	r.Get("/api/sessions", s.handleSessions)
 
-	// API: tasks
-	r.Get("/api/tasks", s.handleTasks)
+	// Auth middleware on all other routes
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware(authenticator))
+		r.Get("/api/ws", hub.ServeWS)
+		r.Get("/api/events", s.handleEvents)
+		r.Get("/api/sessions", s.handleSessions)
+		r.Get("/api/tasks", s.handleTasks)
+	})
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", host, port),

@@ -88,8 +88,8 @@ make build
 ### Docker
 
 ```bash
-# Build (CGo required for SQLite FTS5)
-CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build -o build/ozzie ./cmd/ozzie
+# Build
+go build -o build/ozzie ./cmd/ozzie
 docker build -t ozzie .
 
 # Run (mount Docker socket for container-based tasks)
@@ -131,11 +131,11 @@ Tasks run in isolated sub-agents with their own tool sets, crash recovery, and h
 
 Ozzie maintains a persistent semantic memory system in `pkg/memory/` (importable library):
 
-- **Hybrid retrieval** — Keyword scoring (30%) blended with sqlite-vec vector cosine similarity (70%)
+- **Hybrid retrieval** — Keyword scoring (30%) blended with brute-force cosine similarity (70%)
 - **Async embedding pipeline** — Memory storage returns immediately; vector indexing happens in background
 - **Cross-task learning** — Sub-agents automatically receive relevant memories at startup (deterministic injection)
 - **Auto-extraction** — Completed tasks are analyzed to extract reusable lessons (preferences, facts, procedures)
-- **Build requirement** — Requires `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5"` (SQLite CGo dependency via mattn/go-sqlite3)
+- **Pure Go** — Uses modernc.org/sqlite (no CGo required), FTS5 built-in
 
 ### Skills
 
@@ -314,13 +314,10 @@ make run-ask        # Build and run ask with a test message
 Every change must pass all three — no exceptions:
 
 ```bash
-CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build ./...   # compile
-~/go/bin/staticcheck ./...                           # lint
-CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test ./...     # tests
+go build ./...              # compile
+~/go/bin/staticcheck ./...  # lint
+go test ./...               # tests
 ```
-
-> **Note:** `CGO_CFLAGS` is required for SQLite FTS5 support (used by `pkg/memory/`).
-> Without it, memory-related tests fail and the binary cannot create FTS5 virtual tables at runtime.
 
 ### Plugin development with Claude Code
 

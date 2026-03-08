@@ -1,7 +1,7 @@
 .PHONY: build run-gateway run-ask test lint staticcheck clean build-plugins build-all check
 
 build:
-	CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build -o build/ozzie ./cmd/ozzie
+	go build -o build/ozzie ./cmd/ozzie
 
 build-plugins:
 	@mkdir -p build/plugins/calculator build/plugins/todo build/plugins/web-crawler build/plugins/patch
@@ -23,7 +23,7 @@ run-ask: build
 	./build/ozzie ask "Hello, who are you?"
 
 test:
-	CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test ./...
+	go test ./...
 
 lint:
 	golangci-lint run ./...

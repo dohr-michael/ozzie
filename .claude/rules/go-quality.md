@@ -7,11 +7,9 @@ globs: "**/*.go"
 
 Every change MUST pass all three gates before being considered done:
 
-1. **Compile**: `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go build ./...`
+1. **Compile**: `go build ./...`
 2. **Lint**: `staticcheck ./...` (installed at `~/go/bin/staticcheck`)
-3. **Test**: `CGO_CFLAGS="-DSQLITE_ENABLE_FTS5" go test ./...`
-
-> `CGO_CFLAGS` is required for SQLite FTS5 (used by `pkg/memory/`). Without it, FTS5 virtual tables fail at runtime.
+3. **Test**: `go test ./...`
 
 These are equally important. A staticcheck warning (especially SA1019 deprecated, SA4009 unused) is a build failure.
 

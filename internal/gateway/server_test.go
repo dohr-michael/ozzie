@@ -29,7 +29,7 @@ func newTestServer(t *testing.T) *Server {
 	t.Cleanup(func() { bus.Close() })
 
 	store := sessions.NewFileStore(t.TempDir())
-	return NewServer(bus, store, "localhost", 0, nil)
+	return NewServer(bus, store, "localhost", 0, nil, nil)
 }
 
 func TestHandleHealth(t *testing.T) {

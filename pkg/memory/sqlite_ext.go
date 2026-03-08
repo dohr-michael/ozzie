@@ -1,28 +1,17 @@
-//go:build cgo
-
 package memory
 
 import (
 	"database/sql"
 
-	_ "github.com/mattn/go-sqlite3"
-	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
+	_ "modernc.org/sqlite"
 )
 
-func init() {
-	sqlite_vec.Auto()
-}
-
-// openSQLiteDB opens a SQLite database with WAL mode, foreign keys, and sqlite-vec loaded.
+// openSQLiteDB opens a SQLite database with WAL mode and foreign keys.
+// Uses modernc.org/sqlite (pure Go, FTS5 built-in, no CGo required).
 func openSQLiteDB(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_foreign_keys=ON")
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, err
-	}
-	// Verify sqlite-vec extension loaded
-	var vecVersion string
-	if err := db.QueryRow("SELECT vec_version()").Scan(&vecVersion); err != nil {
-		db.Close()
 		return nil, err
 	}
 	return db, nil

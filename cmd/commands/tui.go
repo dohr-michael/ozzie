@@ -34,6 +34,10 @@ func NewTUICommand() *cli.Command {
 				Aliases: []string{"w"},
 				Usage:   "Working directory for the session (default: current directory)",
 			},
+			&cli.BoolFlag{
+				Name:  "insecure",
+				Usage: "Skip authentication (for dev mode)",
+			},
 		},
 		Action: runTUI,
 	}
@@ -48,9 +52,17 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 		workDir, _ = os.Getwd()
 	}
 
+	// Auto-discover local token for authentication
+	var dialOpts []wsclient.DialOption
+	if !cmd.Bool("insecure") {
+		if token := wsclient.DiscoverLocalToken(); token != "" {
+			dialOpts = append(dialOpts, wsclient.WithToken(token))
+		}
+	}
+
 	ctx := context.Background()
 
-	client, err := wsclient.Dial(ctx, gatewayURL)
+	client, err := wsclient.Dial(ctx, gatewayURL, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("connect to gateway: %w", err)
 	}
@@ -80,7 +92,7 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 	p := tea.NewProgram(model)
 
 	// Goroutine: read WS frames with reconnection.
-	go readLoop(ctx, p, client, gatewayURL, sid, workDir)
+	go readLoop(ctx, p, client, gatewayURL, sid, workDir, dialOpts)
 
 	if _, err := p.Run(); err != nil {
 		client.Close()
@@ -92,14 +104,14 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 }
 
 // readLoop reads WS frames and reconnects on failure with exponential backoff.
-func readLoop(ctx context.Context, p *tea.Program, client *wsclient.Client, gatewayURL, sessionID, cwd string) {
+func readLoop(ctx context.Context, p *tea.Program, client *wsclient.Client, gatewayURL, sessionID, cwd string, dialOpts []wsclient.DialOption) {
 	for {
 		frame, err := client.ReadFrame()
 		if err != nil {
 			p.Send(tui.DisconnectedMsg{Err: err})
 
 			// Attempt reconnection with backoff.
-			newClient := reconnect(ctx, p, gatewayURL, sessionID, cwd)
+			newClient := reconnect(ctx, p, gatewayURL, sessionID, cwd, dialOpts)
 			if newClient == nil {
 				return // context cancelled, give up
 			}
@@ -112,7 +124,7 @@ func readLoop(ctx context.Context, p *tea.Program, client *wsclient.Client, gate
 	}
 }
 
-func reconnect(ctx context.Context, p *tea.Program, gatewayURL, sessionID, cwd string) *wsclient.Client {
+func reconnect(ctx context.Context, p *tea.Program, gatewayURL, sessionID, cwd string, dialOpts []wsclient.DialOption) *wsclient.Client {
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
 
@@ -123,7 +135,7 @@ func reconnect(ctx context.Context, p *tea.Program, gatewayURL, sessionID, cwd s
 		case <-time.After(backoff):
 		}
 
-		client, err := wsclient.Dial(ctx, gatewayURL)
+		client, err := wsclient.Dial(ctx, gatewayURL, dialOpts...)
 		if err != nil {
 			backoff = min(backoff*2, maxBackoff)
 			continue

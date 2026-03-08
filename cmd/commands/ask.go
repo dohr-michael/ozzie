@@ -55,6 +55,10 @@ func NewAskCommand() *cli.Command {
 				Aliases: []string{"w"},
 				Usage:   "Working directory for the session (default: current directory)",
 			},
+			&cli.BoolFlag{
+				Name:  "insecure",
+				Usage: "Skip authentication (for dev mode)",
+			},
 		},
 		Action: runAsk,
 	}
@@ -80,11 +84,19 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
+	// Auto-discover local token for authentication
+	var dialOpts []wsclient.DialOption
+	if !cmd.Bool("insecure") {
+		if token := wsclient.DiscoverLocalToken(); token != "" {
+			dialOpts = append(dialOpts, wsclient.WithToken(token))
+		}
+	}
+
 	timeoutSecs := cmd.Int("timeout")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSecs)*time.Second)
 	defer cancel()
 
-	client, err := wsclient.Dial(ctx, gatewayURL)
+	client, err := wsclient.Dial(ctx, gatewayURL, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("connect to gateway: %w", err)
 	}

@@ -3,9 +3,10 @@ package memory
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/cloudwego/eino/components/embedding"
 )
@@ -18,24 +19,24 @@ type VectorResult struct {
 	Metadata   map[string]string
 }
 
-// SQLiteVectorStore wraps sqlite-vec for persistent vector storage.
-// Embeddings are computed externally (via embedder) and stored in vec0 table.
+// SQLiteVectorStore stores embeddings as BLOBs in a standard SQLite table
+// and performs brute-force cosine similarity search in Go.
 type SQLiteVectorStore struct {
 	db       *sql.DB
 	embedder embedding.Embedder
 	dims     int // embedding dimensions
 }
 
-// NewSQLiteVectorStore creates or opens the vec0 virtual table.
+// NewSQLiteVectorStore creates or opens the embeddings table.
 // embedder is used to compute embeddings for upsert and query.
 // dims must match the embedding model's output dimension.
 func NewSQLiteVectorStore(db *sql.DB, embedder embedding.Embedder, dims int) (*SQLiteVectorStore, error) {
-	createSQL := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS memory_embeddings (
 		id TEXT PRIMARY KEY,
-		embedding float[%d]
-	)`, dims)
-	if _, err := db.Exec(createSQL); err != nil {
-		return nil, fmt.Errorf("create vec0 table: %w", err)
+		embedding BLOB NOT NULL
+	)`)
+	if err != nil {
+		return nil, fmt.Errorf("create embeddings table: %w", err)
 	}
 	return &SQLiteVectorStore{db: db, embedder: embedder, dims: dims}, nil
 }
@@ -47,10 +48,10 @@ func (vs *SQLiteVectorStore) Upsert(ctx context.Context, id, content string, _ m
 	if err != nil {
 		return fmt.Errorf("embed for upsert: %w", err)
 	}
-	vecJSON, _ := json.Marshal(vec)
+	blob := encodeEmbedding(vec)
 
-	_, err = vs.db.Exec(`INSERT OR REPLACE INTO memory_vectors(id, embedding) VALUES (?, ?)`,
-		id, string(vecJSON))
+	_, err = vs.db.Exec(`INSERT OR REPLACE INTO memory_embeddings(id, embedding) VALUES (?, ?)`,
+		id, blob)
 	if err != nil {
 		return fmt.Errorf("upsert vector: %w", err)
 	}
@@ -59,50 +60,55 @@ func (vs *SQLiteVectorStore) Upsert(ctx context.Context, id, content string, _ m
 
 // Delete removes a document's embedding.
 func (vs *SQLiteVectorStore) Delete(_ context.Context, id string) error {
-	_, err := vs.db.Exec(`DELETE FROM memory_vectors WHERE id = ?`, id)
+	_, err := vs.db.Exec(`DELETE FROM memory_embeddings WHERE id = ?`, id)
 	return err
 }
 
-// Query performs a semantic search and returns the top results.
+// Query performs a brute-force cosine similarity search and returns the top results.
 func (vs *SQLiteVectorStore) Query(ctx context.Context, queryText string, nResults int) ([]VectorResult, error) {
-	vec, err := vs.embed(ctx, queryText)
+	queryVec, err := vs.embed(ctx, queryText)
 	if err != nil {
 		return nil, fmt.Errorf("embed for query: %w", err)
 	}
-	vecJSON, _ := json.Marshal(vec)
 
-	rows, err := vs.db.Query(`SELECT id, distance
-		FROM memory_vectors
-		WHERE embedding MATCH ?
-		ORDER BY distance
-		LIMIT ?`, string(vecJSON), nResults)
+	rows, err := vs.db.Query(`SELECT id, embedding FROM memory_embeddings`)
 	if err != nil {
-		return nil, fmt.Errorf("vec query: %w", err)
+		return nil, fmt.Errorf("load embeddings: %w", err)
 	}
 	defer rows.Close()
 
 	var results []VectorResult
 	for rows.Next() {
 		var id string
-		var distance float64
-		if err := rows.Scan(&id, &distance); err != nil {
-			return nil, fmt.Errorf("scan vec result: %w", err)
+		var blob []byte
+		if err := rows.Scan(&id, &blob); err != nil {
+			return nil, fmt.Errorf("scan embedding: %w", err)
 		}
-		// Convert L2 distance to similarity in [-1, 1] range for compatibility
-		// with existing HybridRetriever scoring
-		similarity := 1.0 / (1.0 + distance)
+		vec := decodeEmbedding(blob)
+		sim := cosineSimilarity(queryVec, vec)
 		results = append(results, VectorResult{
 			ID:         id,
-			Similarity: float32(similarity),
+			Similarity: sim,
 		})
 	}
-	return results, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate embeddings: %w", err)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+
+	if len(results) > nResults {
+		results = results[:nResults]
+	}
+	return results, nil
 }
 
 // Count returns the number of vectors stored.
 func (vs *SQLiteVectorStore) Count() int {
 	var count int
-	_ = vs.db.QueryRow(`SELECT count(*) FROM memory_vectors`).Scan(&count)
+	_ = vs.db.QueryRow(`SELECT count(*) FROM memory_embeddings`).Scan(&count)
 	return count
 }
 
@@ -133,4 +139,32 @@ func (vs *SQLiteVectorStore) embed(ctx context.Context, text string) ([]float32,
 		}
 	}
 	return f32, nil
+}
+
+// encodeEmbedding converts float32 slice to little-endian bytes.
+func encodeEmbedding(v []float32) []byte {
+	buf := make([]byte, len(v)*4)
+	for i, f := range v {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(f))
+	}
+	return buf
+}
+
+// decodeEmbedding converts little-endian bytes back to float32 slice.
+func decodeEmbedding(b []byte) []float32 {
+	v := make([]float32, len(b)/4)
+	for i := range v {
+		v[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
+	}
+	return v
+}
+
+// cosineSimilarity computes cosine similarity between two vectors.
+// Since embed() normalizes to unit vectors, this is just a dot product.
+func cosineSimilarity(a, b []float32) float32 {
+	var dot float32
+	for i := range a {
+		dot += a[i] * b[i]
+	}
+	return dot
 }

@@ -43,15 +43,17 @@ type Hub struct {
 	unsubscribe    func()
 	recipient      *age.X25519Recipient // nil = encryption disabled
 	passwordTokens sync.Map             // token → bool
+	insecure       bool                 // skip origin check (dev mode)
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
-func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermissions) *Hub {
+func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermissions, insecure bool) *Hub {
 	h := &Hub{
-		clients: make(map[*Client]struct{}),
-		bus:     bus,
-		store:   store,
-		perms:   perms,
+		clients:  make(map[*Client]struct{}),
+		bus:      bus,
+		store:    store,
+		perms:    perms,
+		insecure: insecure,
 	}
 
 	// Track password prompt tokens for encryption
@@ -281,9 +283,13 @@ func (h *Hub) ensureSession(c *Client) {
 
 // ServeWS handles a WebSocket upgrade and manages the client lifecycle.
 func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true, // Allow any origin for dev
-	})
+	opts := &websocket.AcceptOptions{}
+	if h.insecure {
+		opts.InsecureSkipVerify = true
+	} else {
+		opts.OriginPatterns = []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	}
+	conn, err := websocket.Accept(w, r, opts)
 	if err != nil {
 		slog.Error("ws accept", "error", err)
 		return

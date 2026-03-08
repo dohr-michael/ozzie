@@ -55,10 +55,30 @@ Transport: **WebSocket text frames**, each containing one JSON object.
 ws://localhost:7777/api/ws
 ```
 
+### Authentication
+
+The gateway requires a bearer token for all endpoints except `/api/health`.
+
+```
+Authorization: Bearer <token>
+```
+
+The token is passed as an HTTP header during the WebSocket upgrade handshake. CLI clients
+auto-discover it from `$OZZIE_PATH/.local_token` (age-encrypted, decrypted with the local keyring).
+
+| Mode | Behavior |
+|------|----------|
+| **Normal** | Gateway generates a random token at startup, encrypts with age, writes to `.local_token`. Clients decrypt and send as `Authorization: Bearer`. |
+| **`--insecure`** | No token required. Origin check disabled. For dev/testing only. |
+| **No keyring** | Auth disabled with warning. Run `ozzie wake` to create the age keyring. |
+
+**Origin check:** When auth is enabled, WebSocket upgrades are restricted to localhost origins
+(`localhost:*`, `127.0.0.1:*`, `[::1]:*`).
+
 ### Lifecycle
 
 ```
-1. Connect    → WebSocket handshake to /api/ws
+1. Connect    → WebSocket handshake to /api/ws (with Authorization header)
 2. Open       → send "open_session" request
 3. Interact   → send messages, receive events
 4. Disconnect → close WebSocket (server cleans up)
@@ -742,13 +762,15 @@ Client                          Server
 
 These REST endpoints are available for non-WebSocket access (debugging, monitoring).
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/health` | Health check → `{"status":"ok"}` |
-| `GET` | `/api/ws` | WebSocket upgrade endpoint |
-| `GET` | `/api/events?limit=50` | Recent event history (ring buffer) |
-| `GET` | `/api/sessions` | List all sessions |
-| `GET` | `/api/tasks?session_id=...` | List tasks (optional session filter) |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/api/health` | No | Health check → `{"status":"ok"}` |
+| `GET` | `/api/ws` | **Yes** | WebSocket upgrade endpoint |
+| `GET` | `/api/events?limit=50` | **Yes** | Recent event history (ring buffer) |
+| `GET` | `/api/sessions` | **Yes** | List all sessions |
+| `GET` | `/api/tasks?session_id=...` | **Yes** | List tasks (optional session filter) |
+
+> All endpoints except `/api/health` require `Authorization: Bearer <token>` (or `--insecure` mode).
 
 ---
 
@@ -783,7 +805,10 @@ Which events a connector should handle, by complexity tier:
 ### Pseudocode Reference
 
 ```python
-ws = connect("ws://localhost:7777/api/ws")
+# Read and decrypt the local token (or skip for --insecure mode)
+token = decrypt_local_token("~/.ozzie/.local_token", "~/.ozzie/.age/current.key")
+headers = {"Authorization": f"Bearer {token}"} if token else {}
+ws = connect("ws://localhost:7777/api/ws", extra_headers=headers)
 req_id = 0
 
 # 1. Open session

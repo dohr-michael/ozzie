@@ -5,12 +5,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync/atomic"
 
 	"github.com/coder/websocket"
 
 	wsprotocol "github.com/dohr-michael/ozzie/internal/gateway/ws"
 )
+
+// DialOption configures the WS dial.
+type DialOption func(*dialConfig)
+
+type dialConfig struct {
+	token string
+}
+
+// WithToken sets the bearer token for authentication.
+func WithToken(token string) DialOption {
+	return func(c *dialConfig) { c.token = token }
+}
 
 // Client is a WebSocket client for the Ozzie gateway.
 type Client struct {
@@ -22,8 +35,22 @@ type Client struct {
 }
 
 // Dial connects to the gateway WebSocket endpoint.
-func Dial(ctx context.Context, url string) (*Client, error) {
-	conn, _, err := websocket.Dial(ctx, url, nil)
+func Dial(ctx context.Context, url string, opts ...DialOption) (*Client, error) {
+	cfg := &dialConfig{}
+	for _, o := range opts {
+		o(cfg)
+	}
+
+	var wsOpts *websocket.DialOptions
+	if cfg.token != "" {
+		wsOpts = &websocket.DialOptions{
+			HTTPHeader: http.Header{
+				"Authorization": []string{"Bearer " + cfg.token},
+			},
+		}
+	}
+
+	conn, _, err := websocket.Dial(ctx, url, wsOpts)
 	if err != nil {
 		return nil, fmt.Errorf("ws dial: %w", err)
 	}

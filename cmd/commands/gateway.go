@@ -22,6 +22,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/auth"
 	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -54,6 +55,10 @@ func NewGatewayCommand() *cli.Command {
 			&cli.IntFlag{
 				Name:  "port",
 				Usage: "Port to listen on",
+			},
+			&cli.BoolFlag{
+				Name:  "insecure",
+				Usage: "Disable authentication (dev mode only)",
 			},
 		},
 		Action: runGateway,
@@ -629,8 +634,25 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 	})
 	defer eventRunner.Close()
 
+	// Auth — local token (requires keyring for encryption)
+	var authenticator auth.Authenticator
+	if !cmd.Bool("insecure") && kr != nil {
+		tokenPath := filepath.Join(config.OzziePath(), ".local_token")
+		localAuth, err := auth.NewLocalAuth(tokenPath, kr.CurrentRecipient())
+		if err != nil {
+			return fmt.Errorf("init auth: %w", err)
+		}
+		authenticator = localAuth
+		defer os.Remove(tokenPath) // cleanup token on shutdown
+		slog.Info("auth enabled", "mode", "local_token")
+	} else if !cmd.Bool("insecure") && kr == nil {
+		slog.Warn("auth disabled: no keyring available (run ozzie wake to create one)")
+	} else {
+		slog.Warn("auth disabled (--insecure mode)")
+	}
+
 	// Gateway server
-	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port, toolPerms)
+	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port, toolPerms, authenticator)
 
 	// Enable secret encryption on the WS hub
 	if kr != nil {
