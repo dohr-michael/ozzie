@@ -3,7 +3,7 @@ package tui
 import (
 	"encoding/json"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	ws "github.com/dohr-michael/ozzie/internal/gateway/ws"

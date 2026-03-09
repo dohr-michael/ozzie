@@ -8,9 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-isatty"
-	"github.com/muesli/termenv"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 
@@ -77,11 +74,6 @@ func runAsk(_ context.Context, cmd *cli.Command) error {
 	workDir := cmd.String("working-dir")
 	if workDir == "" {
 		workDir, _ = os.Getwd()
-	}
-
-	// Disable ANSI colors when stdout is not a TTY (pipe, redirect).
-	if !isatty.IsTerminal(os.Stdout.Fd()) {
-		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 
 	// Auto-discover local token for authentication

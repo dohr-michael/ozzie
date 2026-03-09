@@ -3,7 +3,7 @@ package setup_wizard
 import (
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -55,7 +55,7 @@ func (s *gatewayStep) showPortInput() {
 
 func (s *gatewayStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 	// Handle back on esc.
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 		switch s.phase {
 		case 0:
 			return s, func() tea.Msg { return StepBackMsg{} }

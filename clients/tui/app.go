@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -161,9 +161,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, a.inputZone.Focus())
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Drop unparsed SGR mouse escape sequence fragments.
-		if msg.Type == tea.KeyRunes && isMouseEscapeFragment(string(msg.Runes)) {
+		if msg.Text != "" && isMouseEscapeFragment(msg.Text) {
 			return a, nil
 		}
 
@@ -249,9 +249,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders only the active zone (small, constant cost).
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.quitting {
-		return ""
+		return tea.NewView("")
 	}
 
 	var parts []string
@@ -262,7 +262,7 @@ func (a *App) View() string {
 	}
 
 	parts = append(parts, a.inputZone.View(), a.header.View())
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	return tea.NewView(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 // renderActive renders only in-progress elements (tools + streaming + thinking).

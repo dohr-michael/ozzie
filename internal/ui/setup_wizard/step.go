@@ -1,6 +1,6 @@
 package setup_wizard
 
-import tea "github.com/charmbracelet/bubbletea"
+import tea "charm.land/bubbletea/v2"
 
 // StepDoneMsg signals the wizard to advance to the next step.
 type StepDoneMsg struct{}

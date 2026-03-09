@@ -1,7 +1,7 @@
 package setup_wizard
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -53,7 +53,7 @@ func (s *defaultStep) Init(answers Answers) tea.Cmd {
 }
 
 func (s *defaultStep) Update(msg tea.Msg) (Step, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 		return s, func() tea.Msg { return StepBackMsg{} }
 	}
 

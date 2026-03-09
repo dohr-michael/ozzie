@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/dohr-michael/ozzie/internal/ui/setup_wizard"
 	"github.com/urfave/cli/v3"
 
@@ -24,7 +24,7 @@ func NewWakeCommand() *cli.Command {
 func runWake(_ context.Context, _ *cli.Command) error {
 	i18n.Lang = i18n.Detect()
 	w := setup_wizard.New()
-	p := tea.NewProgram(w, tea.WithAltScreen())
+	p := tea.NewProgram(w)
 
 	model, err := p.Run()
 	if err != nil {

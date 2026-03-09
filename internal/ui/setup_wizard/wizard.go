@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -78,7 +78,7 @@ func (w *Wizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StepBackMsg:
 		return w.goBack()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			w.cancelled = true
@@ -102,61 +102,64 @@ func (w *Wizard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the wizard.
-func (w *Wizard) View() string {
+func (w *Wizard) View() tea.View {
+	var content string
 	if w.done {
 		if w.err != nil {
-			return components.ErrorStyle.Render(fmt.Sprintf("Error: %v", w.err)) + "\n"
+			content = components.ErrorStyle.Render(fmt.Sprintf("Error: %v", w.err)) + "\n"
+		} else {
+			content = w.finalMsg + "\n"
 		}
-		return w.finalMsg + "\n"
-	}
-	if w.cancelled {
-		return ""
-	}
-	if w.finalizing {
-		return components.HintStyle.Render(i18n.T("wizard.applying")) + "\n"
-	}
+	} else if w.cancelled {
+		content = ""
+	} else if w.finalizing {
+		content = components.HintStyle.Render(i18n.T("wizard.applying")) + "\n"
+	} else {
+		var b strings.Builder
 
-	var b strings.Builder
-
-	// Title
-	title := components.WelcomeTitleStyle.Render(i18n.T("wizard.title"))
-	b.WriteString(title)
-	b.WriteString("\n")
-
-	// Progress bar (skip for welcome step)
-	if w.currentStep > 0 {
-		totalVisible := w.countVisibleSteps()
-		currentVisible := w.currentVisibleIndex()
-		progress := fmt.Sprintf(i18n.T("wizard.step_progress"), currentVisible, totalVisible, w.steps[w.currentStep].Title())
-		b.WriteString(components.HintStyle.Render(progress))
+		// Title
+		title := components.WelcomeTitleStyle.Render(i18n.T("wizard.title"))
+		b.WriteString(title)
 		b.WriteString("\n")
+
+		// Progress bar (skip for welcome step)
+		if w.currentStep > 0 {
+			totalVisible := w.countVisibleSteps()
+			currentVisible := w.currentVisibleIndex()
+			progress := fmt.Sprintf(i18n.T("wizard.step_progress"), currentVisible, totalVisible, w.steps[w.currentStep].Title())
+			b.WriteString(components.HintStyle.Render(progress))
+			b.WriteString("\n")
+		}
+
+		// Separator
+		width := w.width
+		if width <= 0 {
+			width = 80
+		}
+		b.WriteString(components.InputSeparatorStyle.Render(strings.Repeat("─", width)))
+		b.WriteString("\n")
+
+		// Step content
+		b.WriteString("\n")
+		b.WriteString(w.steps[w.currentStep].View())
+		b.WriteString("\n")
+
+		// Bottom separator + hints
+		b.WriteString(components.InputSeparatorStyle.Render(strings.Repeat("─", width)))
+		b.WriteString("\n")
+
+		hints := []string{i18n.T("hint.quit")}
+		if w.currentStep > 0 {
+			hints = append([]string{i18n.T("hint.back")}, hints...)
+		}
+		hintBar := lipgloss.NewStyle().Foreground(components.Muted).Render("  " + strings.Join(hints, " • "))
+		b.WriteString(hintBar)
+		content = b.String()
 	}
 
-	// Separator
-	width := w.width
-	if width <= 0 {
-		width = 80
-	}
-	b.WriteString(components.InputSeparatorStyle.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-
-	// Step content
-	b.WriteString("\n")
-	b.WriteString(w.steps[w.currentStep].View())
-	b.WriteString("\n")
-
-	// Bottom separator + hints
-	b.WriteString(components.InputSeparatorStyle.Render(strings.Repeat("─", width)))
-	b.WriteString("\n")
-
-	hints := []string{i18n.T("hint.quit")}
-	if w.currentStep > 0 {
-		hints = append([]string{i18n.T("hint.back")}, hints...)
-	}
-	hintBar := lipgloss.NewStyle().Foreground(components.Muted).Render("  " + strings.Join(hints, " • "))
-	b.WriteString(hintBar)
-
-	return b.String()
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 // initCurrentStep initializes the current step with answers.

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -288,7 +288,7 @@ func (s *mcpStep) showAddMore() {
 
 func (s *mcpStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "esc" {
 			return s.handleEsc()
 		}

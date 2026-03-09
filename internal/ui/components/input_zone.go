@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 )
@@ -95,7 +95,7 @@ func NewInputZone() *InputZone {
 	ti.Prompt = "" // We render our own ❯ prompt
 	ti.Placeholder = i18n.T("input.placeholder.chat")
 	ti.CharLimit = 2000
-	ti.Width = 80
+	ti.SetWidth(80)
 
 	return &InputZone{
 		mode:        ModeChat,
@@ -116,11 +116,10 @@ func (z *InputZone) Update(msg tea.Msg) (*InputZone, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Drop unparsed SGR mouse escape fragments (e.g. "[<64;75;23M")
-		if msg.Type == tea.KeyRunes {
-			s := string(msg.Runes)
-			if len(s) >= 3 && s[0] == '[' && s[1] == '<' {
+		if msg.Text != "" {
+			if len(msg.Text) >= 3 && msg.Text[0] == '[' && msg.Text[1] == '<' {
 				return z, nil
 			}
 		}
@@ -504,7 +503,7 @@ func (z *InputZone) ClearCompletedFields() {
 func (z *InputZone) SetSize(width, height int) {
 	z.width = width
 	z.height = height
-	z.textInput.Width = width - 4
+	z.textInput.SetWidth(width - 4)
 }
 
 // SetDisabled disables chat input (while waiting for response).

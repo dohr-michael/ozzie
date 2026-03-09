@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/clients/tui"

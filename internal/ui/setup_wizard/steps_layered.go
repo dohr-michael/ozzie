@@ -3,7 +3,7 @@ package setup_wizard
 import (
 	"strconv"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -115,7 +115,7 @@ func (s *layeredStep) showMaxArchives() {
 // --- Update ---
 
 func (s *layeredStep) Update(msg tea.Msg) (Step, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 		return s.handleEsc()
 	}
 

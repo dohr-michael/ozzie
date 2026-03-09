@@ -4,8 +4,8 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/i18n"
@@ -87,7 +87,7 @@ func (s *welcomeStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 		}
 	}
 
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		if keyMsg.String() == "enter" && s.autoAdvance {
 			s.autoAdvance = false
 			return s, func() tea.Msg { return StepDoneMsg{} }

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/models"
@@ -161,7 +161,7 @@ func newProviderStep() *providerStep {
 	ti.EchoMode = textinput.EchoPassword
 	ti.EchoCharacter = '*'
 	ti.CharLimit = 200
-	ti.Width = 60
+	ti.SetWidth(60)
 	ti.Placeholder = "Paste your API key..."
 
 	return &providerStep{
@@ -490,7 +490,7 @@ func (s *providerStep) aliasExists(alias string) bool {
 
 func (s *providerStep) Update(msg tea.Msg) (Step, tea.Cmd) {
 	// Handle esc.
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 		return s.handleEsc()
 	}
 
@@ -535,7 +535,7 @@ func (s *providerStep) handleEsc() (Step, tea.Cmd) {
 }
 
 func (s *providerStep) updateKeyInput(msg tea.Msg) (Step, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok {
 		switch keyMsg.String() {
 		case "enter":
 			val := strings.TrimSpace(s.keyInput.Value())

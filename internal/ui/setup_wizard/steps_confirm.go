@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
@@ -54,7 +54,7 @@ func (s *confirmStep) Init(answers Answers) tea.Cmd {
 }
 
 func (s *confirmStep) Update(msg tea.Msg) (Step, tea.Cmd) {
-	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+	if keyMsg, ok := msg.(tea.KeyPressMsg); ok && keyMsg.String() == "esc" {
 		return s, func() tea.Msg { return StepBackMsg{} }
 	}
 
@@ -216,8 +216,8 @@ func (s *confirmStep) updateViewport() {
 	if vpHeight < 3 {
 		vpHeight = 3
 	}
-	s.vp.Width = s.width
-	s.vp.Height = vpHeight
+	s.vp.SetWidth(s.width)
+	s.vp.SetHeight(vpHeight)
 	s.ready = true
 }
 
