@@ -8,38 +8,28 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
-	einoCallbacks "github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/urfave/cli/v3"
 
-	einoFs "github.com/cloudwego/eino/adk/middlewares/filesystem"
-	einoReduction "github.com/cloudwego/eino/adk/middlewares/reduction"
-
 	"github.com/dohr-michael/ozzie/internal/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/auth"
-	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/gateway"
-	"github.com/dohr-michael/ozzie/internal/heartbeat"
+	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
 	"github.com/dohr-michael/ozzie/internal/layered"
-	"github.com/dohr-michael/ozzie/internal/membridge"
-	"github.com/dohr-michael/ozzie/pkg/memory"
-	memtools "github.com/dohr-michael/ozzie/pkg/memory/tools"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/skills"
-	"github.com/dohr-michael/ozzie/internal/storage"
 	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
 // NewGatewayCommand returns the gateway subcommand.
@@ -65,602 +55,129 @@ func NewGatewayCommand() *cli.Command {
 	}
 }
 
+// gateway holds all components wired during startup.
+type gateway struct {
+	cmd *cli.Command
+	ctx context.Context
+
+	// Config
+	cfg      *config.Config
+	kr       *secrets.KeyRing
+	reloader *config.Reloader
+
+	// Infra
+	bus *events.Bus
+
+	// Models
+	registry    *models.Registry
+	chatModel   model.ToolCallingChatModel
+	defaultTier agent.ModelTier
+
+	// Tools
+	toolRegistry *plugins.ToolRegistry
+	toolPerms    *plugins.ToolPermissions
+	toolSet      *agent.ToolSet
+	tmpDir       string
+
+	// Skills
+	skillRegistry *skills.Registry
+	skillRunCfg   skills.RunnerConfig
+	skillExecutor *skills.PoolSkillExecutor
+	skillDescs    map[string]string
+
+	// Stores
+	sessionStore sessions.Store
+	taskStore    tasks.Store
+
+	// Memory
+	memoryStore     *memory.SQLiteStore
+	memoryRetriever *memory.HybridRetriever
+	pipeline        *memory.Pipeline
+	embFingerprint  string
+
+	// Runtime
+	pool  *actors.ActorPool
+	sched *scheduler.Scheduler
+
+	// Agent
+	persona     string
+	factory     *agent.AgentFactory
+	eventRunner *agent.EventRunner
+	taskMws     []adk.AgentMiddleware
+	layered     *layered.Manager
+
+	closers []func()
+}
+
 func runGateway(_ context.Context, cmd *cli.Command) error {
-	// 1. KeyRing — loaded before config (does not depend on config)
-	kr, krErr := secrets.NewKeyRing()
-	if krErr != nil {
-		slog.Warn("keyring not loaded, secret decryption disabled", "error", krErr)
+	g := &gateway{cmd: cmd}
+	if err := g.loadConfig(); err != nil {
+		return err
 	}
-	if kr == nil {
-		slog.Info("no .age/ keyring found, secrets will not be decrypted")
-	}
-
-	// Decrypt function for config loader
-	var decryptFn config.DecryptFunc
-	if kr != nil {
-		decryptFn = kr.DecryptValue
-	}
-
-	// 2. Load config with decryption
-	configPath := cmd.String("config")
-	var loadOpts []config.LoadOption
-	if decryptFn != nil {
-		loadOpts = append(loadOpts, config.WithDecrypt(decryptFn))
-	}
-	cfg, err := config.Load(configPath, loadOpts...)
-	if err != nil {
-		slog.Warn("config not found, using defaults", "path", configPath, "error", err)
-		cfg = &config.Config{}
-		cfg.Gateway.Host = "127.0.0.1"
-		cfg.Gateway.Port = 18420
-		cfg.Events.BufferSize = 1024
-		cfg.Events.LogLevel = "info"
-	}
-
-	// Setup log level: config value, with --debug CLI override
-	logLevel := resolveLogLevel(cfg.Events.LogLevel)
-	if cmd.Bool("debug") {
-		logLevel = slog.LevelDebug
-	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
-
-	// CLI flags override config
-	if cmd.IsSet("host") {
-		cfg.Gateway.Host = cmd.String("host")
-	}
-	if cmd.IsSet("port") {
-		cfg.Gateway.Port = cmd.Int("port")
-	}
-
-	// 3. Config reloader with decrypt
-	reloader := config.NewReloader(configPath, config.DotenvPath(), cfg, decryptFn)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	g.ctx = ctx
+	g.startSIGHUP()
 
-	// SIGHUP handler for config hot reload
-	sighupCh := make(chan os.Signal, 1)
-	signal.Notify(sighupCh, syscall.SIGHUP)
-	go func() {
-		for range sighupCh {
-			if err := reloader.Reload(); err != nil {
-				slog.Error("config reload failed", "error", err)
-			}
-		}
-	}()
-
-	// Event bus
-	bus := events.NewBus(cfg.Events.BufferSize)
-	defer bus.Close()
-
-	// Register Eino callbacks → event bus bridge
-	cbHandler := ozzieCallbacks.NewEventBusHandler(bus, events.SourceAgent)
-	einoCallbacks.AppendGlobalHandlers(cbHandler)
-
-	// Event persistence
-	logsDir := filepath.Join(config.OzziePath(), "logs")
-	eventLogger := storage.NewEventLogger(logsDir, bus)
-	defer eventLogger.Close()
-
-	// Validate provider capabilities (warning only — allows future extensibility)
-	for name, prov := range cfg.Models.Providers {
-		if len(prov.Capabilities) > 0 {
-			if err := models.ValidateCapabilities(prov.Capabilities); err != nil {
-				slog.Warn("provider has unknown capability", "provider", name, "error", err)
-			}
-		}
+	if err := g.initInfra(); err != nil {
+		return err
 	}
-
-	// Model registry (with keyring for encrypted auth)
-	registry := models.NewRegistry(cfg.Models, kr)
-
-	// Wire reloader → model registry for hot config reload
-	reloader.OnReload(func(newCfg *config.Config) {
-		registry.UpdateProviders(newCfg.Models)
-	})
-
-	// Get default model
-	chatModel, err := registry.Default(ctx)
-	if err != nil {
-		return fmt.Errorf("init default model: %w", err)
+	defer g.close()
+	if err := g.initModels(); err != nil {
+		return err
 	}
-
-	// Plugin registry — load WASM plugins + register native tools
-	toolRegistry, err := plugins.SetupToolRegistry(ctx, cfg, bus)
-	if err != nil {
-		return fmt.Errorf("setup tools: %w", err)
+	if err := g.initToolPipeline(); err != nil {
+		return err
 	}
-	defer toolRegistry.Close(ctx)
-
-	// MCP servers — connect to external MCP tool servers
-	if err := plugins.SetupMCPServers(ctx, cfg.MCP, toolRegistry, bus); err != nil {
-		slog.Warn("failed to setup MCP servers", "error", err)
+	if err := g.initSkills(); err != nil {
+		return err
 	}
-
-	// Tool permissions — global auto-approved tools from config
-	toolPerms := plugins.NewToolPermissions(cfg.Tools.AllowedDangerous)
-
-	// Prepare tmp dir early — needed by both sandbox guard and filesystem middleware
-	tmpDir := filepath.Join(config.OzziePath(), "tmp")
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		return fmt.Errorf("create tmp dir: %w", err)
+	if err := g.initStores(); err != nil {
+		return err
 	}
-
-	// Sandbox guard — validates command content in autonomous mode (before dangerous wrapper)
-	if cfg.Sandbox.IsSandboxEnabled() {
-		sandboxPaths := append([]string{tmpDir}, cfg.Sandbox.AllowedPaths...)
-		plugins.WrapRegistrySandbox(toolRegistry, sandboxPaths)
+	if err := g.initMemory(); err != nil {
+		return err
 	}
-
-	// Constraint guard — per-tool argument validation (between sandbox and dangerous)
-	plugins.WrapRegistryConstraints(toolRegistry)
-
-	// Wrap dangerous tools with confirmation for interactive gateway
-	plugins.WrapRegistryDangerous(toolRegistry, bus, toolPerms)
-
-	// Skill registry — load from SKILL.md directories
-	skillRegistry := skills.NewRegistry()
-	for _, dir := range cfg.Skills.Dirs {
-		if err := skillRegistry.LoadDir(dir); err != nil {
-			slog.Warn("failed to load skills", "dir", dir, "error", err)
-		}
+	if err := g.initRuntime(); err != nil {
+		return err
 	}
-	slog.Info("skills loaded", "count", len(skillRegistry.All()))
-
-	// Verifier for acceptance criteria
-	verifier := skills.NewVerifier(registry)
-
-	skillRunCfg := skills.RunnerConfig{
-		ModelRegistry: registry,
-		ToolRegistry:  toolRegistry,
-		EventBus:      bus,
-		Verifier:      verifier,
+	g.registerTools()
+	if err := g.initAgent(); err != nil {
+		return err
 	}
+	return g.serve()
+}
 
-	// Catalog for context middleware (name → description only)
-	skillDescs := skillRegistry.Catalog()
-
-	// Session store
-	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
-	sessionStore := sessions.NewFileStore(sessionsDir)
-
-	// Task store
-	tasksDir := filepath.Join(config.OzziePath(), "tasks")
-	taskStore := tasks.NewFileStore(tasksDir)
-
-	// Crash recovery — re-queue interrupted tasks
-	recovered, recoverErr := tasks.RecoverTasks(taskStore)
-	if recoverErr != nil {
-		slog.Warn("task recovery", "error", recoverErr)
-	}
-	if recovered > 0 {
-		slog.Info("recovered interrupted tasks", "count", recovered)
-	}
-
-	// Heartbeat writer
-	hbWriter := heartbeat.NewWriter(filepath.Join(config.OzziePath(), "heartbeat.json"))
-	hbWriter.Start()
-	defer hbWriter.Stop()
-
-	// Register update_session tool (needs session store, so registered here)
-	updateSessionTool := plugins.NewUpdateSessionTool(sessionStore)
-	if err := toolRegistry.RegisterNative("update_session", updateSessionTool, plugins.UpdateSessionManifest()); err != nil {
-		slog.Warn("failed to register update_session tool", "error", err)
-	}
-
-	// Resolve default model tier (used for prompt adaptation)
-	defaultTier := registry.DefaultTier()
-	slog.Info("default model tier", "tier", defaultTier)
-
-	// Agent — persona from SOUL.md or DefaultPersona fallback (layer 1)
-	persona := agent.PersonaForTier(agent.LoadPersona(), defaultTier)
-	slog.Debug("loaded persona", "length", len(persona), "persona", persona)
-
-	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
-	fsOpts := []plugins.OzzieBackendOption{
-		plugins.WithWriteAllowedPaths(tmpDir),
-		plugins.WithReadRestrictedPaths(secrets.AgeDirPath()),
-	}
-	fsBackend := plugins.NewOzzieBackend(bus, toolPerms, fsOpts...)
-	fsMw, err := einoFs.NewMiddleware(ctx, &einoFs.Config{
-		Backend:                          fsBackend,
-		WithoutLargeToolResultOffloading: true, // offloading handled by reduction middleware below
-	})
-	if err != nil {
-		return fmt.Errorf("init filesystem middleware: %w", err)
-	}
-
-	// Reduction middleware — clears old tool results and offloads large ones to filesystem
-	reductionMw, err := einoReduction.NewToolResultMiddleware(ctx, &einoReduction.ToolResultConfig{
-		Backend:                fsBackend,
-		ClearingTokenThreshold: 20000,
-		KeepRecentTokens:       40000,
-		OffloadingTokenLimit:   20000,
-	})
-	if err != nil {
-		return fmt.Errorf("init reduction middleware: %w", err)
-	}
-
-	// Build runtime instruction (system tools + environment awareness)
-	systemTools := agent.LoadSystemTools(cfg.Runtime.SystemToolsFile)
-	runtimeInstruction := agent.BuildRuntimeInstruction(cfg.Runtime.Environment, systemTools)
-
-	// SubAgent middleware — injects SubAgentInstructions + runtime (tool reference + workflow)
-	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction, defaultTier)
-
-	// Task middlewares — subagent instructions + filesystem + reduction for sub-agents (no context middleware)
-	taskMiddlewares := []adk.AgentMiddleware{subAgentMw, fsMw, reductionMw}
-
-	// Skill executor for direct skill tasks
-	skillExecutor := skills.NewPoolSkillExecutor(skillRegistry, skillRunCfg)
-
-	// Memory store (SQLite) + optional vector embedding
-	memoryDir := filepath.Join(config.OzziePath(), "memory")
-	memoryStore, err := memory.NewSQLiteStore(memoryDir)
-	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
-	}
-	defer memoryStore.Close()
-
-	var vectorStore memory.VectorStorer
-	var pipeline *memory.Pipeline
-	if cfg.Embedding.IsEnabled() {
-		embedder, embedErr := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
-		if embedErr != nil {
-			slog.Warn("embedding disabled: failed to create embedder", "error", embedErr)
-		} else {
-			dims := cfg.Embedding.Dims
-			if dims <= 0 {
-				dims = 1536 // default for most models
-			}
-			vs, vsErr := memory.NewSQLiteVectorStore(memoryStore.DB(), embedder, dims)
-			if vsErr != nil {
-				slog.Warn("embedding disabled: failed to create vector store", "error", vsErr)
-			} else {
-				vectorStore = vs
-				queueSize := cfg.Embedding.QueueSize
-				if queueSize <= 0 {
-					queueSize = 100
-				}
-				embeddingModel := cfg.Embedding.Model
-				pipeline = memory.NewPipeline(vectorStore, memoryStore, embeddingModel, queueSize)
-				pipeline.Start(ctx)
-				defer pipeline.Stop()
-
-				// Async startup reindex (incremental — skips already-indexed entries)
-				go func() {
-					if _, err := memory.Reindex(ctx, memoryStore, vectorStore, embeddingModel); err != nil {
-						slog.Warn("startup reindex failed", "error", err)
-					}
-				}()
-				slog.Info("semantic memory enabled", "driver", cfg.Embedding.Driver, "model", embeddingModel)
-			}
-		}
-	}
-
-	memoryRetriever := memory.NewHybridRetriever(memoryStore, vectorStore)
-	defer memoryRetriever.Close()
-
-	// Wire reloader → embedding hot-reload
-	var embFingerprint string
-	if cfg.Embedding.IsEnabled() {
-		embFingerprint = membridge.EmbeddingFingerprint(cfg.Embedding)
-	}
-	reloader.OnReload(func(newCfg *config.Config) {
-		newFP := ""
-		if newCfg.Embedding.IsEnabled() {
-			newFP = membridge.EmbeddingFingerprint(newCfg.Embedding)
-		}
-		if newFP == embFingerprint {
-			return
-		}
-		oldFP := embFingerprint
-		embFingerprint = newFP
-
-		if pipeline == nil {
-			// Was disabled at startup — can't hot-enable without restart
-			if newFP != "" {
-				slog.Warn("embedding config changed but was disabled at startup, restart gateway to apply")
-			}
-			return
-		}
-
-		if !newCfg.Embedding.IsEnabled() {
-			pipeline.Swap(nil, "")
-			memoryRetriever.SwapVector(nil)
-			slog.Info("embedding disabled via config reload")
-			return
-		}
-
-		// Recreate embedder + vector store
-		newEmbedder, err := membridge.NewEmbedder(ctx, newCfg.Embedding, kr)
-		if err != nil {
-			slog.Error("embedding reload: create embedder failed", "error", err)
-			return
-		}
-		newDims := newCfg.Embedding.Dims
-		if newDims <= 0 {
-			newDims = 1536
-		}
-		newVS, err := memory.NewSQLiteVectorStore(memoryStore.DB(), newEmbedder, newDims)
-		if err != nil {
-			slog.Error("embedding reload: create vector store failed", "error", err)
-			return
-		}
-		newModel := newCfg.Embedding.Model
-		pipeline.Swap(newVS, newModel)
-		memoryRetriever.SwapVector(newVS)
-
-		go func() {
-			if _, err := memory.Reindex(ctx, memoryStore, newVS, newModel); err != nil {
-				slog.Warn("embedding reload reindex failed", "error", err)
-			}
-		}()
-		slog.Info("embedding reloaded", "old", oldFP, "new", newFP)
-	})
-
-	// Cross-task learning: extract reusable lessons from completed tasks
-	if pipeline != nil {
-		extractor := membridge.NewExtractor(membridge.ExtractorConfig{
-			Store:      memoryStore,
-			Pipeline:   pipeline,
-			TaskReader: taskStore,
-			Summarizer: &extractorLLMAdapter{chatModel: chatModel},
-			Bus:        bus,
-			Retriever:  memoryRetriever,
-		})
-		extractor.Start()
-		defer extractor.Stop()
-	}
-
-	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
-	pool := actors.NewActorPool(actors.ActorPoolConfig{
-		Providers:       cfg.Models.Providers,
-		Store:           taskStore,
-		Bus:             bus,
-		Models:          registry,
-		ToolRegistry:    toolRegistry,
-		SkillRunner:     skillExecutor,
-		TaskMiddlewares: taskMiddlewares,
-		Retriever:       memoryRetriever,
-		Perms:           toolPerms,
-	})
-	pool.Start()
-	defer pool.Stop()
-
-	// Schedule store — persistent dynamic schedule entries
-	schedulesDir := filepath.Join(config.OzziePath(), "schedules")
-	scheduleStore := scheduler.NewScheduleStore(schedulesDir)
-
-	// Extract skill schedule info for the scheduler (avoids import cycle)
-	var schedSkills []scheduler.SkillScheduleInfo
-	for _, sk := range skillRegistry.All() {
-		if sk.Triggers == nil || !sk.Triggers.HasScheduleTrigger() {
-			continue
-		}
-		info := scheduler.SkillScheduleInfo{
-			Name: sk.Name,
-			Cron: sk.Triggers.Cron,
-		}
-		if sk.Triggers.OnEvent != nil {
-			info.OnEvent = &scheduler.EventTrigger{
-				Event:  sk.Triggers.OnEvent.Event,
-				Filter: sk.Triggers.OnEvent.Filter,
-			}
-		}
-		schedSkills = append(schedSkills, info)
-	}
-
-	// Scheduler — cron + event-triggered + dynamic schedule execution
-	sched := scheduler.New(scheduler.Config{
-		Pool:   pool,
-		Bus:    bus,
-		Skills: schedSkills,
-		Store:  scheduleStore,
-	})
-	sched.Start()
-	defer sched.Stop()
-
-	// Register memory tools
-	storeMemTool := memtools.NewStoreMemoryTool(memoryStore, pipeline)
-	if err := toolRegistry.RegisterNative("store_memory", storeMemTool, plugins.StoreMemoryManifest()); err != nil {
-		slog.Warn("failed to register store_memory tool", "error", err)
-	}
-
-	queryMemTool := memtools.NewQueryMemoriesTool(memoryRetriever)
-	if err := toolRegistry.RegisterNative("query_memories", queryMemTool, plugins.QueryMemoriesManifest()); err != nil {
-		slog.Warn("failed to register query_memories tool", "error", err)
-	}
-
-	forgetMemTool := memtools.NewForgetMemoryTool(memoryStore, pipeline)
-	if err := toolRegistry.RegisterNative("forget_memory", forgetMemTool, plugins.ForgetMemoryManifest()); err != nil {
-		slog.Warn("failed to register forget_memory tool", "error", err)
-	}
-
-	// Register task tools
-	submitTool := plugins.NewSubmitTaskTool(pool, toolRegistry, toolPerms, bus)
-	if err := toolRegistry.RegisterNative("submit_task", submitTool, plugins.SubmitTaskManifest()); err != nil {
-		slog.Warn("failed to register submit_task tool", "error", err)
-	}
-
-	checkTool := plugins.NewCheckTaskTool(taskStore)
-	if err := toolRegistry.RegisterNative("check_task", checkTool, plugins.CheckTaskManifest()); err != nil {
-		slog.Warn("failed to register check_task tool", "error", err)
-	}
-
-	cancelTool := plugins.NewCancelTaskTool(pool)
-	if err := toolRegistry.RegisterNative("cancel_task", cancelTool, plugins.CancelTaskManifest()); err != nil {
-		slog.Warn("failed to register cancel_task tool", "error", err)
-	}
-
-	planTool := plugins.NewPlanTaskTool(pool)
-	if err := toolRegistry.RegisterNative("plan_task", planTool, plugins.PlanTaskManifest()); err != nil {
-		slog.Warn("failed to register plan_task tool", "error", err)
-	}
-
-	listTasksTool := plugins.NewListTasksTool(taskStore)
-	if err := toolRegistry.RegisterNative("list_tasks", listTasksTool, plugins.ListTasksManifest()); err != nil {
-		slog.Warn("failed to register list_tasks tool", "error", err)
-	}
-
-	// Register schedule tools
-	scheduleTaskTool := plugins.NewScheduleTaskTool(sched, bus, toolRegistry, toolPerms)
-	if err := toolRegistry.RegisterNative("schedule_task", scheduleTaskTool, plugins.ScheduleTaskManifest()); err != nil {
-		slog.Warn("failed to register schedule_task tool", "error", err)
-	}
-
-	unscheduleTaskTool := plugins.NewUnscheduleTaskTool(sched, bus)
-	if err := toolRegistry.RegisterNative("unschedule_task", unscheduleTaskTool, plugins.UnscheduleTaskManifest()); err != nil {
-		slog.Warn("failed to register unschedule_task tool", "error", err)
-	}
-
-	listSchedulesTool := plugins.NewListSchedulesTool(sched)
-	if err := toolRegistry.RegisterNative("list_schedules", listSchedulesTool, plugins.ListSchedulesManifest()); err != nil {
-		slog.Warn("failed to register list_schedules tool", "error", err)
-	}
-
-	triggerScheduleTool := plugins.NewTriggerScheduleTool(sched)
-	if err := toolRegistry.RegisterNative("trigger_schedule", triggerScheduleTool, plugins.TriggerScheduleManifest()); err != nil {
-		slog.Warn("failed to register trigger_schedule tool", "error", err)
-	}
-
-	// ToolSet: all native tools are always active (core).
-	// Only MCP tools require on-demand activation via activate_tools.
-	// Gemini Flash doesn't handle the activate-then-use pattern reliably.
-	coreTools := toolRegistry.NativeToolNames()
-	toolSet := agent.NewToolSet(coreTools, toolRegistry.ToolNames())
-
-	// Register activate_tools meta-tool (needs toolSet + toolRegistry).
-	// Registered AFTER NewToolSet, so we must explicitly add it to core.
-	activateTool := plugins.NewActivateToolsTool(toolSet, toolRegistry)
-	if err := toolRegistry.RegisterNative("activate_tools", activateTool, plugins.ActivateToolsManifest()); err != nil {
-		slog.Warn("failed to register activate_tools tool", "error", err)
-	}
-	toolSet.RegisterCore("activate_tools")
-
-	// Register activate_skill (core tool — always active, progressive disclosure)
-	activateSkillTool := plugins.NewActivateSkillTool(skillRegistry, toolSet, toolRegistry)
-	if err := toolRegistry.RegisterNative("activate_skill", activateSkillTool, plugins.ActivateSkillManifest()); err != nil {
-		slog.Warn("failed to register activate_skill tool", "error", err)
-	}
-	toolSet.RegisterCore("activate_skill")
-
-	// Register run_workflow (on-demand — activated via activate_skill or explicitly)
-	runWorkflowTool := plugins.NewRunWorkflowTool(skillExecutor)
-	if err := toolRegistry.RegisterNative("run_workflow", runWorkflowTool, plugins.RunWorkflowManifest()); err != nil {
-		slog.Warn("failed to register run_workflow tool", "error", err)
-	}
-
-	slog.Info("tools loaded", "count", len(toolRegistry.ToolNames()))
-
-	// Build full tool descriptions for prompt composer
-	allToolDescs := toolRegistry.AllToolDescriptions()
-
-	// Build actor descriptions for the planner prompt (non-default providers only)
-	var actorDescs []agent.ActorDescription
-	for name, prov := range cfg.Models.Providers {
-		if name == cfg.Models.Default {
-			continue // skip the default provider — it's the planner itself
-		}
-		actorDescs = append(actorDescs, agent.ActorDescription{
-			Name:         name,
-			Tags:         prov.Tags,
-			Capabilities: prov.Capabilities,
-			PromptPrefix: prov.PromptPrefix,
-		})
-	}
-
-	// Context middleware — injects dynamic context (instructions, tools, session, memories)
-	contextMw := agent.NewContextMiddleware(agent.ContextMiddlewareConfig{
-		CustomInstructions:  cfg.Agent.SystemPrompt,
-		PreferredLanguage:   cfg.Agent.PreferredLanguage,
-		RuntimeInstruction:  runtimeInstruction,
-		AllToolDescriptions: allToolDescs,
-		SkillDescriptions:   skillDescs,
-		Store:               sessionStore,
-		ToolSet:             toolSet,
-		Retriever:           memoryRetriever,
-		Tier:                defaultTier,
-		ActorDescriptions:   actorDescs,
-	})
-
-	var middlewares []adk.AgentMiddleware
-	middlewares = append(middlewares, fsMw, reductionMw, contextMw)
-
-	// AgentFactory (replaces single runner — creates fresh runner per turn)
-	factory := agent.NewAgentFactory(chatModel, persona, middlewares)
-
-	// Cost tracker — accumulates token usage per session
-	costTracker := storage.NewCostTracker(bus, sessionStore)
-	defer costTracker.Close()
-
-	// Layered context manager (optional)
-	var layeredManager *layered.Manager
-	if cfg.LayeredContext.IsEnabled() {
-		layeredStore := layered.NewStore(sessionsDir)
-		layeredCfg := layered.DefaultConfig()
-		layeredCfg.Enabled = true
-		layeredCfg.MaxArchives = cfg.LayeredContext.MaxArchives
-		layeredCfg.MaxRecentMessages = cfg.LayeredContext.MaxRecentMessages
-		layeredCfg.ArchiveChunkSize = cfg.LayeredContext.ArchiveChunkSize
-		layeredCfg.MaxPromptTokens = registry.DefaultContextWindow()
-		layeredManager = layered.NewManager(layeredStore, layeredCfg,
-			func(ctx context.Context, prompt string) (string, error) {
-				resp, err := chatModel.Generate(ctx, []*schema.Message{{Role: schema.User, Content: prompt}})
-				if err != nil {
-					return "", err
-				}
-				return resp.Content, nil
-			},
-		)
-		slog.Info("layered context enabled",
-			"max_archives", layeredCfg.MaxArchives,
-			"max_recent", layeredCfg.MaxRecentMessages,
-		)
-	}
-
-	// Event runner with dynamic tool selection and actor pool integration
-	eventRunner := agent.NewEventRunner(agent.EventRunnerConfig{
-		Factory:         factory,
-		ToolSet:         toolSet,
-		Registry:        toolRegistry,
-		EventBus:        bus,
-		Store:           sessionStore,
-		Pool:            actors.NewPoolAdapter(pool),
-		DefaultProvider: registry.DefaultName(),
-		ContextWindow:   registry.DefaultContextWindow(),
-		Tier:            defaultTier,
-		Layered:         layeredManager,
-	})
-	defer eventRunner.Close()
-
+// serve starts the HTTP/WS gateway and blocks until shutdown.
+func (g *gateway) serve() error {
 	// Auth — local token (requires keyring for encryption)
 	var authenticator auth.Authenticator
-	if !cmd.Bool("insecure") && kr != nil {
+	if !g.cmd.Bool("insecure") && g.kr != nil {
 		tokenPath := filepath.Join(config.OzziePath(), ".local_token")
-		localAuth, err := auth.NewLocalAuth(tokenPath, kr.CurrentRecipient())
+		localAuth, err := auth.NewLocalAuth(tokenPath, g.kr.CurrentRecipient())
 		if err != nil {
 			return fmt.Errorf("init auth: %w", err)
 		}
 		authenticator = localAuth
-		defer os.Remove(tokenPath) // cleanup token on shutdown
+		g.closers = append(g.closers, func() { os.Remove(tokenPath) })
 		slog.Info("auth enabled", "mode", "local_token")
-	} else if !cmd.Bool("insecure") && kr == nil {
+	} else if !g.cmd.Bool("insecure") && g.kr == nil {
 		slog.Warn("auth disabled: no keyring available (run ozzie wake to create one)")
 	} else {
 		slog.Warn("auth disabled (--insecure mode)")
 	}
 
 	// Gateway server
-	server := gateway.NewServer(bus, sessionStore, cfg.Gateway.Host, cfg.Gateway.Port, toolPerms, authenticator)
+	server := ozzieGateway.NewServer(g.bus, g.sessionStore, g.cfg.Gateway.Host, g.cfg.Gateway.Port, g.toolPerms, authenticator)
 
 	// Enable secret encryption on the WS hub
-	if kr != nil {
-		server.SetSecretEncryptor(kr.CurrentRecipient())
+	if g.kr != nil {
+		server.SetSecretEncryptor(g.kr.CurrentRecipient())
 	}
 
 	// Connect task handler to gateway (WS + HTTP task operations)
-	taskHandler := gateway.NewWSTaskHandler(pool)
+	taskHandler := ozzieGateway.NewWSTaskHandler(g.pool)
 	server.SetTaskHandler(taskHandler)
 
 	// Start server in goroutine
@@ -671,13 +188,20 @@ func runGateway(_ context.Context, cmd *cli.Command) error {
 
 	// Wait for signal or error
 	select {
-	case <-ctx.Done():
+	case <-g.ctx.Done():
 		slog.Info("shutting down...")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
+	}
+}
+
+// close runs all registered closers in reverse order.
+func (g *gateway) close() {
+	for i := len(g.closers) - 1; i >= 0; i-- {
+		g.closers[i]()
 	}
 }
 
