@@ -16,6 +16,10 @@ import (
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
+// dynamicContextMarker is a sentinel prefix used to make context injection
+// idempotent across ReAct iterations and EventRunner retries.
+const dynamicContextMarker = "<!-- ozzie:dynamic-context -->\n"
+
 // MemoryRetriever retrieves relevant memories for context injection.
 type MemoryRetriever interface {
 	Retrieve(ctx context.Context, query string, tags []string, limit int) ([]memory.RetrievedMemory, error)
@@ -191,14 +195,21 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 		if len(sections) > 0 {
 			contextMsg := &schema.Message{
 				Role:    schema.System,
-				Content: strings.Join(sections, "\n\n"),
+				Content: dynamicContextMarker + strings.Join(sections, "\n\n"),
 			}
 			slog.Debug("composed dynamic context",
 				"session_id", sessionID,
 				"context_length", len(contextMsg.Content),
 				"context", contextMsg.Content,
 			)
-			state.Messages = append([]*schema.Message{contextMsg}, state.Messages...)
+			// Idempotent: replace existing dynamic context if present
+			if len(state.Messages) > 0 &&
+				state.Messages[0].Role == schema.System &&
+				strings.HasPrefix(state.Messages[0].Content, dynamicContextMarker) {
+				state.Messages[0] = contextMsg
+			} else {
+				state.Messages = append([]*schema.Message{contextMsg}, state.Messages...)
+			}
 		}
 
 		return nil

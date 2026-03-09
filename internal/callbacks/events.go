@@ -14,6 +14,25 @@ import (
 	"github.com/dohr-michael/ozzie/internal/events"
 )
 
+type modelNameKeyType struct{}
+
+var modelNameKey = modelNameKeyType{}
+
+// resolveModelName returns the actual model name from Config if available, falling back to info.Name.
+func resolveModelName(info *callbacks.RunInfo, cfg *model.Config) string {
+	if cfg != nil && cfg.Model != "" {
+		return cfg.Model
+	}
+	return info.Name
+}
+
+func modelNameFromContext(ctx context.Context) string {
+	if name, ok := ctx.Value(modelNameKey).(string); ok && name != "" {
+		return name
+	}
+	return ""
+}
+
 // NewEventBusHandler creates a callback handler that publishes events to the bus.
 func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Handler {
 	if source == "" {
@@ -30,18 +49,23 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 
 	modelHandler := &ub.ModelCallbackHandler{
 		OnStart: func(ctx context.Context, info *callbacks.RunInfo, input *model.CallbackInput) context.Context {
+			modelName := resolveModelName(info, input.Config)
 			publishTyped(ctx, events.LLMCallPayload{
 				Phase:        "request",
-				Model:        info.Name,
+				Model:        modelName,
 				MessageCount: len(input.Messages),
 			})
-			return ctx
+			return context.WithValue(ctx, modelNameKey, modelName)
 		},
 
 		OnEnd: func(ctx context.Context, info *callbacks.RunInfo, output *model.CallbackOutput) context.Context {
+			modelName := modelNameFromContext(ctx)
+			if modelName == "" {
+				modelName = info.Name
+			}
 			payload := events.LLMCallPayload{
 				Phase: "response",
-				Model: info.Name,
+				Model: modelName,
 			}
 			if output.Message != nil && output.Message.ResponseMeta != nil && output.Message.ResponseMeta.Usage != nil {
 				u := output.Message.ResponseMeta.Usage
@@ -54,6 +78,10 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 		},
 
 		OnEndWithStreamOutput: func(ctx context.Context, info *callbacks.RunInfo, output *schema.StreamReader[*model.CallbackOutput]) context.Context {
+			modelName := modelNameFromContext(ctx)
+			if modelName == "" {
+				modelName = info.Name
+			}
 			// Stream is a copy — must be drained. Run in goroutine to avoid blocking.
 			go func() {
 				defer output.Close()
@@ -64,7 +92,7 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 						if err != io.EOF {
 							publishTyped(ctx, events.LLMCallPayload{
 								Phase: "error",
-								Model: info.Name,
+								Model: modelName,
 								Error: err.Error(),
 							})
 						}
@@ -98,7 +126,7 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 				}
 				publishTyped(ctx, events.LLMCallPayload{
 					Phase:           "response",
-					Model:           info.Name,
+					Model:           modelName,
 					TokensInput:     tokensIn,
 					TokensOutput:    tokensOut,
 					TokensReasoning: tokensReasoning,
@@ -108,9 +136,13 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 		},
 
 		OnError: func(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
+			modelName := modelNameFromContext(ctx)
+			if modelName == "" {
+				modelName = info.Name
+			}
 			publishTyped(ctx, events.LLMCallPayload{
 				Phase: "error",
-				Model: info.Name,
+				Model: modelName,
 				Error: err.Error(),
 			})
 			return ctx
