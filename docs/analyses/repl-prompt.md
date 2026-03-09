@@ -7,7 +7,7 @@
 | What | Technology |
 |------|-----------|
 | Language | Go 1.25 |
-| UI Framework | `charmbracelet/bubbletea`, `bubbles`, `lipgloss` |
+| UI Framework | `charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2` |
 | Markdown rendering | `charmbracelet/glamour` |
 | Architecture | Atomic Design (Atoms, Molecules, Organisms) |
 | Source of truth | Event stream via WebSocket (`ws://localhost:18420/api/ws`) |
@@ -69,7 +69,7 @@ The `cmd/commands/tui.go` command must:
 2. Dial gateway via `ws.Dial(ctx, url)` using configured host/port
 3. Open session via `client.OpenSession(opts)` (new or resume)
 4. Start a background goroutine that calls `client.ReadFrame()` in a loop and converts frames to `tea.Msg` via `p.Send()`
-5. Launch `tea.NewProgram(NewMainModel(client))` with `tea.WithAltScreen()`
+5. Launch `tea.NewProgram(NewMainModel(client))` (AltScreen is set declaratively in `View()` via `view.AltScreen = true`)
 6. On exit: `client.Close()`
 
 ### 2. Atomic Architecture (folder structure)
@@ -151,7 +151,7 @@ Rules:
 
 ### 7. Rendering (Lipgloss)
 
-- Adaptive borders (`lipgloss.AdaptiveColor`) for light/dark terminal themes
+- Explicit colors (lipgloss v2 removed `AdaptiveColor`; use `lipgloss.HasDarkBackground()` or `tea.BackgroundColorMsg` for theme detection)
 - `TextBlock`: rendered Markdown via `glamour` with terminal-width word wrapping
 - `ToolBlock`: visually distinct — thick left border, subtle background tint, monospace result
 - `SkillBlock`: similar to tool block but with step progress
