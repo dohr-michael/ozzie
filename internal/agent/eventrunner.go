@@ -49,10 +49,11 @@ type EventRunner struct {
 
 	pool            CapacityPool // actor pool for capacity management (optional)
 	defaultProvider string       // default provider name for AcquireInteractive
+	processTimeout  time.Duration
 
 	mu           sync.Mutex
-	running      map[string]bool // per-session lock
-	streamSeqIdx int32
+	running      map[string]bool           // per-session lock
+	streamSeqIdx map[string]*atomic.Int32  // per-session stream sequence counter
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -71,6 +72,7 @@ type EventRunnerConfig struct {
 	ContextWindow   int              // total context window in tokens (for compression)
 	Tier            ModelTier        // model tier for adaptive compression
 	Layered         *layered.Manager // layered context manager (optional)
+	ProcessTimeout  time.Duration    // max time for a single processMessage call (default 5m)
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -83,6 +85,11 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		compCfg.PreserveRatio = 0.40
 	}
 
+	processTimeout := cfg.ProcessTimeout
+	if processTimeout <= 0 {
+		processTimeout = 5 * time.Minute
+	}
+
 	er := &EventRunner{
 		factory:         cfg.Factory,
 		toolSet:         cfg.ToolSet,
@@ -93,7 +100,9 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		layered:         cfg.Layered,
 		pool:            cfg.Pool,
 		defaultProvider: cfg.DefaultProvider,
+		processTimeout:  processTimeout,
 		running:         make(map[string]bool),
+		streamSeqIdx:    make(map[string]*atomic.Int32),
 		ctx:             ctx,
 		cancel:          cancel,
 	}
@@ -131,14 +140,19 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		return
 	}
 	er.running[sessionID] = true
-	atomic.StoreInt32(&er.streamSeqIdx, 0)
+	er.streamSeqIdx[sessionID] = &atomic.Int32{}
 	er.mu.Unlock()
 
 	defer func() {
 		er.mu.Lock()
 		delete(er.running, sessionID)
+		delete(er.streamSeqIdx, sessionID)
 		er.mu.Unlock()
 	}()
+
+	// Apply process timeout
+	ctx, cancel := context.WithTimeout(er.ctx, er.processTimeout)
+	defer cancel()
 
 	// Acquire a capacity slot from the actor pool (if configured)
 	if er.pool != nil {
@@ -188,7 +202,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 	// Context compression — layered context takes priority, compressor is fallback.
 	compressed := false
 	if er.layered != nil {
-		if lmsgs, layeredErr := er.layered.Apply(er.ctx, sessionID, messages, history); layeredErr == nil {
+		if lmsgs, layeredErr := er.layered.Apply(ctx, sessionID, messages, history); layeredErr == nil {
 			messages = lmsgs
 			compressed = true
 		} else {
@@ -202,7 +216,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 				Content: er.factory.Persona(),
 			}})
 
-			result, compErr := er.compressor.Compress(er.ctx, session, messages, sysEstimate, er.summarize)
+			result, compErr := er.compressor.Compress(ctx, session, messages, sysEstimate, er.summarize)
 			if compErr != nil {
 				slog.Error("context compression", "error", compErr)
 			} else {
@@ -225,14 +239,14 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 
 		// First attempt with inactive tools: run buffered (non-streaming) to detect activation
 		if attempt == 0 && er.toolSet.HasInactiveTools(sessionID) {
-			runner, err := er.factory.CreateRunnerBuffered(er.ctx, tools)
+			runner, err := er.factory.CreateRunnerBuffered(ctx, tools)
 			if err != nil {
 				slog.Error("create runner (buffered)", "error", err, "session_id", sessionID)
 				er.emitError(sessionID, "failed to create agent runner")
 				return
 			}
 
-			content, runErr := er.runAgentBuffered(sessionID, runner, messages)
+			content, runErr := er.runAgentBuffered(ctx, sessionID, runner, messages)
 
 			if er.toolSet.ActivatedDuringTurn(sessionID) {
 				// Tools were activated — retry with expanded tool set (streamed).
@@ -277,7 +291,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		}
 
 		// All tools active OR retry: stream normally
-		runner, err := er.factory.CreateRunner(er.ctx, tools)
+		runner, err := er.factory.CreateRunner(ctx, tools)
 		if err != nil {
 			slog.Error("create runner", "error", err, "session_id", sessionID)
 			er.emitError(sessionID, "failed to create agent runner")
@@ -285,21 +299,21 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		}
 
 		er.emitStreamStart(sessionID)
-		er.runAgent(sessionID, runner, messages)
+		er.runAgent(ctx, sessionID, runner, messages)
 		return
 	}
 }
 
-func (er *EventRunner) runAgent(sessionID string, runner *adk.Runner, messages []*schema.Message) {
-	ctx := events.ContextWithSessionID(er.ctx, sessionID)
+func (er *EventRunner) runAgent(ctx context.Context, sessionID string, runner *adk.Runner, messages []*schema.Message) {
+	ctx = events.ContextWithSessionID(ctx, sessionID)
 	ctx = er.withSessionWorkDir(ctx, sessionID)
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 	er.consumeIterator(sessionID, iter)
 }
 
-func (er *EventRunner) runAgentBuffered(sessionID string, runner *adk.Runner, messages []*schema.Message) (string, error) {
-	ctx := events.ContextWithSessionID(er.ctx, sessionID)
+func (er *EventRunner) runAgentBuffered(ctx context.Context, sessionID string, runner *adk.Runner, messages []*schema.Message) (string, error) {
+	ctx = events.ContextWithSessionID(ctx, sessionID)
 	ctx = er.withSessionWorkDir(ctx, sessionID)
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
@@ -447,7 +461,14 @@ func (er *EventRunner) emitStreamStart(sessionID string) {
 }
 
 func (er *EventRunner) emitStreamDelta(sessionID string, content string) {
-	seq := atomic.AddInt32(&er.streamSeqIdx, 1)
+	er.mu.Lock()
+	counter := er.streamSeqIdx[sessionID]
+	er.mu.Unlock()
+
+	var seq int32
+	if counter != nil {
+		seq = counter.Add(1)
+	}
 	er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.AssistantStreamPayload{
 		Phase:   events.StreamPhaseDelta,
 		Content: content,

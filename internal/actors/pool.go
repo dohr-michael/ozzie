@@ -399,14 +399,22 @@ func (p *ActorPool) preemptLowest(providerName string) *Actor {
 
 	// Hard cancel timeout goroutine
 	taskID := lowestRT.taskID
+	p.wg.Add(1)
 	go func() {
-		time.Sleep(preemptionTimeout)
-		p.mu.Lock()
-		if rt, ok := p.runners[taskID]; ok {
-			slog.Warn("hard-cancelling task after preemption timeout", "task_id", taskID)
-			rt.cancel()
+		defer p.wg.Done()
+		timer := time.NewTimer(preemptionTimeout)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			p.mu.Lock()
+			if rt, ok := p.runners[taskID]; ok {
+				slog.Warn("hard-cancelling task after preemption timeout", "task_id", taskID)
+				rt.cancel()
+			}
+			p.mu.Unlock()
+		case <-p.ctx.Done():
+			return
 		}
-		p.mu.Unlock()
 	}()
 
 	// Wait briefly for the task to suspend (up to 5s before returning the actor)

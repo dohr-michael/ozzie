@@ -76,6 +76,9 @@ func (wr *WorkflowRunner) Run(ctx context.Context, vars map[string]string) (stri
 		}
 	}
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	completed := make(map[string]bool)
 	results := make(map[string]string)
 	var mu sync.Mutex
@@ -107,6 +110,7 @@ func (wr *WorkflowRunner) Run(ctx context.Context, vars map[string]string) (stri
 
 				output, err := wr.runStep(ctx, id, vars, resultsCopy)
 				if err != nil {
+					cancel() // cancel sibling steps on first error
 					errCh <- fmt.Errorf("step %q: %w", id, err)
 					return
 				}
