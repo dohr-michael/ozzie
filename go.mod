@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v0.10.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
-	github.com/cloudwego/eino v0.7.36
+	github.com/cloudwego/eino v0.7.37
 	github.com/cloudwego/eino-ext/components/embedding/ollama v0.0.0-20260228075615-1332771b7a8e
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260228075615-1332771b7a8e
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.28
@@ -26,11 +26,11 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/muesli/termenv v0.16.0
-	github.com/robfig/cron/v3 v3.0.1
+	github.com/netresearch/go-cron v0.13.1
 	github.com/tailscale/hujson v0.0.0-20260302212456-ecc657c15afd
-	github.com/urfave/cli/v3 v3.6.2
+	github.com/urfave/cli/v3 v3.7.0
 	golang.org/x/term v0.40.0
-	google.golang.org/genai v1.36.0
+	google.golang.org/genai v1.49.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 	mvdan.cc/sh/v3 v3.12.0

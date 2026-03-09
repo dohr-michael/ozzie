@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/robfig/cron/v3"
+	cron "github.com/netresearch/go-cron"
 )
 
 // CronExpr wraps a parsed cron schedule.
@@ -16,7 +16,10 @@ type CronExpr struct {
 // ParseCron parses a cron expression string.
 // Supports standard 5-field (minute-based) cron expressions.
 func ParseCron(expr string) (*CronExpr, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	parser, err := cron.TryNewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	if err != nil {
+		return nil, fmt.Errorf("create cron parser: %w", err)
+	}
 	schedule, err := parser.Parse(expr)
 	if err != nil {
 		return nil, fmt.Errorf("parse cron %q: %w", expr, err)
