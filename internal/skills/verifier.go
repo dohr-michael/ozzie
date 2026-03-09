@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/dohr-michael/ozzie/internal/llmutil"
 	"github.com/dohr-michael/ozzie/internal/models"
 )
 
@@ -90,25 +91,8 @@ func buildVerifyPrompt(criteria *AcceptanceCriteria, stepTitle, output string) s
 }
 
 func parseVerifyResponse(content string) *VerifyResult {
-	// Try to extract JSON from the response
-	content = strings.TrimSpace(content)
-
-	// Strip markdown code fences if present
-	if strings.HasPrefix(content, "```") {
-		lines := strings.Split(content, "\n")
-		var jsonLines []string
-		inBlock := false
-		for _, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), "```") {
-				inBlock = !inBlock
-				continue
-			}
-			if inBlock {
-				jsonLines = append(jsonLines, line)
-			}
-		}
-		content = strings.Join(jsonLines, "\n")
-	}
+	// Try to extract JSON from the response (strip markdown fences if present)
+	content = llmutil.StripCodeFences(content)
 
 	var vr VerifyResult
 	if err := json.Unmarshal([]byte(content), &vr); err != nil {

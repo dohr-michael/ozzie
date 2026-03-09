@@ -13,9 +13,8 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/membridge"
-	"github.com/dohr-michael/ozzie/pkg/memory"
 	"github.com/dohr-michael/ozzie/internal/models"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
 // NewMemoryCommand returns the memory subcommand.
@@ -127,13 +126,7 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 
 	// Use hybrid retriever if embeddings are enabled
 	var vectorStore memory.VectorStorer
-	configPath := cmd.String("config")
-	kr, _ := secrets.NewKeyRing()
-	var loadOpts []config.LoadOption
-	if kr != nil {
-		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
-	}
-	cfg, cfgErr := config.Load(configPath, loadOpts...)
+	cfg, kr, cfgErr := loadConfigWithKeyRing(cmd.String("config"))
 	if cfgErr == nil && cfg.Embedding.IsEnabled() {
 		embedder, embErr := membridge.NewEmbedder(ctx, cfg.Embedding, kr)
 		if embErr == nil {
@@ -244,15 +237,9 @@ func runMemoryForget(_ context.Context, cmd *cli.Command) error {
 }
 
 func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
-	configPath := cmd.String("config")
-	kr, _ := secrets.NewKeyRing()
-	var loadOpts []config.LoadOption
-	if kr != nil {
-		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
-	}
-	cfg, err := config.Load(configPath, loadOpts...)
+	cfg, kr, err := loadConfigWithKeyRing(cmd.String("config"))
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return err
 	}
 
 	if !cfg.Embedding.IsEnabled() {
@@ -292,15 +279,9 @@ func runMemoryReindex(ctx context.Context, cmd *cli.Command) error {
 }
 
 func runMemoryConsolidate(ctx context.Context, cmd *cli.Command) error {
-	configPath := cmd.String("config")
-	kr, _ := secrets.NewKeyRing()
-	var loadOpts []config.LoadOption
-	if kr != nil {
-		loadOpts = append(loadOpts, config.WithDecrypt(kr.DecryptValue))
-	}
-	cfg, err := config.Load(configPath, loadOpts...)
+	cfg, kr, err := loadConfigWithKeyRing(cmd.String("config"))
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return err
 	}
 
 	if !cfg.Embedding.IsEnabled() {

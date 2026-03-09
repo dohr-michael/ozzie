@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/llmutil"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
@@ -185,22 +185,7 @@ type extractedLesson struct {
 
 // parseLessons extracts lessons from LLM response, handling raw JSON and markdown fences.
 func parseLessons(resp string) []extractedLesson {
-	resp = strings.TrimSpace(resp)
-
-	// Strip markdown code fences if present
-	if strings.HasPrefix(resp, "```") {
-		lines := strings.Split(resp, "\n")
-		// Remove first and last lines (``` markers)
-		if len(lines) >= 2 {
-			lines = lines[1:]
-			if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
-				lines = lines[:len(lines)-1]
-			}
-			resp = strings.Join(lines, "\n")
-		}
-	}
-
-	resp = strings.TrimSpace(resp)
+	resp = llmutil.StripCodeFences(resp)
 
 	var lessons []extractedLesson
 	if err := json.Unmarshal([]byte(resp), &lessons); err != nil {

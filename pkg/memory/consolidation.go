@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/dohr-michael/ozzie/internal/llmutil"
 )
 
 // LLMSummarizer generates a text summary from a prompt.
@@ -172,13 +174,7 @@ func (c *Consolidator) mergeGroup(ctx context.Context, ids []string) error {
 	}
 
 	// Handle markdown fences
-	response = strings.TrimSpace(response)
-	if strings.HasPrefix(response, "```") {
-		lines := strings.Split(response, "\n")
-		if len(lines) > 2 {
-			response = strings.Join(lines[1:len(lines)-1], "\n")
-		}
-	}
+	response = llmutil.StripCodeFences(response)
 
 	if err := json.Unmarshal([]byte(response), &merged); err != nil {
 		return fmt.Errorf("parse merge result: %w", err)

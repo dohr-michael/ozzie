@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -165,12 +164,9 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 
 	// Resolve relative work_dir to absolute so sub-agents find the directory
-	if workDir != "" && !filepath.IsAbs(workDir) {
-		abs, err := filepath.Abs(workDir)
-		if err != nil {
-			return "", fmt.Errorf("submit_task: resolve work_dir: %w", err)
-		}
-		workDir = abs
+	workDir, err := resolveAbsWorkDir(workDir, "submit_task")
+	if err != nil {
+		return "", err
 	}
 
 	// Merge tool constraints: session constraints + task-specific (intersection)

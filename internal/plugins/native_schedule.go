@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -150,13 +149,11 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	}
 
 	// Resolve relative work_dir to absolute so sub-agents find the directory
-	if input.WorkDir != "" && !filepath.IsAbs(input.WorkDir) {
-		abs, err := filepath.Abs(input.WorkDir)
-		if err != nil {
-			return "", fmt.Errorf("schedule_task: resolve work_dir: %w", err)
-		}
-		input.WorkDir = abs
+	resolved, err := resolveAbsWorkDir(input.WorkDir, "schedule_task")
+	if err != nil {
+		return "", err
 	}
+	input.WorkDir = resolved
 
 	entry := &scheduler.ScheduleEntry{
 		Source:      "dynamic",
