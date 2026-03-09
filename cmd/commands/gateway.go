@@ -21,7 +21,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
-	"github.com/dohr-michael/ozzie/internal/layered"
+	"github.com/dohr-michael/ozzie/internal/layeredctx"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
@@ -104,7 +104,7 @@ type gateway struct {
 	factory     *agent.AgentFactory
 	eventRunner *agent.EventRunner
 	taskMws     []adk.AgentMiddleware
-	layered     *layered.Manager
+	layered     *layeredctx.Manager
 
 	closers []func()
 }

@@ -1,7 +1,7 @@
 // Package layered implements a three-tier progressive context compression
 // system (L0 abstract, L1 summary, L2 full transcript) with BM25-based
 // retrieval for relevance-aware context selection.
-package layered
+package layeredctx
 
 import "time"
 

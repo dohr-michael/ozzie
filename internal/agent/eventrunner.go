@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/layered"
+	"github.com/dohr-michael/ozzie/internal/layeredctx"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -45,7 +45,7 @@ type EventRunner struct {
 	bus        *events.Bus
 	store      sessions.Store
 	compressor *Compressor
-	layered    *layered.Manager
+	layered    *layeredctx.Manager
 
 	pool            CapacityPool // actor pool for capacity management (optional)
 	defaultProvider string       // default provider name for AcquireInteractive
@@ -71,7 +71,7 @@ type EventRunnerConfig struct {
 	DefaultProvider string           // default provider name for AcquireInteractive
 	ContextWindow   int              // total context window in tokens (for compression)
 	Tier            ModelTier        // model tier for adaptive compression
-	Layered         *layered.Manager // layered context manager (optional)
+	Layered         *layeredctx.Manager // layered context manager (optional)
 	ProcessTimeout  time.Duration    // max time for a single processMessage call (default 5m)
 }
 

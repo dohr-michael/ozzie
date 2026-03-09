@@ -48,7 +48,7 @@ Working E2E: `ozzie gateway` → `ozzie ask "hello"` → streamed LLM response w
 | Scheduler         | `internal/scheduler/` (cron, event triggers)            |
 | Sessions          | `internal/sessions/` (store, approved tools)            |
 | Context           | `internal/agent/middleware_context.go` (dynamic prompt composition) |
-| Layered context   | `internal/layered/` (L0/L1/L2 compression)             |
+| Layered context   | `internal/layeredctx/` (L0/L1/L2 compression)          |
 | WS client         | `clients/ws/`                                           |
 | TUI               | `clients/tui/`                                          |
 | Default persona   | `internal/agent/agent.go` → `DefaultPersona` + `AgentInstructions` |

@@ -28,7 +28,7 @@ internal/membridge/ → memory wiring (embedder factory, cross-task extractor)
 internal/skills/    → DAG workflow engine
 internal/scheduler/ → cron + event-based scheduler
 internal/sessions/  → session store (approved tools, metadata)
-internal/layered/   → layered context compression (L0/L1/L2)
+internal/layeredctx/→ layered context compression (L0/L1/L2)
 internal/mcp/       → MCP client (external server connections)
 clients/ws/         → WS client library
 clients/tui/        → TUI client (Bubbletea)

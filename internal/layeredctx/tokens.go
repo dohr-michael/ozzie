@@ -1,4 +1,4 @@
-package layered
+package layeredctx
 
 // EstimateTokens returns a heuristic token count: ~4 chars per token + 4 overhead.
 func EstimateTokens(text string) int {
