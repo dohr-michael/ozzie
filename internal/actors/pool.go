@@ -285,16 +285,15 @@ func (p *ActorPool) scheduleLoop() {
 // schedule assigns pending tasks to idle actors.
 // It also cancels tasks whose dependencies can never be satisfied (failed/cancelled).
 func (p *ActorPool) schedule() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Assign pending tasks (oldest first, dependencies resolved)
+	// Fetch pending tasks outside the lock (store is independently thread-safe).
 	pending, _ := p.store.List(tasks.ListFilter{Status: tasks.TaskPending})
+
 	// List returns sorted by UpdatedAt DESC, iterate in reverse for oldest first
 	for i := len(pending) - 1; i >= 0; i-- {
 		t := pending[i]
 
-		// Cancel tasks with unresolvable dependencies (dep failed/cancelled)
+		// Cancel tasks with unresolvable dependencies (dep failed/cancelled).
+		// Store reads don't require pool mutex.
 		if reason := p.unresolvableDep(t); reason != "" {
 			slog.Info("cancelling task with unresolvable dependency", "task_id", t.ID, "reason", reason)
 			now := time.Now()
@@ -317,8 +316,11 @@ func (p *ActorPool) schedule() {
 			continue
 		}
 
+		// Lock only for actor state mutations.
+		p.mu.Lock()
 		actor := p.findIdleActor("", t.Tags, t.Config.RequiredCapabilities)
 		if actor == nil {
+			p.mu.Unlock()
 			if len(t.Tags) > 0 || len(t.Config.RequiredCapabilities) > 0 {
 				slog.Warn("no actor matches task requirements", "task_id", t.ID, "tags", t.Tags, "capabilities", t.Config.RequiredCapabilities)
 			}
@@ -326,8 +328,8 @@ func (p *ActorPool) schedule() {
 		}
 		actor.Status = ActorBusy
 		actor.CurrentTask = t.ID
-
 		p.startTask(t, actor)
+		p.mu.Unlock()
 	}
 }
 
