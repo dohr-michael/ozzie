@@ -309,7 +309,7 @@ func (b *OzzieBackend) GrepRaw(ctx context.Context, req *filesystem.GrepRequest)
 				return filepath.SkipDir
 			}
 			// Skip restricted directories
-			if b.isRestrictedDir(path) {
+			if b.isRestrictedPath(path) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -447,21 +447,6 @@ func (b *OzzieBackend) Edit(ctx context.Context, req *filesystem.EditRequest) er
 		return fmt.Errorf("edit: write: %w", err)
 	}
 	return nil
-}
-
-// isRestrictedDir checks if a directory path falls inside a restricted path.
-func (b *OzzieBackend) isRestrictedDir(dirPath string) bool {
-	absPath, err := filepath.Abs(dirPath)
-	if err != nil {
-		return false
-	}
-	for _, restricted := range b.readRestrictedPaths {
-		clean := filepath.Clean(restricted)
-		if isUnder(absPath, clean) {
-			return true
-		}
-	}
-	return false
 }
 
 // isRestrictedPath checks if a file/dir path falls inside a restricted path.

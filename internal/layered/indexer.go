@@ -249,11 +249,6 @@ func (ix *Indexer) chunkMessages(messages []sessions.Message) [][]sessions.Messa
 	for i := 0; i < len(messages); i++ {
 		current = append(current, messages[i])
 
-		// Keep tool pairs together: if this is a tool_use, grab the next tool_result
-		if messages[i].Role == "tool" && i+1 < len(messages) && messages[i+1].Role == "tool" {
-			continue
-		}
-
 		if len(current) >= size {
 			chunks = append(chunks, current)
 			current = nil

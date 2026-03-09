@@ -89,9 +89,7 @@ func (m *ResilientModel) Generate(ctx context.Context, input []*schema.Message, 
 		}
 
 		lastErr = err
-		if IsRetryable(err) {
-			m.cb.RecordFailure()
-		}
+		m.cb.RecordFailure()
 	}
 
 	return nil, fmt.Errorf("provider %s: retries exhausted after %d attempts: %w", m.name, m.maxAttempts, lastErr)
