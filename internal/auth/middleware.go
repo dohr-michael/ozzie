@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 )
 
@@ -16,7 +17,9 @@ func Middleware(auth Authenticator) func(http.Handler) http.Handler {
 			}
 			deviceID, err := auth.AuthenticateHTTP(r)
 			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintf(w, `{"error":"unauthorized","hint":"provide Authorization: Bearer <token> header (token file: $OZZIE_PATH/.local_token)"}`)
 				return
 			}
 			ctx := context.WithValue(r.Context(), deviceIDKey, deviceID)
