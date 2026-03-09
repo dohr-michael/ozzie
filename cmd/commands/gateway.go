@@ -109,13 +109,13 @@ type gateway struct {
 	closers []func()
 }
 
-func runGateway(_ context.Context, cmd *cli.Command) error {
+func runGateway(parentCtx context.Context, cmd *cli.Command) error {
 	g := &gateway{cmd: cmd}
 	if err := g.loadConfig(); err != nil {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt)
 	defer stop()
 	g.ctx = ctx
 	g.startSIGHUP()

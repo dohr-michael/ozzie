@@ -6,18 +6,19 @@ import (
 	"strings"
 )
 
-// LoadDotenv reads a .env file and sets environment variables that are not already defined.
-// Missing file is silently ignored. Existing env vars are never overridden.
-func LoadDotenv(path string) error {
+// parseDotenvFile reads a .env file and returns key-value pairs.
+// Missing file returns nil map and no error.
+func parseDotenvFile(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 	defer f.Close()
 
+	vars := make(map[string]string)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -33,46 +34,37 @@ func LoadDotenv(path string) error {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
 		value = unquote(value)
+		vars[key] = value
+	}
+	return vars, scanner.Err()
+}
 
-		// Don't override existing env vars.
+// LoadDotenv reads a .env file and sets environment variables that are not already defined.
+// Missing file is silently ignored. Existing env vars are never overridden.
+func LoadDotenv(path string) error {
+	vars, err := parseDotenvFile(path)
+	if err != nil {
+		return err
+	}
+	for key, value := range vars {
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, value)
 		}
 	}
-	return scanner.Err()
+	return nil
 }
 
 // ReloadDotenv reads a .env file and sets all environment variables unconditionally,
 // overriding any existing values. Used for hot-reload after secret injection.
 func ReloadDotenv(path string) error {
-	f, err := os.Open(path)
+	vars, err := parseDotenvFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		value = unquote(value)
-
+	for key, value := range vars {
 		os.Setenv(key, value)
 	}
-	return scanner.Err()
+	return nil
 }
 
 // unquote strips matching surrounding quotes (single or double).

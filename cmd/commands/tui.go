@@ -43,7 +43,7 @@ func NewTUICommand() *cli.Command {
 	}
 }
 
-func runTUI(_ context.Context, cmd *cli.Command) error {
+func runTUI(ctx context.Context, cmd *cli.Command) error {
 	gatewayURL := cmd.String("gateway")
 	sessionFlag := cmd.String("session")
 
@@ -59,8 +59,6 @@ func runTUI(_ context.Context, cmd *cli.Command) error {
 			dialOpts = append(dialOpts, wsclient.WithToken(token))
 		}
 	}
-
-	ctx := context.Background()
 
 	client, err := wsclient.Dial(ctx, gatewayURL, dialOpts...)
 	if err != nil {
@@ -115,6 +113,7 @@ func readLoop(ctx context.Context, p *tea.Program, client *wsclient.Client, gate
 			if newClient == nil {
 				return // context cancelled, give up
 			}
+			client.Close()
 			client = newClient
 			continue
 		}
