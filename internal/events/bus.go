@@ -88,12 +88,13 @@ const (
 
 // Event represents an event in the system.
 type Event struct {
-	ID        string         `json:"id"`
-	SessionID string         `json:"session_id,omitempty"`
-	Type      EventType      `json:"type"`
-	Timestamp time.Time      `json:"timestamp"`
-	Source    EventSource    `json:"source"`
-	Payload   map[string]any `json:"payload"`
+	ID           string         `json:"id"`
+	SessionID    string         `json:"session_id,omitempty"`
+	Type         EventType      `json:"type"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Source       EventSource    `json:"source"`
+	Payload      map[string]any `json:"payload"`
+	typedPayload any            // original typed payload (unexported, for zero-alloc extraction)
 }
 
 // eventIDCounter is used to generate sequential event IDs.

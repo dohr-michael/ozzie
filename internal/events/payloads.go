@@ -155,22 +155,24 @@ func GetContextLayeredPayload(e Event) (ContextLayeredPayload, bool) {
 
 func NewTypedEvent(source EventSource, payload EventPayload) Event {
 	return Event{
-		ID:        generateEventID(),
-		Type:      payload.EventType(),
-		Timestamp: time.Now(),
-		Source:    source,
-		Payload:   toMap(payload),
+		ID:           generateEventID(),
+		Type:         payload.EventType(),
+		Timestamp:    time.Now(),
+		Source:       source,
+		Payload:      toMap(payload),
+		typedPayload: payload,
 	}
 }
 
 func NewTypedEventWithSession(source EventSource, payload EventPayload, sessionID string) Event {
 	return Event{
-		ID:        generateEventID(),
-		SessionID: sessionID,
-		Type:      payload.EventType(),
-		Timestamp: time.Now(),
-		Source:    source,
-		Payload:   toMap(payload),
+		ID:           generateEventID(),
+		SessionID:    sessionID,
+		Type:         payload.EventType(),
+		Timestamp:    time.Now(),
+		Source:       source,
+		Payload:      toMap(payload),
+		typedPayload: payload,
 	}
 }
 
@@ -191,6 +193,12 @@ func toMap(v any) map[string]any {
 // =============================================================================
 
 func ExtractPayload[T EventPayload](e Event) (T, bool) {
+	// Fast path: zero-alloc type assertion on the original typed payload
+	if tp, ok := e.typedPayload.(T); ok {
+		return tp, true
+	}
+
+	// Slow path: JSON round-trip (e.g. events reconstructed from serialized data)
 	var result T
 	data, err := json.Marshal(e.Payload)
 	if err != nil {
