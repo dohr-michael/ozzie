@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -208,6 +209,7 @@ func (b *Bus) Publish(event Event) {
 	select {
 	case b.eventChan <- event:
 	default:
+		slog.Warn("event dropped: channel full", "type", event.Type, "session", event.SessionID)
 	}
 }
 

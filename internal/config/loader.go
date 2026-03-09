@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -70,6 +71,8 @@ func expandEnvTemplates(s string, decrypt DecryptFunc) string {
 		if decrypt != nil {
 			if decrypted, err := decrypt(value); err == nil {
 				return jsonEscapeValue(decrypted)
+			} else {
+				slog.Warn("config: decryption failed, using raw value", "var", parts[1], "error", err)
 			}
 		}
 		return jsonEscapeValue(value)

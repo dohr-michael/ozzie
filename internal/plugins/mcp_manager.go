@@ -84,13 +84,16 @@ func buildTransport(cfg *config.MCPServerConfig) (mcp.Transport, error) {
 			return nil, fmt.Errorf("stdio transport requires command")
 		}
 		cmd := exec.Command(cfg.Command, cfg.Args...)
-		// Only pass declared env vars — do NOT inherit os.Environ()
+		// When Env is set, only pass declared vars (no os.Environ inheritance).
+		// When Env is empty, Go inherits the full parent environment by default.
 		if len(cfg.Env) > 0 {
 			env := make([]string, 0, len(cfg.Env))
 			for k, v := range cfg.Env {
 				env = append(env, k+"="+v)
 			}
 			cmd.Env = env
+		} else {
+			slog.Warn("mcp: no env vars declared, subprocess inherits full parent environment", "command", cfg.Command)
 		}
 		return &mcp.CommandTransport{Command: cmd}, nil
 
