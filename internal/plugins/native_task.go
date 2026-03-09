@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
@@ -249,42 +247,8 @@ func (t *SubmitTaskTool) preApproveDangerousTools(ctx context.Context, sessionID
 		return nil
 	}
 
-	token := uuid.New().String()
-
-	t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.PromptRequestPayload{
-		Type:  events.PromptTypeSelect,
-		Label: fmt.Sprintf("Task requires dangerous tools: %s. Allow?", strings.Join(unapproved, ", ")),
-		Options: []events.PromptOption{
-			{Value: "allow", Label: "Allow all listed tools"},
-			{Value: "deny", Label: "Deny"},
-		},
-		Token: token,
-	}, sessionID))
-
-	ch, unsub := t.bus.SubscribeChan(1, events.EventPromptResponse)
-	defer unsub()
-
-	for {
-		select {
-		case event := <-ch:
-			payload, ok := events.GetPromptResponsePayload(event)
-			if !ok || payload.Token != token {
-				continue
-			}
-			val, _ := payload.Value.(string)
-			if val == "allow" {
-				for _, name := range unapproved {
-					t.perms.AllowForSession(sessionID, name)
-					t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin,
-						events.ToolApprovedPayload{ToolName: name}, sessionID))
-				}
-				return nil
-			}
-			return fmt.Errorf("dangerous tools denied by user: %s", strings.Join(unapproved, ", "))
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for tool approval: %w", ctx.Err())
-		}
-	}
+	return promptToolApproval(ctx, t.bus, t.perms, sessionID, unapproved,
+		"Task requires dangerous tools: %s. Allow?")
 }
 
 var _ tool.InvokableTool = (*SubmitTaskTool)(nil)

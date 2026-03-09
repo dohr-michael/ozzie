@@ -3,7 +3,6 @@ package skills
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -361,50 +360,5 @@ func (wr *WorkflowRunner) emitStepCompleted(sessionID, stepID, stepTitle, output
 
 // consumeRunnerOutput drains an ADK AsyncIterator and returns the concatenated text output.
 func consumeRunnerOutput(iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
-	var content string
-
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-
-		if event.Err != nil {
-			return content, event.Err
-		}
-
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-
-		mv := event.Output.MessageOutput
-
-		// Skip tool messages
-		if mv.Role == schema.Tool {
-			if mv.IsStreaming && mv.MessageStream != nil {
-				mv.MessageStream.Close()
-			}
-			continue
-		}
-
-		// Collect assistant content
-		if mv.IsStreaming && mv.MessageStream != nil {
-			for {
-				chunk, err := mv.MessageStream.Recv()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
-					return content, err
-				}
-				if chunk != nil && chunk.Content != "" {
-					content += chunk.Content
-				}
-			}
-		} else if mv.Message != nil && mv.Message.Content != "" {
-			content = mv.Message.Content
-		}
-	}
-
-	return content, nil
+	return agent.ConsumeIterator(iter, agent.IterCallbacks{})
 }

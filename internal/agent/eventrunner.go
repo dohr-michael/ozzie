@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -324,152 +323,26 @@ func (er *EventRunner) withSessionWorkDir(ctx context.Context, sessionID string)
 }
 
 func (er *EventRunner) consumeIterator(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) {
-	var contentBuilder string
-
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-
-		if event.Err != nil {
-			slog.Error("agent error", "error", event.Err)
-			er.emitError(sessionID, event.Err.Error())
-			return
-		}
-
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-
-		mv := event.Output.MessageOutput
-
-		// Tool results (intermediate ReAct steps) — skip, callbacks handle emission
-		if mv.Role == schema.Tool {
-			// Consume the stream to avoid leaking goroutines
-			if mv.IsStreaming && mv.MessageStream != nil {
-				mv.MessageStream.Close()
-			}
-			continue
-		}
-
-		// Assistant message — may contain tool calls (intermediate) or final text
-		if mv.IsStreaming {
-			content := er.consumeStream(sessionID, mv.MessageStream)
-			if content != "" {
-				contentBuilder = content
-				er.emitStreamEnd(sessionID)
-			}
-		} else if mv.Message != nil {
-			// Intermediate assistant messages with tool calls — skip accumulation
-			if len(mv.Message.ToolCalls) > 0 && mv.Message.Content == "" {
-				continue
-			}
-			if mv.Message.Content != "" {
-				contentBuilder = mv.Message.Content
-				er.emitStreamDelta(sessionID, contentBuilder)
-				er.emitStreamEnd(sessionID)
-			}
-		}
-	}
+	content, _ := ConsumeIterator(iter, IterCallbacks{
+		OnStreamChunk: func(chunk string) { er.emitStreamDelta(sessionID, chunk) },
+		OnStreamDone:  func() { er.emitStreamEnd(sessionID) },
+		OnError: func(err error) {
+			slog.Error("agent error", "error", err)
+			er.emitError(sessionID, err.Error())
+		},
+	})
 
 	// Always emit StreamEnd to match the StreamStart emitted before runAgent.
 	// This ensures the TUI resets its streaming state even on empty responses.
-	if contentBuilder == "" {
+	if content == "" {
 		er.emitStreamEnd(sessionID)
 	}
 
-	er.persistAndEmitResponse(sessionID, contentBuilder)
+	er.persistAndEmitResponse(sessionID, content)
 }
 
-func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
-	var contentBuilder string
-
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-
-		if event.Err != nil {
-			slog.Error("agent error (buffered)", "error", event.Err)
-			return "", event.Err
-		}
-
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-
-		mv := event.Output.MessageOutput
-
-		// Tool results — consume streams to avoid leaks
-		if mv.Role == schema.Tool {
-			if mv.IsStreaming && mv.MessageStream != nil {
-				mv.MessageStream.Close()
-			}
-			continue
-		}
-
-		// Assistant message — collect content without streaming
-		if mv.IsStreaming {
-			content := er.consumeStreamBuffered(mv.MessageStream)
-			if content != "" {
-				contentBuilder = content
-			}
-		} else if mv.Message != nil {
-			if len(mv.Message.ToolCalls) > 0 && mv.Message.Content == "" {
-				continue
-			}
-			if mv.Message.Content != "" {
-				contentBuilder = mv.Message.Content
-			}
-		}
-	}
-
-	return contentBuilder, nil
-}
-
-func (er *EventRunner) consumeStream(sessionID string, stream *schema.StreamReader[*schema.Message]) string {
-	var sb strings.Builder
-
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			er.emitError(sessionID, err.Error())
-			break
-		}
-
-		if chunk != nil && chunk.Content != "" {
-			er.emitStreamDelta(sessionID, chunk.Content)
-			sb.WriteString(chunk.Content)
-		}
-	}
-
-	return sb.String()
-}
-
-func (er *EventRunner) consumeStreamBuffered(stream *schema.StreamReader[*schema.Message]) string {
-	var sb strings.Builder
-
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			slog.Error("stream error (buffered)", "error", err)
-			break
-		}
-
-		if chunk != nil && chunk.Content != "" {
-			sb.WriteString(chunk.Content)
-		}
-	}
-
-	return sb.String()
+func (er *EventRunner) consumeIteratorBuffered(_ string, iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
+	return ConsumeIterator(iter, IterCallbacks{})
 }
 
 func (er *EventRunner) persistAndEmitResponse(sessionID string, content string) {
@@ -493,26 +366,10 @@ func (er *EventRunner) summarize(ctx context.Context, prompt string) (string, er
 	messages := []*schema.Message{{Role: schema.User, Content: prompt}}
 	iter := runner.Run(ctx, messages)
 
-	var content string
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if event.Err != nil {
-			return "", event.Err
-		}
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-		mv := event.Output.MessageOutput
-		if mv.IsStreaming {
-			content = er.consumeStreamBuffered(mv.MessageStream)
-		} else if mv.Message != nil && mv.Message.Content != "" {
-			content = mv.Message.Content
-		}
+	content, err := ConsumeIterator(iter, IterCallbacks{})
+	if err != nil {
+		return "", err
 	}
-
 	if content == "" {
 		return "", fmt.Errorf("empty summarization response")
 	}

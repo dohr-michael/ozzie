@@ -64,6 +64,52 @@ func Dial(ctx context.Context, url string, opts ...DialOption) (*Client, error) 
 	}, nil
 }
 
+// sendFire marshals and sends a request frame (fire-and-forget).
+func (c *Client) sendFire(method string, params any) error {
+	seq := atomic.AddUint64(&c.reqSeq, 1)
+
+	var rawParams json.RawMessage
+	if params != nil {
+		var err error
+		rawParams, err = json.Marshal(params)
+		if err != nil {
+			return fmt.Errorf("marshal %s: %w", method, err)
+		}
+	}
+
+	frame := wsprotocol.Frame{
+		Type:   wsprotocol.FrameTypeRequest,
+		ID:     fmt.Sprintf("req-%d", seq),
+		Method: method,
+		Params: rawParams,
+	}
+
+	data, err := wsprotocol.MarshalFrame(frame)
+	if err != nil {
+		return fmt.Errorf("marshal %s: %w", method, err)
+	}
+
+	return c.conn.Write(c.ctx, websocket.MessageText, data)
+}
+
+// sendRequest sends a request and waits for the response.
+func (c *Client) sendRequest(method string, params any) (wsprotocol.Frame, error) {
+	if err := c.sendFire(method, params); err != nil {
+		return wsprotocol.Frame{}, err
+	}
+
+	resp, err := c.ReadFrame()
+	if err != nil {
+		return wsprotocol.Frame{}, fmt.Errorf("read %s response: %w", method, err)
+	}
+
+	if resp.OK != nil && !*resp.OK {
+		return resp, fmt.Errorf("%s failed: %s", method, resp.Error)
+	}
+
+	return resp, nil
+}
+
 // OpenSessionOpts holds parameters for opening or resuming a session.
 type OpenSessionOpts struct {
 	SessionID string `json:"session_id,omitempty"`
@@ -74,34 +120,9 @@ type OpenSessionOpts struct {
 // If opts.SessionID is empty, the server creates a new session.
 // If opts.SessionID is non-empty, the server resumes that session.
 func (c *Client) OpenSession(opts OpenSessionOpts) (string, error) {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(opts)
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodOpenSession),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
+	resp, err := c.sendRequest(string(wsprotocol.MethodOpenSession), opts)
 	if err != nil {
-		return "", fmt.Errorf("marshal open_session: %w", err)
-	}
-
-	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
-		return "", fmt.Errorf("send open_session: %w", err)
-	}
-
-	// Read the response
-	resp, err := c.ReadFrame()
-	if err != nil {
-		return "", fmt.Errorf("read open_session response: %w", err)
-	}
-
-	if resp.OK != nil && !*resp.OK {
-		return "", fmt.Errorf("open_session failed: %s", resp.Error)
+		return "", err
 	}
 
 	var result struct {
@@ -119,127 +140,38 @@ func (c *Client) OpenSession(opts OpenSessionOpts) (string, error) {
 
 // SendMessage sends a user message to the gateway.
 func (c *Client) SendMessage(content string) error {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(map[string]string{"content": content})
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodSendMessage),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
-	if err != nil {
-		return err
-	}
-
-	return c.conn.Write(c.ctx, websocket.MessageText, data)
+	return c.sendFire(string(wsprotocol.MethodSendMessage), map[string]string{"content": content})
 }
 
 // RespondToPrompt sends a prompt_response to confirm or deny a tool execution.
 func (c *Client) RespondToPrompt(token string, cancelled bool) error {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(map[string]any{
+	return c.sendFire(string(wsprotocol.MethodPromptResponse), map[string]any{
 		"token":     token,
 		"cancelled": cancelled,
 	})
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodPromptResponse),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
-	if err != nil {
-		return fmt.Errorf("marshal prompt_response: %w", err)
-	}
-
-	return c.conn.Write(c.ctx, websocket.MessageText, data)
 }
 
 // RespondToPromptWithValue sends a prompt_response with a string value (for text/password prompts).
 func (c *Client) RespondToPromptWithValue(token string, value string) error {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(map[string]any{
+	return c.sendFire(string(wsprotocol.MethodPromptResponse), map[string]any{
 		"token": token,
 		"value": value,
 	})
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodPromptResponse),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
-	if err != nil {
-		return fmt.Errorf("marshal prompt_response: %w", err)
-	}
-
-	return c.conn.Write(c.ctx, websocket.MessageText, data)
 }
 
 // RespondToPromptWithValues sends a prompt_response with multiple values (for multi-select prompts).
 func (c *Client) RespondToPromptWithValues(token string, values []string) error {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(map[string]any{
+	return c.sendFire(string(wsprotocol.MethodPromptResponse), map[string]any{
 		"token":  token,
 		"values": values,
 	})
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodPromptResponse),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
-	if err != nil {
-		return fmt.Errorf("marshal prompt_response: %w", err)
-	}
-
-	return c.conn.Write(c.ctx, websocket.MessageText, data)
 }
 
 // AcceptAllTools sends an accept_all_tools request to enable auto-approval
 // of all dangerous tools for the current session.
 func (c *Client) AcceptAllTools() error {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodAcceptAllTools),
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
-	if err != nil {
-		return fmt.Errorf("marshal accept_all_tools: %w", err)
-	}
-
-	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
-		return fmt.Errorf("send accept_all_tools: %w", err)
-	}
-
-	resp, err := c.ReadFrame()
-	if err != nil {
-		return fmt.Errorf("read accept_all_tools response: %w", err)
-	}
-
-	if resp.OK != nil && !*resp.OK {
-		return fmt.Errorf("accept_all_tools failed: %s", resp.Error)
-	}
-
-	return nil
+	_, err := c.sendRequest(string(wsprotocol.MethodAcceptAllTools), nil)
+	return err
 }
 
 // HistoryMessage is a message returned by LoadMessages.
@@ -251,33 +183,9 @@ type HistoryMessage struct {
 
 // LoadMessages fetches the last N messages from the session history.
 func (c *Client) LoadMessages(limit int) ([]HistoryMessage, error) {
-	seq := atomic.AddUint64(&c.reqSeq, 1)
-
-	params, _ := json.Marshal(map[string]int{"limit": limit})
-
-	frame := wsprotocol.Frame{
-		Type:   wsprotocol.FrameTypeRequest,
-		ID:     fmt.Sprintf("req-%d", seq),
-		Method: string(wsprotocol.MethodLoadMessages),
-		Params: params,
-	}
-
-	data, err := wsprotocol.MarshalFrame(frame)
+	resp, err := c.sendRequest(string(wsprotocol.MethodLoadMessages), map[string]int{"limit": limit})
 	if err != nil {
-		return nil, fmt.Errorf("marshal load_messages: %w", err)
-	}
-
-	if err := c.conn.Write(c.ctx, websocket.MessageText, data); err != nil {
-		return nil, fmt.Errorf("send load_messages: %w", err)
-	}
-
-	resp, err := c.ReadFrame()
-	if err != nil {
-		return nil, fmt.Errorf("read load_messages response: %w", err)
-	}
-
-	if resp.OK != nil && !*resp.OK {
-		return nil, fmt.Errorf("load_messages failed: %s", resp.Error)
+		return nil, err
 	}
 
 	var msgs []HistoryMessage

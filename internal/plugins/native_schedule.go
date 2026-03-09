@@ -5,12 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
@@ -235,72 +233,32 @@ func (t *ScheduleTaskTool) InvokableRun(ctx context.Context, argumentsInJSON str
 }
 
 // preApproveDangerousTools checks for dangerous tools and prompts the user.
-// Returns the list of approved dangerous tool names.
+// Returns the list of all dangerous tool names (both already-approved and newly-approved).
 func (t *ScheduleTaskTool) preApproveDangerousTools(ctx context.Context, sessionID string, toolNames []string) ([]string, error) {
-	var unapproved []string
+	var allDangerous []string
+	var needPrompt []string
 	for _, name := range toolNames {
 		spec := t.registry.ToolSpec(name)
 		if spec == nil || !spec.Dangerous {
 			continue
 		}
-		if t.perms.IsAllowed(sessionID, name) {
-			// Already approved — still include in template for future runs
-			unapproved = append(unapproved, name)
-			continue
-		}
-		unapproved = append(unapproved, name)
-	}
-	if len(unapproved) == 0 {
-		return nil, nil
-	}
-
-	// Check which are truly unapproved (need prompt)
-	var needPrompt []string
-	for _, name := range unapproved {
+		allDangerous = append(allDangerous, name)
 		if !t.perms.IsAllowed(sessionID, name) {
 			needPrompt = append(needPrompt, name)
 		}
 	}
+	if len(allDangerous) == 0 {
+		return nil, nil
+	}
 	if len(needPrompt) == 0 {
-		return unapproved, nil
+		return allDangerous, nil
 	}
 
-	token := uuid.New().String()
-
-	t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin, events.PromptRequestPayload{
-		Type:  events.PromptTypeSelect,
-		Label: fmt.Sprintf("Schedule requires dangerous tools: %s. Pre-approve for all future runs?", strings.Join(needPrompt, ", ")),
-		Options: []events.PromptOption{
-			{Value: "allow", Label: "Allow all listed tools"},
-			{Value: "deny", Label: "Deny"},
-		},
-		Token: token,
-	}, sessionID))
-
-	ch, unsub := t.bus.SubscribeChan(1, events.EventPromptResponse)
-	defer unsub()
-
-	for {
-		select {
-		case event := <-ch:
-			payload, ok := events.GetPromptResponsePayload(event)
-			if !ok || payload.Token != token {
-				continue
-			}
-			val, _ := payload.Value.(string)
-			if val == "allow" {
-				for _, name := range needPrompt {
-					t.perms.AllowForSession(sessionID, name)
-					t.bus.Publish(events.NewTypedEventWithSession(events.SourcePlugin,
-						events.ToolApprovedPayload{ToolName: name}, sessionID))
-				}
-				return unapproved, nil
-			}
-			return nil, fmt.Errorf("dangerous tools denied by user: %s", strings.Join(needPrompt, ", "))
-		case <-ctx.Done():
-			return nil, fmt.Errorf("waiting for tool approval: %w", ctx.Err())
-		}
+	if err := promptToolApproval(ctx, t.bus, t.perms, sessionID, needPrompt,
+		"Schedule requires dangerous tools: %s. Pre-approve for all future runs?"); err != nil {
+		return nil, err
 	}
+	return allDangerous, nil
 }
 
 var _ tool.InvokableTool = (*ScheduleTaskTool)(nil)

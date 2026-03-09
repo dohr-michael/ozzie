@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,5 +113,39 @@ func TestExpandEnvTemplates(t *testing.T) {
 	expected := `{"key": "my-secret"}`
 	if result != expected {
 		t.Errorf("expected %s, got %s", expected, result)
+	}
+}
+
+func TestExpandEnvTemplates_JSONEscape(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"double_quote", `value with "quotes"`},
+		{"backslash", `path\to\file`},
+		{"closing_brace", `evil"}, "injected": "yes`},
+		{"newline", "line1\nline2"},
+		{"tab", "col1\tcol2"},
+		{"unicode", "emoji: \U0001F600"},
+		{"combined", `all: " \ } ` + "\n\t"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("ESCAPE_TEST", tt.value)
+
+			result := expandEnvTemplates(`{"key": "${{ .Env.ESCAPE_TEST }}"}`, nil)
+
+			// Result must be valid JSON
+			var parsed map[string]string
+			if err := json.Unmarshal([]byte(result), &parsed); err != nil {
+				t.Fatalf("invalid JSON after expansion: %v\nraw: %s", err, result)
+			}
+
+			// Round-trip: parsed value must equal original
+			if parsed["key"] != tt.value {
+				t.Errorf("round-trip mismatch:\n  want: %q\n  got:  %q", tt.value, parsed["key"])
+			}
+		})
 	}
 }

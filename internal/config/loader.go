@@ -59,6 +59,7 @@ func Load(path string, opts ...LoadOption) (*Config, error) {
 
 // expandEnvTemplates replaces ${{ .Env.VAR }} with the env var value,
 // optionally decrypting ENC[age:...] blobs.
+// Values are JSON-escaped before injection to prevent template injection (SEC-2).
 func expandEnvTemplates(s string, decrypt DecryptFunc) string {
 	return envTemplateRe.ReplaceAllStringFunc(s, func(match string) string {
 		parts := envTemplateRe.FindStringSubmatch(match)
@@ -68,11 +69,19 @@ func expandEnvTemplates(s string, decrypt DecryptFunc) string {
 		value := os.Getenv(parts[1])
 		if decrypt != nil {
 			if decrypted, err := decrypt(value); err == nil {
-				return decrypted
+				return jsonEscapeValue(decrypted)
 			}
 		}
-		return value
+		return jsonEscapeValue(value)
 	})
+}
+
+// jsonEscapeValue escapes a string for safe embedding inside a JSON string literal.
+// It uses json.Marshal to handle all special characters (quotes, backslashes, etc.)
+// and strips the surrounding quotes.
+func jsonEscapeValue(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
 }
 
 // applyDefaults fills in zero-value fields with sensible defaults.

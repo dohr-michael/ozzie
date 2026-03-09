@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"slices"
@@ -227,66 +226,13 @@ func (r *TaskRunner) consumeRunnerOutput(ctx context.Context, runner *adk.Runner
 	checkpointID := uuid.New().String()
 	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
 
-	var content string
-	for {
-		// Check preemption between ReAct iterations
-		if r.isPreempted() {
-			return content, ErrPreempted
-		}
-
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-
-		if event.Err != nil {
-			return "", event.Err
-		}
-
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-
-		mv := event.Output.MessageOutput
-
-		if mv.Role == schema.Tool {
-			if mv.IsStreaming && mv.MessageStream != nil {
-				mv.MessageStream.Close()
-			}
-			continue
-		}
-
-		if mv.IsStreaming && mv.MessageStream != nil {
-			content = consumeStream(mv.MessageStream)
-		} else if mv.Message != nil {
-			if len(mv.Message.ToolCalls) > 0 && mv.Message.Content == "" {
-				continue
-			}
-			if mv.Message.Content != "" {
-				content = mv.Message.Content
-			}
-		}
+	content, err := agent.ConsumeIterator(iter, agent.IterCallbacks{
+		ShouldPreempt: r.isPreempted,
+	})
+	if errors.Is(err, agent.ErrIterPreempted) {
+		return content, ErrPreempted
 	}
-
-	return content, nil
-}
-
-func consumeStream(stream *schema.StreamReader[*schema.Message]) string {
-	var sb strings.Builder
-	for {
-		chunk, err := stream.Recv()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			slog.Error("task stream error", "error", err)
-			break
-		}
-		if chunk != nil && chunk.Content != "" {
-			sb.WriteString(chunk.Content)
-		}
-	}
-	return sb.String()
+	return content, err
 }
 
 func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string) error {
