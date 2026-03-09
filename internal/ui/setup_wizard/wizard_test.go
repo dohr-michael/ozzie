@@ -293,11 +293,12 @@ func TestRenderConfigWithSystemPrompt(t *testing.T) {
 
 func TestDriverProviderNames(t *testing.T) {
 	tests := map[string]string{
-		"anthropic": "claude",
-		"openai":    "gpt",
-		"gemini":    "gemini",
-		"mistral":   "mistral",
-		"ollama":    "local",
+		"anthropic":   "claude",
+		"openai":      "gpt",
+		"openai-like": "custom",
+		"gemini":      "gemini",
+		"mistral":     "mistral",
+		"ollama":      "local",
 	}
 	for driver, want := range tests {
 		if got := driverProviderNames[driver]; got != want {

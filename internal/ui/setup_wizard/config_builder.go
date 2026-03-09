@@ -60,11 +60,12 @@ type ProviderConfigData struct {
 
 // driverProviderNames maps driver names to friendly provider names.
 var driverProviderNames = map[string]string{
-	"anthropic": "claude",
-	"openai":    "gpt",
-	"gemini":    "gemini",
-	"mistral":   "mistral",
-	"ollama":    "local",
+	"anthropic":   "claude",
+	"openai":      "gpt",
+	"openai-like": "custom",
+	"gemini":      "gemini",
+	"mistral":     "mistral",
+	"ollama":      "local",
 }
 
 // driverEnvVars maps driver names to their expected env var for the API key.

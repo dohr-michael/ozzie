@@ -61,6 +61,8 @@ func ResolveAuth(cfg config.ProviderConfig, kr *secrets.KeyRing) (ResolvedAuth, 
 			return ResolvedAuth{Kind: AuthAPIKey, Value: key}, nil
 		}
 		return ResolvedAuth{}, fmt.Errorf("OPENAI_API_KEY not set")
+	case "openai-like":
+		return ResolvedAuth{}, nil
 	case "mistral":
 		if key := maybeDecrypt(os.Getenv("MISTRAL_API_KEY"), kr); key != "" {
 			return ResolvedAuth{Kind: AuthAPIKey, Value: key}, nil

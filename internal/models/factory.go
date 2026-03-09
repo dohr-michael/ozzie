@@ -21,7 +21,7 @@ func CreateModel(ctx context.Context, cfg config.ProviderConfig, kr *secrets.Key
 			return nil, fmt.Errorf("resolve auth: %w", err)
 		}
 		return NewAnthropic(ctx, cfg, auth)
-	case "openai":
+	case "openai", "openai-like":
 		auth, err := ResolveAuth(cfg, kr)
 		if err != nil {
 			return nil, fmt.Errorf("resolve auth: %w", err)

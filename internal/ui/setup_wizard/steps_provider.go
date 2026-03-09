@@ -44,6 +44,7 @@ var driverModelDefaults = map[string][]struct {
 		{"gpt-4o-mini", "GPT-4o Mini", "wizard.model.gpt4omini.desc"},
 		{"o3", "o3", "wizard.model.o3.desc"},
 	},
+	"openai-like": {},
 	"gemini": {
 		{"gemini-2.5-flash", "Gemini 2.5 Flash", "wizard.model.gem25flash.desc"},
 		{"gemini-2.5-pro", "Gemini 2.5 Pro", "wizard.model.gem25pro.desc"},
@@ -91,8 +92,8 @@ func defaultModelForDriver(driver string) string {
 
 // driversWithBaseURL lists drivers that support a custom base_url.
 var driversWithBaseURL = map[string]bool{
-	"ollama": true,
-	"openai": true,
+	"ollama":      true,
+	"openai-like": true,
 }
 
 // modelDefaultCaps maps known model IDs to their default capabilities.
@@ -274,6 +275,7 @@ func (s *providerStep) showDriverSelect() {
 		[]components.InputOption{
 			{Value: "anthropic", Label: "Anthropic", Description: i18n.T("wizard.driver.anthropic.desc")},
 			{Value: "openai", Label: "OpenAI", Description: i18n.T("wizard.driver.openai.desc")},
+			{Value: "openai-like", Label: "OpenAI Compatible", Description: i18n.T("wizard.driver.openai-like.desc")},
 			{Value: "gemini", Label: "Google Gemini", Description: i18n.T("wizard.driver.gemini.desc")},
 			{Value: "mistral", Label: "Mistral", Description: i18n.T("wizard.driver.mistral.desc")},
 			{Value: "ollama", Label: "Ollama", Description: i18n.T("wizard.driver.ollama.desc")},
@@ -309,9 +311,13 @@ func (s *providerStep) showBaseURLInput() {
 		} else {
 			placeholder = s.current.BaseURL
 		}
-	case "openai":
-		label = i18n.T("wizard.provider.base_url.openai")
-		placeholder = "https://api.openai.com/v1 (leave empty for default)"
+	case "openai-like":
+		label = i18n.T("wizard.provider.base_url.openai-like")
+		if s.current.BaseURL == "" {
+			placeholder = "http://localhost:8080/v1"
+		} else {
+			placeholder = s.current.BaseURL
+		}
 	}
 	s.input.PromptText(label, "base_url", placeholder, "", false, "")
 }
@@ -380,14 +386,14 @@ func (s *providerStep) showAddMore() {
 // --- Navigation helpers ---
 
 func (s *providerStep) needsBaseURL() bool {
-	if s.current.Driver == "ollama" {
+	if s.current.Driver == "ollama" || s.current.Driver == "openai-like" {
 		return true
 	}
 	return s.customModel && driversWithBaseURL[s.current.Driver]
 }
 
 func (s *providerStep) needsAPIKey() bool {
-	return s.current.Driver != "ollama"
+	return s.current.Driver != "ollama" && s.current.Driver != "openai-like"
 }
 
 // isPhaseApplicable returns true if the phase should be visited given current state.
@@ -595,6 +601,8 @@ func (s *providerStep) handleResult(result components.InputResult) (Step, tea.Cm
 		text := result.Text
 		if text == "" && s.current.Driver == "ollama" {
 			text = "http://localhost:11434"
+		} else if text == "" && s.current.Driver == "openai-like" {
+			text = "http://localhost:8080/v1"
 		}
 		s.current.BaseURL = text
 		s.phase = s.nextApplicablePhase(phaseBaseURL)
