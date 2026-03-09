@@ -84,6 +84,7 @@ func (m *ResilientModel) Generate(ctx context.Context, input []*schema.Message, 
 			return msg, nil
 		}
 
+		err = HandleError(err)
 		if !IsRetryable(err) {
 			return nil, err
 		}
@@ -123,6 +124,7 @@ func (m *ResilientModel) Stream(ctx context.Context, input []*schema.Message, op
 			return stream, nil
 		}
 
+		err = HandleError(err)
 		if !IsRetryable(err) {
 			return nil, err
 		}

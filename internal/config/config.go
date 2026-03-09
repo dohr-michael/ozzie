@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Config is the root configuration for Ozzie.
 type Config struct {
@@ -215,6 +218,26 @@ type ProviderConfig struct {
 	Options       map[string]any `json:"options,omitempty"`
 	Retry         *RetryConfig   `json:"retry,omitempty"`    // retry + circuit breaker config
 	Fallback      string         `json:"fallback,omitempty"` // name of fallback provider
+}
+
+// Equal returns true if two ProviderConfigs are equivalent (field-by-field comparison).
+func (p ProviderConfig) Equal(other ProviderConfig) bool {
+	if p.Driver != other.Driver || p.Model != other.Model || p.BaseURL != other.BaseURL {
+		return false
+	}
+	if p.Auth != other.Auth || p.MaxTokens != other.MaxTokens || p.ContextWindow != other.ContextWindow {
+		return false
+	}
+	if p.MaxConcurrent != other.MaxConcurrent || p.PromptPrefix != other.PromptPrefix {
+		return false
+	}
+	if p.Tier != other.Tier || p.Timeout != other.Timeout || p.Fallback != other.Fallback {
+		return false
+	}
+	if !slices.Equal(p.Tags, other.Tags) || !slices.Equal(p.Capabilities, other.Capabilities) {
+		return false
+	}
+	return true
 }
 
 // RetryConfig configures retry behavior with exponential backoff.

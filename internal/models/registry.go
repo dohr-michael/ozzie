@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -189,7 +188,7 @@ func (r *Registry) UpdateProviders(cfg config.ModelsConfig) {
 	r.defaultName = cfg.Default
 	newProviders := make(map[string]*ProviderEntry, len(cfg.Providers))
 	for name, provCfg := range cfg.Providers {
-		if existing, ok := r.providers[name]; ok && reflect.DeepEqual(existing.Config, provCfg) {
+		if existing, ok := r.providers[name]; ok && existing.Config.Equal(provCfg) {
 			newProviders[name] = existing // unchanged — keep cached model
 		} else {
 			newProviders[name] = &ProviderEntry{Config: provCfg}

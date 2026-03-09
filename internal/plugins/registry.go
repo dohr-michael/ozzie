@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/cloudwego/eino/components/tool"
 
@@ -14,6 +15,7 @@ import (
 
 // ToolRegistry is the unified registry for all tools (WASM + native + MCP).
 type ToolRegistry struct {
+	mu          sync.RWMutex
 	tools       map[string]tool.InvokableTool
 	manifests   map[string]*PluginManifest // tool name → parent manifest
 	specs       map[string]*ToolSpec       // tool name → specific ToolSpec
@@ -39,6 +41,9 @@ func NewToolRegistry(bus *events.Bus) *ToolRegistry {
 // The optional auth parameter provides user-side authorization for the plugin.
 // A multi-tool plugin registers one entry per ToolSpec.
 func (r *ToolRegistry) LoadWasmPlugin(ctx context.Context, manifestPath string, auth *PluginAuthorization) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	manifest, err := LoadManifest(manifestPath)
 	if err != nil {
 		return err
@@ -72,6 +77,9 @@ func (r *ToolRegistry) LoadWasmPlugin(ctx context.Context, manifestPath string, 
 
 // RegisterNative registers a Go-native tool with its manifest.
 func (r *ToolRegistry) RegisterNative(name string, t tool.InvokableTool, manifest *PluginManifest) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if _, exists := r.tools[name]; exists {
 		return fmt.Errorf("tool %q already registered", name)
 	}
@@ -91,6 +99,9 @@ func (r *ToolRegistry) RegisterNative(name string, t tool.InvokableTool, manifes
 
 // Tools returns all registered tools as a slice for the agent.
 func (r *ToolRegistry) Tools() []tool.InvokableTool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	result := make([]tool.InvokableTool, 0, len(r.tools))
 	for _, t := range r.tools {
 		result = append(result, t)
@@ -100,21 +111,30 @@ func (r *ToolRegistry) Tools() []tool.InvokableTool {
 
 // Manifest returns the parent manifest for a given tool name.
 func (r *ToolRegistry) Manifest(name string) *PluginManifest {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.manifests[name]
 }
 
 // ToolSpec returns the specific ToolSpec for a given tool name.
 func (r *ToolRegistry) ToolSpec(name string) *ToolSpec {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.specs[name]
 }
 
 // PluginTools returns the tool names registered by a given plugin.
 func (r *ToolRegistry) PluginTools(pluginName string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.pluginTools[pluginName]
 }
 
 // ToolNames returns all registered tool names.
 func (r *ToolRegistry) ToolNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
 		names = append(names, name)
@@ -124,6 +144,9 @@ func (r *ToolRegistry) ToolNames() []string {
 
 // NativeToolNames returns the names of all tools whose manifest has Provider == "native".
 func (r *ToolRegistry) NativeToolNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	var names []string
 	for name, m := range r.manifests {
 		if m.Provider == "native" {
@@ -135,12 +158,17 @@ func (r *ToolRegistry) NativeToolNames() []string {
 
 // Tool returns the InvokableTool for a given name, or nil if not found.
 func (r *ToolRegistry) Tool(name string) tool.InvokableTool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.tools[name]
 }
 
 // ToolsByNames returns the InvokableTools matching the given names.
 // Unknown names are silently skipped.
 func (r *ToolRegistry) ToolsByNames(names []string) []tool.InvokableTool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	result := make([]tool.InvokableTool, 0, len(names))
 	for _, name := range names {
 		if t, ok := r.tools[name]; ok {
@@ -153,6 +181,9 @@ func (r *ToolRegistry) ToolsByNames(names []string) []tool.InvokableTool {
 // AllToolDescriptions returns a map of tool name → description for every
 // registered tool. Tools without a ToolSpec get an empty description.
 func (r *ToolRegistry) AllToolDescriptions() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	descs := make(map[string]string, len(r.tools))
 	for name := range r.tools {
 		if spec, ok := r.specs[name]; ok {

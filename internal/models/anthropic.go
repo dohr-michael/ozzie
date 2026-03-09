@@ -92,7 +92,7 @@ func (m *AnthropicChatModel) Generate(ctx context.Context, messages []*schema.Me
 	params := m.buildParams(messages, opts)
 	resp, err := m.client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, HandleError(err)
+		return nil, err
 	}
 
 	outMsg = m.convertResponse(resp)
