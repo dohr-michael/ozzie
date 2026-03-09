@@ -1,7 +1,6 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -265,27 +264,19 @@ func execGit(ctx context.Context, dir string, args ...string) (gitResult, error)
 	}
 	applyTaskEnv(ctx, cmd)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	exitCode := 0
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return gitResult{}, fmt.Errorf("git: exec: %w", err)
-		}
+	r, err := execCommand(ctx, cmd)
+	if err != nil {
+		return gitResult{}, fmt.Errorf("git: exec: %w", err)
 	}
 
-	output := stdout.String()
+	output := r.Stdout
 	if output == "" {
-		output = stderr.String()
+		output = r.Stderr
 	}
 
 	return gitResult{
 		Output:   output,
-		ExitCode: exitCode,
+		ExitCode: r.ExitCode,
 	}, nil
 }
 

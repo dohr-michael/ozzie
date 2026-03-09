@@ -155,8 +155,12 @@ func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Ha
 }
 
 func truncatePayload(s string, maxLen int) string {
-	if maxLen <= 0 || len(s) <= maxLen {
+	if maxLen <= 0 {
 		return s
 	}
-	return s[:maxLen] + "... (truncated)"
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "... (truncated)"
 }

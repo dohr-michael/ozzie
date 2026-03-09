@@ -178,7 +178,7 @@ func (b *Bus) notifySubscribers(event Event) {
 
 	for _, sub := range b.subscribers {
 		if b.matches(sub, event) {
-			go sub.handler(event)
+			sub.handler(event)
 		}
 	}
 }
@@ -254,17 +254,19 @@ func (b *Bus) Subscribe(handler Subscriber, eventTypes ...EventType) func() {
 // SubscribeChan returns a channel that receives events.
 func (b *Bus) SubscribeChan(bufSize int, eventTypes ...EventType) (<-chan Event, func()) {
 	ch := make(chan Event, bufSize)
+	done := make(chan struct{})
+	var once sync.Once
 
 	unsubscribe := b.Subscribe(func(e Event) {
 		select {
 		case ch <- e:
-		default:
+		case <-done:
 		}
 	}, eventTypes...)
 
 	return ch, func() {
+		once.Do(func() { close(done) })
 		unsubscribe()
-		close(ch)
 	}
 }
 

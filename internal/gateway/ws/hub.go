@@ -108,12 +108,30 @@ func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermission
 
 // SetTaskHandler sets the optional task handler for WS task methods.
 func (h *Hub) SetTaskHandler(th TaskHandler) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.tasks = th
 }
 
 // SetSecretEncryptor enables encryption for password prompt responses.
 func (h *Hub) SetSecretEncryptor(r *age.X25519Recipient) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.recipient = r
+}
+
+// taskHandler returns the current task handler (thread-safe).
+func (h *Hub) taskHandler() TaskHandler {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.tasks
+}
+
+// secretRecipient returns the current encryption recipient (thread-safe).
+func (h *Hub) secretRecipient() *age.X25519Recipient {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.recipient
 }
 
 // broadcast sends data to all connected clients.
@@ -388,9 +406,10 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 		}
 
 		// Encrypt password responses before they reach the event bus / LLM
-		if _, ok := c.hub.passwordTokens.LoadAndDelete(params.Token); ok && c.hub.recipient != nil {
+		recipient := c.hub.secretRecipient()
+		if _, ok := c.hub.passwordTokens.LoadAndDelete(params.Token); ok && recipient != nil {
 			if strVal, ok := params.Value.(string); ok {
-				encrypted, err := secrets.Encrypt(strVal, c.hub.recipient)
+				encrypted, err := secrets.Encrypt(strVal, recipient)
 				if err != nil {
 					c.sendError(ctx, frame.ID, "encrypt secret: "+err.Error())
 					return
@@ -451,7 +470,8 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 }
 
 func (c *Client) handleSubmitTask(ctx context.Context, frame Frame) {
-	if c.hub.tasks == nil {
+	th := c.hub.taskHandler()
+	if th == nil {
 		c.sendError(ctx, frame.ID, "task system not available")
 		return
 	}
@@ -469,7 +489,7 @@ func (c *Client) handleSubmitTask(ctx context.Context, frame Frame) {
 
 	c.hub.ensureSession(c)
 
-	taskID, err := c.hub.tasks.Submit(c.sessionID, params.Title, params.Description, params.Tools, params.Priority)
+	taskID, err := th.Submit(c.sessionID, params.Title, params.Description, params.Tools, params.Priority)
 	if err != nil {
 		c.sendError(ctx, frame.ID, err.Error())
 		return
@@ -479,7 +499,8 @@ func (c *Client) handleSubmitTask(ctx context.Context, frame Frame) {
 }
 
 func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
-	if c.hub.tasks == nil {
+	th := c.hub.taskHandler()
+	if th == nil {
 		c.sendError(ctx, frame.ID, "task system not available")
 		return
 	}
@@ -492,7 +513,7 @@ func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
 		return
 	}
 
-	result, err := c.hub.tasks.Check(params.TaskID)
+	result, err := th.Check(params.TaskID)
 	if err != nil {
 		c.sendError(ctx, frame.ID, err.Error())
 		return
@@ -502,7 +523,8 @@ func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
 }
 
 func (c *Client) handleCancelTask(ctx context.Context, frame Frame) {
-	if c.hub.tasks == nil {
+	th := c.hub.taskHandler()
+	if th == nil {
 		c.sendError(ctx, frame.ID, "task system not available")
 		return
 	}
@@ -516,7 +538,7 @@ func (c *Client) handleCancelTask(ctx context.Context, frame Frame) {
 		return
 	}
 
-	if err := c.hub.tasks.Cancel(params.TaskID, params.Reason); err != nil {
+	if err := th.Cancel(params.TaskID, params.Reason); err != nil {
 		c.sendError(ctx, frame.ID, err.Error())
 		return
 	}
@@ -525,12 +547,13 @@ func (c *Client) handleCancelTask(ctx context.Context, frame Frame) {
 }
 
 func (c *Client) handleListTasks(ctx context.Context, frame Frame) {
-	if c.hub.tasks == nil {
+	th := c.hub.taskHandler()
+	if th == nil {
 		c.sendError(ctx, frame.ID, "task system not available")
 		return
 	}
 
-	result, err := c.hub.tasks.List(c.sessionID)
+	result, err := th.List(c.sessionID)
 	if err != nil {
 		c.sendError(ctx, frame.ID, err.Error())
 		return

@@ -430,7 +430,7 @@ func (er *EventRunner) consumeIteratorBuffered(sessionID string, iter *adk.Async
 }
 
 func (er *EventRunner) consumeStream(sessionID string, stream *schema.StreamReader[*schema.Message]) string {
-	var fullContent string
+	var sb strings.Builder
 
 	for {
 		chunk, err := stream.Recv()
@@ -444,15 +444,15 @@ func (er *EventRunner) consumeStream(sessionID string, stream *schema.StreamRead
 
 		if chunk != nil && chunk.Content != "" {
 			er.emitStreamDelta(sessionID, chunk.Content)
-			fullContent += chunk.Content
+			sb.WriteString(chunk.Content)
 		}
 	}
 
-	return fullContent
+	return sb.String()
 }
 
 func (er *EventRunner) consumeStreamBuffered(stream *schema.StreamReader[*schema.Message]) string {
-	var fullContent string
+	var sb strings.Builder
 
 	for {
 		chunk, err := stream.Recv()
@@ -465,11 +465,11 @@ func (er *EventRunner) consumeStreamBuffered(stream *schema.StreamReader[*schema
 		}
 
 		if chunk != nil && chunk.Content != "" {
-			fullContent += chunk.Content
+			sb.WriteString(chunk.Content)
 		}
 	}
 
-	return fullContent
+	return sb.String()
 }
 
 func (er *EventRunner) persistAndEmitResponse(sessionID string, content string) {
@@ -554,12 +554,13 @@ func (er *EventRunner) persistToolLog(sessionID string, p events.ToolCallPayload
 	}
 }
 
-// truncate shortens s to maxLen, appending "…" if truncated.
+// truncate shortens s to maxLen runes, appending "…" if truncated.
 func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "…"
+	return string(runes[:maxLen]) + "…"
 }
 
 // Close stops the event runner.

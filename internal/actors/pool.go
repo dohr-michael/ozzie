@@ -422,7 +422,10 @@ func (p *ActorPool) preemptLowest(providerName string) *Actor {
 		select {
 		case <-deadline:
 			p.mu.Lock()
-			// Force-take the actor
+			// Hard-cancel the task before force-taking the actor
+			if rt, ok := p.runners[lowestRT.taskID]; ok {
+				rt.cancel()
+			}
 			actor.Status = ActorBusy
 			actor.CurrentTask = "_interactive"
 			return actor

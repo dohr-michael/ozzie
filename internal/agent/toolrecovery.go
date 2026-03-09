@@ -9,12 +9,10 @@ import (
 )
 
 // ToolRecoveryConfig configures the tool-call error recovery middleware.
-// Kept for API compatibility but currently unused — all errors are converted
-// to textual results unconditionally. The runner's maxIterations (20) serves
-// as the guard against infinite retry loops.
-type ToolRecoveryConfig struct {
-	MaxRetries int
-}
+// Currently a marker type — all errors are converted to textual results
+// unconditionally. The runner's maxIterations (20) guards against infinite
+// retry loops.
+type ToolRecoveryConfig struct{}
 
 // NewToolRecoveryMiddleware returns an Eino ToolMiddleware that intercepts tool
 // errors and converts them into textual results so the LLM can decide whether to

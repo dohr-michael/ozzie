@@ -211,7 +211,7 @@ func (t *PlanTaskTool) runInline(ctx context.Context, inliner tasks.InlineExecut
 
 		tools := step.Tools
 		if len(tools) == 0 {
-			tools = []string{"run_command", "git", "query_memories"}
+			tools = DefaultTaskTools
 		}
 
 		task := &tasks.Task{
@@ -285,7 +285,7 @@ func (t *PlanTaskTool) runAsync(_ context.Context, input planTaskInput, sessionI
 		// Default tools if step doesn't specify any
 		tools := step.Tools
 		if len(tools) == 0 {
-			tools = []string{"run_command", "git", "query_memories"}
+			tools = DefaultTaskTools
 		}
 
 		task := &tasks.Task{

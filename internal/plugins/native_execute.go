@@ -1,7 +1,6 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -144,29 +143,12 @@ func (t *ExecuteTool) InvokableRun(ctx context.Context, argumentsInJSON string, 
 	}
 	applyTaskEnv(ctx, cmd)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	exitCode := 0
-	if err := cmd.Run(); err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("run_command: %w", ctx.Err())
-		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return "", fmt.Errorf("run_command: exec: %w", err)
-		}
+	r, err := execCommand(ctx, cmd)
+	if err != nil {
+		return "", fmt.Errorf("run_command: %w", err)
 	}
 
-	result := executeOutput{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}
-
-	out, err := json.Marshal(result)
+	out, err := json.Marshal(executeOutput(r))
 	if err != nil {
 		return "", fmt.Errorf("run_command: marshal result: %w", err)
 	}

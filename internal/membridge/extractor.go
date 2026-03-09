@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -40,6 +41,7 @@ type Extractor struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	unsubscribe func()
+	wg          sync.WaitGroup
 }
 
 // NewExtractor creates a new cross-task learning extractor.
@@ -61,7 +63,7 @@ func (e *Extractor) Start() {
 	slog.Info("memory extractor started")
 }
 
-// Stop cancels pending extractions and unsubscribes from events.
+// Stop cancels pending extractions, waits for in-flight goroutines, and unsubscribes.
 func (e *Extractor) Stop() {
 	if e.cancel != nil {
 		e.cancel()
@@ -69,6 +71,7 @@ func (e *Extractor) Stop() {
 	if e.unsubscribe != nil {
 		e.unsubscribe()
 	}
+	e.wg.Wait()
 	slog.Info("memory extractor stopped")
 }
 
@@ -77,7 +80,11 @@ func (e *Extractor) handleEvent(ev events.Event) {
 	if !ok {
 		return
 	}
-	go e.extractLessons(payload.TaskID, payload.Title)
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		e.extractLessons(payload.TaskID, payload.Title)
+	}()
 }
 
 const maxOutputLen = 4000

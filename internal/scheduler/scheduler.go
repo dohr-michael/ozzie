@@ -72,6 +72,7 @@ type Scheduler struct {
 	entries map[string]*runtimeEntry
 
 	done        chan struct{}
+	wg          sync.WaitGroup
 	unsubscribe func()
 }
 
@@ -98,16 +99,18 @@ func (s *Scheduler) Start() {
 
 	// Always start loops and event subscription — entries can be added dynamically.
 	s.unsubscribe = s.bus.Subscribe(s.handleEvent)
+	s.wg.Add(2)
 	go s.cronLoop()
 	go s.intervalLoop()
 }
 
-// Stop halts the scheduler.
+// Stop halts the scheduler and waits for goroutines to finish.
 func (s *Scheduler) Stop() {
 	close(s.done)
 	if s.unsubscribe != nil {
 		s.unsubscribe()
 	}
+	s.wg.Wait()
 	slog.Info("scheduler stopped")
 }
 
@@ -374,6 +377,7 @@ func (s *Scheduler) checkMissedRuns(now time.Time) {
 }
 
 func (s *Scheduler) cronLoop() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
@@ -388,6 +392,7 @@ func (s *Scheduler) cronLoop() {
 }
 
 func (s *Scheduler) intervalLoop() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 

@@ -272,7 +272,7 @@ func (r *TaskRunner) consumeRunnerOutput(ctx context.Context, runner *adk.Runner
 }
 
 func consumeStream(stream *schema.StreamReader[*schema.Message]) string {
-	var fullContent string
+	var sb strings.Builder
 	for {
 		chunk, err := stream.Recv()
 		if err == io.EOF {
@@ -283,10 +283,10 @@ func consumeStream(stream *schema.StreamReader[*schema.Message]) string {
 			break
 		}
 		if chunk != nil && chunk.Content != "" {
-			fullContent += chunk.Content
+			sb.WriteString(chunk.Content)
 		}
 	}
-	return fullContent
+	return sb.String()
 }
 
 func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string) error {

@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -161,11 +162,6 @@ func sortedKeys(m map[string]struct{}) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
-	// Simple insertion sort — small sets
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
-			keys[j], keys[j-1] = keys[j-1], keys[j]
-		}
-	}
+	slices.Sort(keys)
 	return keys
 }

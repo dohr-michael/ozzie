@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -16,13 +17,13 @@ func TestBuildVerifyPrompt(t *testing.T) {
 	}
 
 	// Check that criteria are included
-	if !contains(prompt, "Contains greeting") {
+	if !strings.Contains(prompt, "Contains greeting") {
 		t.Fatal("expected prompt to contain criterion 'Contains greeting'")
 	}
-	if !contains(prompt, "Is polite") {
+	if !strings.Contains(prompt, "Is polite") {
 		t.Fatal("expected prompt to contain criterion 'Is polite'")
 	}
-	if !contains(prompt, "Hello! How are you?") {
+	if !strings.Contains(prompt, "Hello! How are you?") {
 		t.Fatal("expected prompt to contain the output")
 	}
 }
@@ -39,7 +40,7 @@ func TestBuildVerifyPrompt_LongOutput(t *testing.T) {
 	}
 
 	prompt := buildVerifyPrompt(criteria, "Test", longOutput)
-	if !contains(prompt, "truncated") {
+	if !strings.Contains(prompt, "truncated") {
 		t.Fatal("expected long output to be truncated")
 	}
 }
@@ -87,15 +88,3 @@ func TestParseVerifyResponse_InvalidJSON(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && searchContains(s, substr)
-}
-
-func searchContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

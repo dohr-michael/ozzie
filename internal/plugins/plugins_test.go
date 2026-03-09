@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/dohr-michael/ozzie/internal/events"
@@ -410,7 +411,7 @@ func TestExecuteTool_InvokableRun_Plugins(t *testing.T) {
 	if result == "" {
 		t.Error("expected non-empty result")
 	}
-	if !contains(result, "hello") {
+	if !strings.Contains(result, "hello") {
 		t.Errorf("result %q does not contain 'hello'", result)
 	}
 }
@@ -467,22 +468,9 @@ func TestWasmToolIntegration(t *testing.T) {
 		t.Fatalf("InvokableRun: %v", err)
 	}
 
-	if !contains(result, "4") {
+	if !strings.Contains(result, "4") {
 		t.Errorf("result %q does not contain '4'", result)
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
 
 // --- ExecuteTool timeout tests ---
@@ -530,7 +518,7 @@ func TestGitTool_InvokableRun_Status(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
-	if !contains(result, `"exit_code":0`) {
+	if !strings.Contains(result, `"exit_code":0`) {
 		t.Errorf("expected exit_code:0 in result %q", result)
 	}
 }
@@ -615,7 +603,7 @@ func TestActivateToolsTool_ActivateKnown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
-	if !contains(result, `"name":"run_command"`) {
+	if !strings.Contains(result, `"name":"run_command"`) {
 		t.Errorf("result %q does not contain activated run_command", result)
 	}
 	if len(activator.activated["sess1"]) != 1 || activator.activated["sess1"][0] != "run_command" {
@@ -637,7 +625,7 @@ func TestActivateToolsTool_ActivateUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
-	if !contains(result, "unknown tool") {
+	if !strings.Contains(result, "unknown tool") {
 		t.Errorf("result %q does not contain error for unknown tool", result)
 	}
 }

@@ -92,14 +92,6 @@ func (m *Manager) Apply(
 	return out, nil
 }
 
-// Result returns retrieval metadata from the last Apply call.
-// This is useful for emitting events. Returns nil if Apply hasn't been called.
-func (m *Manager) LastResult() *RetrievalResult {
-	// For now, callers should use the result from Apply directly.
-	// This method is a placeholder for future caching.
-	return nil
-}
-
 // lastUserMessageContent extracts the content of the last user message.
 func lastUserMessageContent(messages []*schema.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {

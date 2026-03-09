@@ -150,7 +150,7 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	tools := input.Tools
 	// Default tools: if none specified and not a skill task, provide base action tools
 	if len(tools) == 0 && input.Skill == "" {
-		tools = []string{"run_command", "git", "query_memories"}
+		tools = DefaultTaskTools
 	}
 
 	// Pre-approve dangerous tools before submitting

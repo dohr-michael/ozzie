@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -79,7 +80,7 @@ func (g *ConstraintGuard) validate(tc *events.ToolConstraint, argsJSON string) e
 	// AllowedCommands: check ALL binaries in chained commands (AST-based)
 	if len(tc.AllowedCommands) > 0 && args.Command != "" {
 		for _, binary := range extractAllBinariesAST(args.Command) {
-			if !stringInSlice(binary, tc.AllowedCommands) {
+			if !slices.Contains(tc.AllowedCommands, binary) {
 				return fmt.Errorf("command %q not in allowed list %v", binary, tc.AllowedCommands)
 			}
 		}
@@ -180,16 +181,6 @@ func splitSubCommands(command string) []string {
 		}
 	}
 	return result
-}
-
-// stringInSlice checks if s is in the slice.
-func stringInSlice(s string, slice []string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // matchesAnyPattern returns true if s matches any regex in patterns.
