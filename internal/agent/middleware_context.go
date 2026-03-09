@@ -18,7 +18,7 @@ import (
 
 // MemoryRetriever retrieves relevant memories for context injection.
 type MemoryRetriever interface {
-	Retrieve(query string, tags []string, limit int) ([]memory.RetrievedMemory, error)
+	Retrieve(ctx context.Context, query string, tags []string, limit int) ([]memory.RetrievedMemory, error)
 }
 
 // ActorDescription describes a configured actor overlay for the planner prompt.
@@ -173,7 +173,7 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 					memContentMax = 100
 				}
 
-				if memories, err := cfg.Retriever.Retrieve(query, tags, memLimit); err == nil && len(memories) > 0 {
+				if memories, err := cfg.Retriever.Retrieve(ctx, query, tags, memLimit); err == nil && len(memories) > 0 {
 					var sb strings.Builder
 					sb.WriteString("## Relevant Memories\n\n")
 					for _, m := range memories {

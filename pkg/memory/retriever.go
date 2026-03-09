@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -16,7 +17,7 @@ type RetrievedMemory struct {
 
 // MemoryRetriever retrieves relevant memories for context injection or dedup.
 type MemoryRetriever interface {
-	Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error)
+	Retrieve(ctx context.Context, query string, tags []string, limit int) ([]RetrievedMemory, error)
 }
 
 // Retriever performs keyword-based memory retrieval with scoring.
@@ -31,7 +32,7 @@ func NewRetriever(store Store) *Retriever {
 
 // Retrieve finds the most relevant memories for the given query.
 // Scoring: tag match × 3 + title word match × 2 + recency bonus × confidence.
-func (r *Retriever) Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error) {
+func (r *Retriever) Retrieve(_ context.Context, query string, tags []string, limit int) ([]RetrievedMemory, error) {
 	entries, err := r.store.List()
 	if err != nil {
 		return nil, err

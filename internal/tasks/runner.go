@@ -169,7 +169,7 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 	}
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
-	memoryContext := r.buildMemoryContext()
+	memoryContext := r.buildMemoryContext(ctx)
 	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, memoryContext))
 
@@ -318,7 +318,7 @@ const maxMemoryContextLen = 2000
 
 // buildMemoryContext retrieves relevant memories for the task and formats them
 // as an instruction block. Single retrieval per task at startup — not per LLM call.
-func (r *TaskRunner) buildMemoryContext() string {
+func (r *TaskRunner) buildMemoryContext(ctx context.Context) string {
 	if r.retriever == nil {
 		return ""
 	}
@@ -338,7 +338,7 @@ func (r *TaskRunner) buildMemoryContext() string {
 		maxLen = 800
 	}
 
-	memories, err := r.retriever.Retrieve(query, tags, limit)
+	memories, err := r.retriever.Retrieve(ctx, query, tags, limit)
 	if err != nil || len(memories) == 0 {
 		return ""
 	}

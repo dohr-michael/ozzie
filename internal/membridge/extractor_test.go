@@ -95,7 +95,7 @@ type mockDedupRetriever struct {
 	title string
 }
 
-func (m *mockDedupRetriever) Retrieve(_ string, _ []string, _ int) ([]memory.RetrievedMemory, error) {
+func (m *mockDedupRetriever) Retrieve(_ context.Context, _ string, _ []string, _ int) ([]memory.RetrievedMemory, error) {
 	if m.score == 0 {
 		return nil, nil
 	}

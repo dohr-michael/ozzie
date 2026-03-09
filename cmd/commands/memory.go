@@ -142,7 +142,7 @@ func runMemorySearch(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	retriever := memory.NewHybridRetriever(store, vectorStore)
-	results, err := retriever.Retrieve(query, nil, 10)
+	results, err := retriever.Retrieve(ctx, query, nil, 10)
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
 	}

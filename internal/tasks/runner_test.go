@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -271,13 +272,13 @@ type mockRetriever struct {
 	err     error
 }
 
-func (m *mockRetriever) Retrieve(query string, tags []string, limit int) ([]memory.RetrievedMemory, error) {
+func (m *mockRetriever) Retrieve(_ context.Context, query string, tags []string, limit int) ([]memory.RetrievedMemory, error) {
 	return m.results, m.err
 }
 
 func TestBuildMemoryContext_NilRetriever(t *testing.T) {
 	r := &TaskRunner{task: &Task{Title: "test", Description: "desc"}}
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
@@ -288,7 +289,7 @@ func TestBuildMemoryContext_NoResults(t *testing.T) {
 		task:      &Task{Title: "test", Description: "desc"},
 		retriever: &mockRetriever{results: nil},
 	}
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
@@ -299,7 +300,7 @@ func TestBuildMemoryContext_RetrieverError(t *testing.T) {
 		task:      &Task{Title: "test", Description: "desc"},
 		retriever: &mockRetriever{err: fmt.Errorf("embedding down")},
 	}
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	if got != "" {
 		t.Errorf("expected empty on error, got %q", got)
 	}
@@ -323,7 +324,7 @@ func TestBuildMemoryContext_WithResults(t *testing.T) {
 			},
 		},
 	}
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	if !strings.Contains(got, "## Relevant Memories") {
 		t.Errorf("expected header, got %q", got)
 	}
@@ -358,7 +359,7 @@ func TestBuildMemoryContext_Truncation(t *testing.T) {
 			},
 		},
 	}
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	// The first entry itself exceeds the limit, so it should be skipped
 	// and the result should just be the header (no entries fit)
 	if strings.Contains(got, "Should be skipped") {
@@ -377,7 +378,7 @@ func TestBuildMemoryContext_QueryTruncation(t *testing.T) {
 		},
 	}
 	_ = capturedQuery
-	got := r.buildMemoryContext()
+	got := r.buildMemoryContext(context.Background())
 	if got != "" {
 		t.Errorf("expected empty for no results, got %q", got)
 	}

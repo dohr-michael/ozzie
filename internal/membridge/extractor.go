@@ -124,7 +124,7 @@ func (e *Extractor) extractLessons(taskID, title string) {
 
 	now := time.Now()
 	for _, lesson := range lessons {
-		if e.isDuplicate(lesson.Title, lesson.Content) {
+		if e.isDuplicate(e.ctx, lesson.Title, lesson.Content) {
 			continue
 		}
 		entry := &memory.MemoryEntry{
@@ -154,7 +154,7 @@ func (e *Extractor) extractLessons(taskID, title string) {
 
 const dedupScoreThreshold = 0.65
 
-func (e *Extractor) isDuplicate(title, content string) bool {
+func (e *Extractor) isDuplicate(ctx context.Context, title, content string) bool {
 	if e.retriever == nil {
 		return false
 	}
@@ -162,7 +162,7 @@ func (e *Extractor) isDuplicate(title, content string) bool {
 	if runes := []rune(query); len(runes) > 300 {
 		query = string(runes[:300])
 	}
-	results, err := e.retriever.Retrieve(query, nil, 1)
+	results, err := e.retriever.Retrieve(ctx, query, nil, 1)
 	if err != nil || len(results) == 0 {
 		return false
 	}

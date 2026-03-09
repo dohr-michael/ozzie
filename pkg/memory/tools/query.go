@@ -58,7 +58,7 @@ func (t *QueryMemoriesTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	}, nil
 }
 
-func (t *QueryMemoriesTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+func (t *QueryMemoriesTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	var input queryMemoriesInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
 		return "", fmt.Errorf("query_memories: parse input: %w", err)
@@ -79,7 +79,7 @@ func (t *QueryMemoriesTool) InvokableRun(_ context.Context, argumentsInJSON stri
 		limit = int(input.Limit)
 	}
 
-	memories, err := t.retriever.Retrieve(input.Query, tags, limit)
+	memories, err := t.retriever.Retrieve(ctx, input.Query, tags, limit)
 	if err != nil {
 		return "", fmt.Errorf("query_memories: %w", err)
 	}

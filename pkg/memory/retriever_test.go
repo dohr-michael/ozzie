@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -132,7 +133,7 @@ func TestRetriever_BasicQuery(t *testing.T) {
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
-	results, err := r.Retrieve("tabs formatting", nil, 5)
+	results, err := r.Retrieve(context.Background(),"tabs formatting", nil, 5)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
@@ -152,7 +153,7 @@ func TestRetriever_TagFilter(t *testing.T) {
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
-	results, err := r.Retrieve("something", []string{"deploy"}, 5)
+	results, err := r.Retrieve(context.Background(),"something", []string{"deploy"}, 5)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestRetriever_LimitResults(t *testing.T) {
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
-	results, err := r.Retrieve("project editor deploy", nil, 2)
+	results, err := r.Retrieve(context.Background(),"project editor deploy", nil, 2)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
@@ -193,7 +194,7 @@ func TestRetriever_EmptyQuery(t *testing.T) {
 	seedMemories(t, store)
 
 	r := NewRetriever(store)
-	results, err := r.Retrieve("", nil, 5)
+	results, err := r.Retrieve(context.Background(),"", nil, 5)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}
@@ -208,7 +209,7 @@ func TestRetriever_EmptyStore(t *testing.T) {
 	store := newInMemoryStore()
 
 	r := NewRetriever(store)
-	results, err := r.Retrieve("test query", nil, 5)
+	results, err := r.Retrieve(context.Background(),"test query", nil, 5)
 	if err != nil {
 		t.Fatalf("Retrieve: %v", err)
 	}

@@ -60,7 +60,7 @@ func (hr *HybridRetriever) Wait() {
 
 // Retrieve finds the most relevant memories using hybrid scoring.
 // It satisfies the agent.MemoryRetriever interface.
-func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]RetrievedMemory, error) {
+func (hr *HybridRetriever) Retrieve(ctx context.Context, query string, tags []string, limit int) ([]RetrievedMemory, error) {
 	if limit <= 0 {
 		limit = 5
 	}
@@ -72,7 +72,7 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 
 	// Keyword-only fallback when vector store is not available
 	if vector == nil {
-		results, err := hr.keyword.Retrieve(query, tags, limit)
+		results, err := hr.keyword.Retrieve(ctx, query, tags, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -87,12 +87,12 @@ func (hr *HybridRetriever) Retrieve(query string, tags []string, limit int) ([]R
 	// Fetch expanded result sets from both sources
 	fetchLimit := limit * 2
 
-	keywordResults, err := hr.keyword.Retrieve(query, tags, fetchLimit)
+	keywordResults, err := hr.keyword.Retrieve(ctx, query, tags, fetchLimit)
 	if err != nil {
 		return nil, err
 	}
 
-	semanticResults, err := vector.Query(context.Background(), query, fetchLimit)
+	semanticResults, err := vector.Query(ctx, query, fetchLimit)
 	if err != nil {
 		// Graceful degradation: reuse keyword results already fetched
 		results := keywordResults
