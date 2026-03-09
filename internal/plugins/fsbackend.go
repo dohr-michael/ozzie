@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/pkg/editor"
 )
 
 // skipDirs are directories to skip during search and traversal.
@@ -464,4 +465,88 @@ func (b *OzzieBackend) isRestrictedPath(path string) bool {
 	return false
 }
 
-var _ filesystem.Backend = (*OzzieBackend)(nil)
+// --- editor.Backend implementation ---
+// OzzieBackend also implements editor.Backend, providing the same path
+// resolution and security guards (read restrictions, write sandbox) to
+// the str_replace_editor tool without an intermediate adapter.
+
+func (b *OzzieBackend) ReadFile(ctx context.Context, path string) (string, error) {
+	if err := b.validateReadPath(ctx, path); err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(b.resolvePath(ctx, path))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (b *OzzieBackend) WriteFile(ctx context.Context, path, content string) error {
+	if err := b.validateWritePath(ctx, path); err != nil {
+		return err
+	}
+	resolved := b.resolvePath(ctx, path)
+	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
+		return fmt.Errorf("create dirs: %w", err)
+	}
+	return os.WriteFile(resolved, []byte(content), 0o644)
+}
+
+func (b *OzzieBackend) IsDirectory(ctx context.Context, path string) (bool, error) {
+	info, err := os.Stat(b.resolvePath(ctx, path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, fmt.Errorf("path does not exist: %s", path)
+		}
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+func (b *OzzieBackend) Exists(ctx context.Context, path string) (bool, error) {
+	_, err := os.Stat(b.resolvePath(ctx, path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (b *OzzieBackend) ListDir(ctx context.Context, path string, maxDepth int) ([]string, error) {
+	root := filepath.Clean(b.resolvePath(ctx, path))
+	var entries []string
+
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		if rel == "." {
+			return nil
+		}
+		depth := strings.Count(rel, string(filepath.Separator)) + 1
+		if depth > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() && (skipDirs[d.Name()] || strings.HasPrefix(d.Name(), ".")) {
+			return filepath.SkipDir
+		}
+		suffix := ""
+		if d.IsDir() {
+			suffix = "/"
+		}
+		entries = append(entries, rel+suffix)
+		return nil
+	})
+	return entries, err
+}
+
+var (
+	_ filesystem.Backend = (*OzzieBackend)(nil)
+	_ editor.Backend     = (*OzzieBackend)(nil)
+)

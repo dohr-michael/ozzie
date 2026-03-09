@@ -7,6 +7,8 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/pkg/editor"
+	editortools "github.com/dohr-michael/ozzie/pkg/editor/tools"
 )
 
 // SetupToolRegistry creates and populates a ToolRegistry with WASM and native tools.
@@ -72,6 +74,16 @@ func RegisterWebTools(ctx context.Context, cfg *config.Config, registry *ToolReg
 		if err := registry.RegisterNative("web_fetch", fetchTool, resolvedNativeManifest(WebFetchManifest())); err != nil {
 			slog.Warn("failed to register web_fetch tool", "error", err)
 		}
+	}
+}
+
+// RegisterFilesystemTools registers filesystem-based native tools (str_replace_editor).
+// backend implements both filesystem.Backend (Eino) and editor.Backend.
+func RegisterFilesystemTools(registry *ToolRegistry, backend *OzzieBackend) {
+	editorTool := editortools.NewStrReplaceEditorTool(editor.New(backend))
+	if err := registry.RegisterNative("str_replace_editor", editorTool,
+		resolvedNativeManifest(StrReplaceEditorManifest())); err != nil {
+		slog.Warn("failed to register str_replace_editor tool", "error", err)
 	}
 }
 

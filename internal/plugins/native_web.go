@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/pkg/htmltext"
 )
 
 // ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ func (t *WebFetchTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 	}
 
 	// Extract text from HTML
-	content := extractText(string(body))
+	content := htmltext.Extract(string(body))
 
 	// Truncate to maxBodyKB of text
 	if len(content) > int(maxBytes) {
@@ -230,128 +230,6 @@ func WebFetchManifest() *PluginManifest {
 			},
 		},
 	}
-}
-
-// extractText strips HTML tags and returns plain text.
-// Simple state-machine approach — no external dependency needed.
-func extractText(html string) string {
-	var sb strings.Builder
-	sb.Grow(len(html) / 2)
-
-	inTag := false
-	inScript := false
-	inStyle := false
-	lastSpace := true
-
-	lower := strings.ToLower(html)
-
-	for i := 0; i < len(html); {
-		r, size := utf8.DecodeRuneInString(html[i:])
-
-		if inScript {
-			if i+9 <= len(lower) && lower[i:i+9] == "</script>" {
-				inScript = false
-				i += 9
-				continue
-			}
-			i += size
-			continue
-		}
-		if inStyle {
-			if i+8 <= len(lower) && lower[i:i+8] == "</style>" {
-				inStyle = false
-				i += 8
-				continue
-			}
-			i += size
-			continue
-		}
-
-		if r == '<' {
-			// Check for script/style tags
-			rest := lower[i:]
-			if strings.HasPrefix(rest, "<script") {
-				inScript = true
-				inTag = true
-			} else if strings.HasPrefix(rest, "<style") {
-				inStyle = true
-				inTag = true
-			} else {
-				inTag = true
-			}
-
-			// Block-level tags → newline
-			if len(rest) > 1 {
-				tag := rest[1:]
-				for _, bt := range []string{"p>", "p ", "div>", "div ", "br>", "br/>", "br />",
-					"h1>", "h1 ", "h2>", "h2 ", "h3>", "h3 ", "h4>", "h4 ",
-					"li>", "li ", "tr>", "tr ", "td>", "td "} {
-					if strings.HasPrefix(tag, bt) || strings.HasPrefix(tag, "/"+bt[:len(bt)-1]) {
-						if !lastSpace {
-							sb.WriteByte('\n')
-							lastSpace = true
-						}
-						break
-					}
-				}
-			}
-
-			i += size
-			continue
-		}
-
-		if r == '>' {
-			inTag = false
-			i += size
-			continue
-		}
-
-		if inTag {
-			i += size
-			continue
-		}
-
-		// HTML entities
-		if r == '&' {
-			end := strings.IndexByte(html[i:], ';')
-			if end > 0 && end < 10 {
-				entity := html[i : i+end+1]
-				switch entity {
-				case "&nbsp;", "&#160;":
-					sb.WriteByte(' ')
-				case "&amp;":
-					sb.WriteByte('&')
-				case "&lt;":
-					sb.WriteByte('<')
-				case "&gt;":
-					sb.WriteByte('>')
-				case "&quot;":
-					sb.WriteByte('"')
-				default:
-					sb.WriteString(entity)
-				}
-				lastSpace = false
-				i += end + 1
-				continue
-			}
-		}
-
-		// Collapse whitespace
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			if !lastSpace {
-				sb.WriteByte(' ')
-				lastSpace = true
-			}
-			i += size
-			continue
-		}
-
-		sb.WriteRune(r)
-		lastSpace = false
-		i += size
-	}
-
-	return strings.TrimSpace(sb.String())
 }
 
 // ---------------------------------------------------------------------------

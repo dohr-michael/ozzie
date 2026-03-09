@@ -22,7 +22,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
-	"github.com/dohr-michael/ozzie/internal/layered"
+	"github.com/dohr-michael/ozzie/internal/layeredctx"
 	"github.com/dohr-michael/ozzie/internal/membridge"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
@@ -551,6 +551,11 @@ func (g *gateway) initAgent() error {
 		plugins.WithReadRestrictedPaths(secrets.AgeDirPath()),
 	}
 	fsBackend := plugins.NewOzzieBackend(g.bus, g.toolPerms, fsOpts...)
+
+	// Register str_replace_editor (filesystem-based, needs fsBackend)
+	plugins.RegisterFilesystemTools(g.toolRegistry, fsBackend)
+	g.toolSet.RegisterCore("str_replace_editor")
+
 	fsMw, err := einoFs.NewMiddleware(g.ctx, &einoFs.Config{
 		Backend:                          fsBackend,
 		WithoutLargeToolResultOffloading: true, // offloading handled by reduction middleware below
@@ -624,15 +629,15 @@ func (g *gateway) initAgent() error {
 
 	// Layered context manager (optional)
 	if g.cfg.LayeredContext.IsEnabled() {
-		layeredStore := layered.NewStore(sessionsDir)
-		layeredCfg := layered.DefaultConfig()
+		layeredStore := layeredctx.NewStore(sessionsDir)
+		layeredCfg := layeredctx.DefaultConfig()
 		layeredCfg.Enabled = true
 		layeredCfg.MaxArchives = g.cfg.LayeredContext.MaxArchives
 		layeredCfg.MaxRecentMessages = g.cfg.LayeredContext.MaxRecentMessages
 		layeredCfg.ArchiveChunkSize = g.cfg.LayeredContext.ArchiveChunkSize
 		layeredCfg.MaxPromptTokens = g.registry.DefaultContextWindow()
 		chatModel := g.chatModel
-		g.layered = layered.NewManager(layeredStore, layeredCfg,
+		g.layered = layeredctx.NewManager(layeredStore, layeredCfg,
 			func(ctx context.Context, prompt string) (string, error) {
 				resp, err := chatModel.Generate(ctx, []*schema.Message{{Role: schema.User, Content: prompt}})
 				if err != nil {

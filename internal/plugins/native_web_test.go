@@ -2,11 +2,13 @@ package plugins
 
 import (
 	"testing"
+
+	"github.com/dohr-michael/ozzie/pkg/htmltext"
 )
 
 func TestExtractText_BasicHTML(t *testing.T) {
 	html := `<html><head><title>Test</title></head><body><h1>Hello</h1><p>World</p></body></html>`
-	got := extractText(html)
+	got := htmltext.Extract(html)
 	if got != "Test\nHello\nWorld" {
 		t.Errorf("expected 'Test\\nHello\\nWorld', got %q", got)
 	}
@@ -14,7 +16,7 @@ func TestExtractText_BasicHTML(t *testing.T) {
 
 func TestExtractText_ScriptAndStyle(t *testing.T) {
 	html := `<p>Before</p><script>var x=1;</script><style>.a{color:red}</style><p>After</p>`
-	got := extractText(html)
+	got := htmltext.Extract(html)
 	if got != "Before\nAfter" {
 		t.Errorf("expected 'Before\\nAfter', got %q", got)
 	}
@@ -22,7 +24,7 @@ func TestExtractText_ScriptAndStyle(t *testing.T) {
 
 func TestExtractText_WhitespaceCollapse(t *testing.T) {
 	html := `<p>Hello    world   here</p>`
-	got := extractText(html)
+	got := htmltext.Extract(html)
 	if got != "Hello world here" {
 		t.Errorf("expected 'Hello world here', got %q", got)
 	}
@@ -30,7 +32,7 @@ func TestExtractText_WhitespaceCollapse(t *testing.T) {
 
 func TestExtractText_Entities(t *testing.T) {
 	html := `<p>A &amp; B &lt; C</p>`
-	got := extractText(html)
+	got := htmltext.Extract(html)
 	if got != "A & B < C" {
 		t.Errorf("expected 'A & B < C', got %q", got)
 	}
@@ -38,7 +40,7 @@ func TestExtractText_Entities(t *testing.T) {
 
 func TestExtractText_PlainText(t *testing.T) {
 	text := "Just plain text with no tags"
-	got := extractText(text)
+	got := htmltext.Extract(text)
 	if got != text {
 		t.Errorf("expected %q, got %q", text, got)
 	}
