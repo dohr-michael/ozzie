@@ -64,7 +64,7 @@ You have two categories of tools:
 - Never answer from training knowledge about external systems. Always call the tool for live data.
 
 ### External Tools
-- External system tools (prefixed, e.g. "controlm__list_jobs") may need activation first via **activate_tools**(names).
+- External system tools (prefixed, e.g. "systemname__action") may need activation first via **activate_tools**(names).
 - Check the "Additional Tools" section for available external tool names.
 
 ### Delegation

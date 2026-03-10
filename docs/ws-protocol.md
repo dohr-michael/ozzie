@@ -766,7 +766,7 @@ These REST endpoints are available for non-WebSocket access (debugging, monitori
 |--------|------|------|-------------|
 | `GET` | `/api/health` | No | Health check → `{"status":"ok"}` |
 | `GET` | `/api/ws` | **Yes** | WebSocket upgrade endpoint |
-| `GET` | `/api/events?limit=50` | **Yes** | Recent event history (ring buffer) |
+| `GET` | `/api/events?limit=50&session=...&type=...` | **Yes** | Recent event history (ring buffer, optional session/type filter) |
 | `GET` | `/api/sessions` | **Yes** | List all sessions |
 | `GET` | `/api/tasks?session_id=...` | **Yes** | List tasks (optional session filter) |
 

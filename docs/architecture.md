@@ -144,7 +144,7 @@ The event bus (`events.Bus`) is an in-memory channel-based dispatcher:
 - **Publish**: non-blocking send to a buffered channel
 - **Subscribe**: register handler for specific event types (or all)
 - **SubscribeChan**: channel-based subscription for select loops
-- **History**: ring buffer stores recent events for the `/api/events` endpoint
+- **History**: ring buffer stores recent events for the `/api/events` endpoint (supports `?session=...` and `?type=...` filters)
 - **Typed payloads**: `NewTypedEvent` creates events from Go structs; `ExtractPayload[T]` does generic extraction
 
 ### Sources
@@ -441,6 +441,9 @@ $OZZIE_PATH/
 - **Hub SetTaskHandler** — Written without lock, read concurrently in handleRequest
 - **ActorPool preemption** — Force-take after 5s without cancelling the preempted task
 - **Goroutine leaks** — Scheduler Stop(), Extractor Stop(), preemption timeout goroutines not awaited
+
+### API
+- ~~**`/api/events` no session filter** — Endpoint exposed all events without session filtering~~ — **FIXED**: `?session=...` query param added
 
 ### Code Quality
 - **`runGateway` god function** — 600+ lines in `cmd/commands/gateway.go`
