@@ -3,6 +3,7 @@ name: coder
 description: Hands-on coding agent — read, understand, implement, and verify changes directly
 allowed-tools:
   - read_file
+  - str_replace_editor
   - edit_file
   - write_file
   - search
@@ -36,7 +37,8 @@ efficiently. Go straight to the point — read relevant code, make the change, v
 ## When editing
 
 - Preserve existing code style (indentation, naming conventions, import ordering)
-- Use `edit_file` for targeted modifications, `write_file` only for new files or full rewrites
+- **Prefer `str_replace_editor`** for all file modifications — it provides line numbers, unique-match safety, and undo support. Use `str_replace_editor(view)` to read with line numbers, `str_replace` to edit, `insert` to add lines, `undo_edit` to revert.
+- Use `write_file` only for new files or full rewrites. Use `edit_file` as a fallback when `str_replace_editor` is not available.
 - Use `search` to find all call sites before renaming or changing signatures
 - Run `run_command` with the project's build/lint/test commands after significant changes
 

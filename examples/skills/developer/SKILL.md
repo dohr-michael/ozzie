@@ -3,6 +3,7 @@ name: developer
 description: End-to-end development workflow — analyze requirements, design architecture, implement, test, and review
 allowed-tools:
   - read_file
+  - str_replace_editor
   - write_file
   - search
   - run_command

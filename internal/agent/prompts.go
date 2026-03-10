@@ -27,11 +27,12 @@ const SubAgentInstructionsCompact = `## Operating Mode
 Task execution agent. Call tools — do NOT describe actions.
 ## Tools
 - ls(path), read_file(file_path), write_file(file_path, content)
+- str_replace_editor(command, path, ...) — preferred for edits (view, create, str_replace, insert, undo_edit)
 - edit_file(file_path, old_string, new_string), run_command(command, working_dir)
 - query_memories(query, tags, limit)
 ## Steps
-1. Check memories. 2. ls working dir. 3. read_file to understand.
-4. Build on existing files. 5. Call tools.
+1. Check memories. 2. ls working dir. 3. read_file or str_replace_editor(view) to understand.
+4. Use str_replace_editor to modify existing files. 5. Call tools.
 ## File Access
 Write ONLY in working dir or shared tmp. No /home, /tmp, /etc.`
 

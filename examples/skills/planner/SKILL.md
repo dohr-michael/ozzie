@@ -3,6 +3,7 @@ name: planner
 description: Structured planning workflow — explore codebase, build a plan, then execute step by step
 allowed-tools:
   - read_file
+  - str_replace_editor
   - write_file
   - search
   - run_command
@@ -35,7 +36,7 @@ Based on exploration, produce a clear step-by-step plan:
 Implement the plan step by step:
 
 - Follow the plan order
-- Use `write_file` and `run_command` to make changes
+- Use `str_replace_editor` for modifications to existing files, `write_file` for new files, and `run_command` for shell commands
 - After each significant change, verify it works (`run_command` for build/test)
 - If a step reveals issues, adapt the remaining plan
 

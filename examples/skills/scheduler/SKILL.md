@@ -24,7 +24,7 @@ Collect the following from the user before calling `schedule_task`:
     - **Interval** — Fixed frequency (e.g. `30m`, `2h`, `24h`)
     - **Event** — React to a system event (e.g. `task.completed`, `task.failed`)
 3. **Tools** — Which tools does the task need? Common sets:
-    - Code changes: `read_file`, `write_file`, `search`, `run_command`
+    - Code changes: `read_file`, `str_replace_editor`, `write_file`, `search`, `run_command`
     - Read-only checks: `read_file`, `search`, `run_command`
     - Git operations: `git`, `run_command`
     - Monitoring: `run_command`
