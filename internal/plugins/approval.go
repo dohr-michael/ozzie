@@ -15,7 +15,7 @@ import (
 // on denial or context cancellation.
 func promptToolApproval(
 	ctx context.Context,
-	bus *events.Bus,
+	bus events.EventBus,
 	perms *ToolPermissions,
 	sessionID string,
 	needPrompt []string,

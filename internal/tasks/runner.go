@@ -33,7 +33,7 @@ type ToolPermissionsSeeder interface {
 type TaskRunner struct {
 	task  *Task
 	store Store
-	bus   *events.Bus
+	bus   events.EventBus
 
 	chatModel       model.ToolCallingChatModel
 	toolRegistry    agent.ToolLookup
@@ -49,7 +49,7 @@ type TaskRunner struct {
 // TaskRunnerConfig holds dependencies for creating a TaskRunner.
 type TaskRunnerConfig struct {
 	Store           Store
-	Bus             *events.Bus
+	Bus             events.EventBus
 	ChatModel       model.ToolCallingChatModel
 	ToolRegistry    agent.ToolLookup
 	SkillRunner     SkillExecutor

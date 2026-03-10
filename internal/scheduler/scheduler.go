@@ -17,7 +17,7 @@ const DefaultCooldown = 60 * time.Second
 // Config holds dependencies for the scheduler.
 type Config struct {
 	Pool   tasks.TaskSubmitter
-	Bus    *events.Bus
+	Bus    events.EventBus
 	Skills []SkillScheduleInfo // skill-based schedule entries (converted by caller)
 	Store  *ScheduleStore      // nil-safe: dynamic entries are not persisted without a store
 }
@@ -64,7 +64,7 @@ func (r *runtimeEntry) toEntry() Entry {
 // Scheduler manages cron-based, interval-based, and event-triggered execution.
 type Scheduler struct {
 	pool   tasks.TaskSubmitter
-	bus    *events.Bus
+	bus    events.EventBus
 	skills []SkillScheduleInfo
 	store  *ScheduleStore
 

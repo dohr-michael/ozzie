@@ -13,7 +13,7 @@ import (
 )
 
 // waitForEvents polls the bus history until at least n events are present.
-func waitForEvents(bus *events.Bus, n int) {
+func waitForEvents(bus events.EventBus, n int) {
 	for i := 0; i < 200; i++ {
 		if len(bus.History(100)) >= n {
 			return
@@ -126,6 +126,38 @@ func TestHandleEvents_LimitParam(t *testing.T) {
 	}
 	if len(body) != 5 {
 		t.Fatalf("expected 5 events with limit=5, got %d", len(body))
+	}
+}
+
+func TestHandleEvents_SessionFilter(t *testing.T) {
+	srv := newTestServer(t)
+	defer srv.hub.Close()
+
+	srv.bus.Publish(events.NewEventWithSession(events.EventUserMessage, events.SourceWS, map[string]any{"content": "a"}, "sess_alpha"))
+	srv.bus.Publish(events.NewEventWithSession(events.EventUserMessage, events.SourceWS, map[string]any{"content": "b"}, "sess_beta"))
+	srv.bus.Publish(events.NewEventWithSession(events.EventAssistantMessage, events.SourceAgent, map[string]any{"content": "c"}, "sess_alpha"))
+
+	waitForEvents(srv.bus, 3)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events?session=sess_alpha", nil)
+	w := httptest.NewRecorder()
+	srv.httpServer.Handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var body []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if len(body) != 2 {
+		t.Fatalf("expected 2 events for sess_alpha, got %d", len(body))
+	}
+	for _, e := range body {
+		if e["session_id"] != "sess_alpha" {
+			t.Fatalf("expected session_id 'sess_alpha', got %q", e["session_id"])
+		}
 	}
 }
 

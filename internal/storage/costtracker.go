@@ -11,13 +11,13 @@ import (
 // CostTracker subscribes to LLM call events and accumulates token usage per session.
 type CostTracker struct {
 	mu          sync.Mutex
-	bus         *events.Bus
+	bus         events.EventBus
 	store       sessions.Store
 	unsubscribe func()
 }
 
 // NewCostTracker creates a CostTracker that listens for LLM response events.
-func NewCostTracker(bus *events.Bus, store sessions.Store) *CostTracker {
+func NewCostTracker(bus events.EventBus, store sessions.Store) *CostTracker {
 	ct := &CostTracker{
 		bus:   bus,
 		store: store,

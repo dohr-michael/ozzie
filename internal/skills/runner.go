@@ -23,7 +23,7 @@ import (
 type RunnerConfig struct {
 	ModelRegistry *models.Registry
 	ToolRegistry  *plugins.ToolRegistry
-	EventBus      *events.Bus
+	EventBus      events.EventBus
 	Verifier      *Verifier
 }
 

@@ -66,7 +66,7 @@ type gateway struct {
 	reloader *config.Reloader
 
 	// Infra
-	bus *events.Bus
+	bus events.EventBus
 
 	// Models
 	registry    *models.Registry

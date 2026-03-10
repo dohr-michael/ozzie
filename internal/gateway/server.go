@@ -25,7 +25,7 @@ import (
 type Server struct {
 	httpServer  *http.Server
 	hub         *ws.Hub
-	bus         *events.Bus
+	bus         events.EventBus
 	store       sessions.Store
 	taskHandler *WSTaskHandler
 	host        string
@@ -33,7 +33,7 @@ type Server struct {
 }
 
 // NewServer creates a new gateway server.
-func NewServer(bus *events.Bus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions, authenticator auth.Authenticator) *Server {
+func NewServer(bus events.EventBus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions, authenticator auth.Authenticator) *Server {
 	insecure := authenticator == nil
 	hub := ws.NewHub(bus, store, perms, insecure)
 
@@ -98,6 +98,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	typeFilter := r.URL.Query().Get("type")
+	sessionFilter := r.URL.Query().Get("session")
+
 	var history []events.Event
 	if typeFilter != "" {
 		history = s.bus.HistoryFiltered(limit, events.EventType(typeFilter))
@@ -117,16 +119,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		Payload   map[string]any     `json:"payload"`
 	}
 
-	result := make([]eventJSON, len(history))
-	for i, e := range history {
-		result[i] = eventJSON{
+	result := make([]eventJSON, 0, len(history))
+	for _, e := range history {
+		if sessionFilter != "" && e.SessionID != sessionFilter {
+			continue
+		}
+		result = append(result, eventJSON{
 			ID:        e.ID,
 			SessionID: e.SessionID,
 			Type:      string(e.Type),
 			Timestamp: e.Timestamp.Format(time.RFC3339Nano),
 			Source:    e.Source,
 			Payload:   e.Payload,
-		}
+		})
 	}
 
 	json.NewEncoder(w).Encode(result)

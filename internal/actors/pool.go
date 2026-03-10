@@ -41,7 +41,7 @@ type ActorPool struct {
 	runners          map[string]*runningTask // taskID → running state
 	providerCooldown map[string]time.Time    // provider → cooldown expiry
 	store            tasks.Store
-	bus              *events.Bus
+	bus              events.EventBus
 	models           *models.Registry
 	toolRegistry     agent.ToolLookup
 
@@ -60,7 +60,7 @@ type ActorPool struct {
 type ActorPoolConfig struct {
 	Providers           map[string]config.ProviderConfig
 	Store               tasks.Store
-	Bus                 *events.Bus
+	Bus                 events.EventBus
 	Models              *models.Registry
 	ToolRegistry        agent.ToolLookup
 	SkillRunner         tasks.SkillExecutor         // optional skill executor for direct skill tasks

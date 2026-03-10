@@ -14,7 +14,7 @@ import (
 // SetupToolRegistry creates and populates a ToolRegistry with WASM and native tools.
 // Tools are registered without dangerous wrappers — the caller is responsible for
 // wrapping dangerous tools if needed (e.g. gateway wraps, MCP does not).
-func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus *events.Bus) (*ToolRegistry, error) {
+func SetupToolRegistry(ctx context.Context, cfg *config.Config, bus events.EventBus) (*ToolRegistry, error) {
 	registry := NewToolRegistry(bus)
 
 	// Convert config authorizations to plugin authorizations
@@ -114,7 +114,7 @@ func WrapRegistrySandbox(registry *ToolRegistry, allowedPaths []string) {
 
 // WrapRegistryDangerous wraps all dangerous tools in the registry with confirmation.
 // Used by the gateway; MCP mode skips this.
-func WrapRegistryDangerous(registry *ToolRegistry, bus *events.Bus, perms *ToolPermissions) {
+func WrapRegistryDangerous(registry *ToolRegistry, bus events.EventBus, perms *ToolPermissions) {
 	for _, name := range registry.ToolNames() {
 		spec := registry.ToolSpec(name)
 		if spec != nil && spec.Dangerous {

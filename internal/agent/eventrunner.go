@@ -42,7 +42,7 @@ type EventRunner struct {
 	factory    *AgentFactory
 	toolSet    *ToolSet
 	registry   ToolLookup
-	bus        *events.Bus
+	bus        events.EventBus
 	store      sessions.Store
 	compressor *Compressor
 	layered    *layeredctx.Manager
@@ -65,7 +65,7 @@ type EventRunnerConfig struct {
 	Factory         *AgentFactory
 	ToolSet         *ToolSet
 	Registry        ToolLookup
-	EventBus        *events.Bus
+	EventBus        events.EventBus
 	Store           sessions.Store
 	Pool            CapacityPool     // actor pool for capacity management (optional)
 	DefaultProvider string           // default provider name for AcquireInteractive

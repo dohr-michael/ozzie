@@ -56,7 +56,7 @@ type hostEmitEvent struct {
 
 // NewHostFunctions creates the standard Ozzie host functions for a plugin.
 // All functions live in the "ozzie" namespace.
-func NewHostFunctions(bus *events.Bus, kv *KVStore, pluginConfig map[string]string) []extism.HostFunction {
+func NewHostFunctions(bus events.EventBus, kv *KVStore, pluginConfig map[string]string) []extism.HostFunction {
 	var fns []extism.HostFunction
 
 	// ozzie.log — structured logging from plugin

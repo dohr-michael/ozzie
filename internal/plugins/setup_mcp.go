@@ -12,7 +12,7 @@ import (
 
 // SetupMCPServers connects to external MCP servers, discovers their tools,
 // and registers them in the ToolRegistry.
-func SetupMCPServers(ctx context.Context, cfg config.MCPConfig, registry *ToolRegistry, bus *events.Bus) error {
+func SetupMCPServers(ctx context.Context, cfg config.MCPConfig, registry *ToolRegistry, bus events.EventBus) error {
 	if len(cfg.Servers) == 0 {
 		return nil
 	}
@@ -30,7 +30,7 @@ func SetupMCPServers(ctx context.Context, cfg config.MCPConfig, registry *ToolRe
 	return nil
 }
 
-func setupOneMCPServer(ctx context.Context, name string, cfg *config.MCPServerConfig, manager *MCPManager, registry *ToolRegistry, bus *events.Bus) error {
+func setupOneMCPServer(ctx context.Context, name string, cfg *config.MCPServerConfig, manager *MCPManager, registry *ToolRegistry, bus events.EventBus) error {
 	session, err := manager.Connect(ctx, name, cfg)
 	if err != nil {
 		return err

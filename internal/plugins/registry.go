@@ -20,13 +20,13 @@ type ToolRegistry struct {
 	manifests   map[string]*PluginManifest // tool name → parent manifest
 	specs       map[string]*ToolSpec       // tool name → specific ToolSpec
 	pluginTools map[string][]string        // plugin name → tool names
-	bus         *events.Bus
+	bus         events.EventBus
 	runtime     *ExtismRuntime
 	mcpManager  *MCPManager // external MCP server sessions (nil if none)
 }
 
 // NewToolRegistry creates a new tool registry.
-func NewToolRegistry(bus *events.Bus) *ToolRegistry {
+func NewToolRegistry(bus events.EventBus) *ToolRegistry {
 	return &ToolRegistry{
 		tools:       make(map[string]tool.InvokableTool),
 		manifests:   make(map[string]*PluginManifest),

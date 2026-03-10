@@ -11,13 +11,13 @@ import (
 // EventLogger persists bus events to JSONL files organized by session.
 type EventLogger struct {
 	dir         string
-	bus         *events.Bus
+	bus         events.EventBus
 	unsubscribe func()
 }
 
 // NewEventLogger creates an EventLogger that subscribes to all bus events
 // and writes them as JSONL to dir, one file per session.
-func NewEventLogger(dir string, bus *events.Bus) *EventLogger {
+func NewEventLogger(dir string, bus events.EventBus) *EventLogger {
 	el := &EventLogger{
 		dir: dir,
 		bus: bus,

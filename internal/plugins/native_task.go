@@ -21,11 +21,11 @@ type SubmitTaskTool struct {
 	pool     tasks.TaskSubmitter
 	registry *ToolRegistry    // for looking up tool specs (dangerous flag)
 	perms    *ToolPermissions // for checking/setting approvals
-	bus      *events.Bus      // for emitting approval prompts
+	bus      events.EventBus  // for emitting approval prompts
 }
 
 // NewSubmitTaskTool creates a new submit_task tool.
-func NewSubmitTaskTool(pool tasks.TaskSubmitter, registry *ToolRegistry, perms *ToolPermissions, bus *events.Bus) *SubmitTaskTool {
+func NewSubmitTaskTool(pool tasks.TaskSubmitter, registry *ToolRegistry, perms *ToolPermissions, bus events.EventBus) *SubmitTaskTool {
 	return &SubmitTaskTool{
 		pool:     pool,
 		registry: registry,

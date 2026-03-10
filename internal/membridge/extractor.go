@@ -25,7 +25,7 @@ type ExtractorConfig struct {
 	Pipeline   *memory.Pipeline
 	TaskReader TaskOutputReader
 	Summarizer memory.LLMSummarizer
-	Bus        *events.Bus
+	Bus        events.EventBus
 	Retriever  memory.MemoryRetriever // optional: dedup check before storing (nil = no dedup)
 }
 
@@ -36,7 +36,7 @@ type Extractor struct {
 	pipeline    *memory.Pipeline
 	taskReader  TaskOutputReader
 	summarizer  memory.LLMSummarizer
-	bus         *events.Bus
+	bus         events.EventBus
 	retriever   memory.MemoryRetriever
 	ctx         context.Context
 	cancel      context.CancelFunc

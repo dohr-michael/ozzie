@@ -12,7 +12,7 @@ import (
 
 // ExtismRuntime manages the lifecycle of WASM plugins.
 type ExtismRuntime struct {
-	bus     *events.Bus
+	bus     events.EventBus
 	plugins map[string]*loadedPlugin
 }
 
@@ -23,7 +23,7 @@ type loadedPlugin struct {
 }
 
 // NewExtismRuntime creates a new runtime for loading WASM plugins.
-func NewExtismRuntime(bus *events.Bus) *ExtismRuntime {
+func NewExtismRuntime(bus events.EventBus) *ExtismRuntime {
 	return &ExtismRuntime{
 		bus:     bus,
 		plugins: make(map[string]*loadedPlugin),

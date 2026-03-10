@@ -18,12 +18,12 @@ import (
 type DangerousToolWrapper struct {
 	inner tool.InvokableTool
 	name  string
-	bus   *events.Bus
+	bus   events.EventBus
 	perms *ToolPermissions
 }
 
 // WrapDangerous wraps a tool with confirmation if dangerous is true.
-func WrapDangerous(t tool.InvokableTool, name string, dangerous bool, bus *events.Bus, perms *ToolPermissions) tool.InvokableTool {
+func WrapDangerous(t tool.InvokableTool, name string, dangerous bool, bus events.EventBus, perms *ToolPermissions) tool.InvokableTool {
 	if !dangerous {
 		return t
 	}

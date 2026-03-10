@@ -34,7 +34,7 @@ func modelNameFromContext(ctx context.Context) string {
 }
 
 // NewEventBusHandler creates a callback handler that publishes events to the bus.
-func NewEventBusHandler(bus *events.Bus, source events.EventSource) callbacks.Handler {
+func NewEventBusHandler(bus events.EventBus, source events.EventSource) callbacks.Handler {
 	if source == "" {
 		source = events.SourceAgent
 	}

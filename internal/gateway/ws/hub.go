@@ -36,7 +36,7 @@ type TaskHandler interface {
 type Hub struct {
 	mu             sync.RWMutex
 	clients        map[*Client]struct{}
-	bus            *events.Bus
+	bus            events.EventBus
 	store          sessions.Store
 	tasks          TaskHandler
 	perms          *plugins.ToolPermissions
@@ -47,7 +47,7 @@ type Hub struct {
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
-func NewHub(bus *events.Bus, store sessions.Store, perms *plugins.ToolPermissions, insecure bool) *Hub {
+func NewHub(bus events.EventBus, store sessions.Store, perms *plugins.ToolPermissions, insecure bool) *Hub {
 	h := &Hub{
 		clients:  make(map[*Client]struct{}),
 		bus:      bus,

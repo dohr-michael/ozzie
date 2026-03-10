@@ -137,6 +137,18 @@ type subscription struct {
 	handler    Subscriber
 }
 
+// EventBus is the interface for publishing and subscribing to events.
+type EventBus interface {
+	Publish(event Event)
+	Subscribe(handler Subscriber, eventTypes ...EventType) func()
+	SubscribeChan(bufSize int, eventTypes ...EventType) (<-chan Event, func())
+	History(limit int) []Event
+	HistoryFiltered(limit int, filterType EventType) []Event
+	Close()
+}
+
+var _ EventBus = (*Bus)(nil)
+
 // Bus is an in-memory event bus using Go channels.
 type Bus struct {
 	mu          sync.RWMutex

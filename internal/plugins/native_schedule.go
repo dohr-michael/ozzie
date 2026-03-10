@@ -20,13 +20,13 @@ import (
 // ScheduleTaskTool creates a recurring schedule entry.
 type ScheduleTaskTool struct {
 	sched    *scheduler.Scheduler
-	bus      *events.Bus
+	bus      events.EventBus
 	registry *ToolRegistry
 	perms    *ToolPermissions
 }
 
 // NewScheduleTaskTool creates a new schedule_task tool.
-func NewScheduleTaskTool(sched *scheduler.Scheduler, bus *events.Bus, registry *ToolRegistry, perms *ToolPermissions) *ScheduleTaskTool {
+func NewScheduleTaskTool(sched *scheduler.Scheduler, bus events.EventBus, registry *ToolRegistry, perms *ToolPermissions) *ScheduleTaskTool {
 	return &ScheduleTaskTool{sched: sched, bus: bus, registry: registry, perms: perms}
 }
 
@@ -267,11 +267,11 @@ var _ tool.InvokableTool = (*ScheduleTaskTool)(nil)
 // UnscheduleTaskTool removes a dynamic schedule entry.
 type UnscheduleTaskTool struct {
 	sched *scheduler.Scheduler
-	bus   *events.Bus
+	bus   events.EventBus
 }
 
 // NewUnscheduleTaskTool creates a new unschedule_task tool.
-func NewUnscheduleTaskTool(sched *scheduler.Scheduler, bus *events.Bus) *UnscheduleTaskTool {
+func NewUnscheduleTaskTool(sched *scheduler.Scheduler, bus events.EventBus) *UnscheduleTaskTool {
 	return &UnscheduleTaskTool{sched: sched, bus: bus}
 }
 

@@ -61,7 +61,7 @@ const writeConfirmTimeout = 60 * time.Second
 type OzzieBackend struct {
 	writeAllowedPaths   []string
 	readRestrictedPaths []string
-	bus                 *events.Bus      // nil = no interactive confirmation (tests)
+	bus                 events.EventBus  // nil = no interactive confirmation (tests)
 	perms               *ToolPermissions // nil = no accept-all bypass
 }
 
@@ -80,7 +80,7 @@ func WithReadRestrictedPaths(paths ...string) OzzieBackendOption {
 
 // NewOzzieBackend creates a new filesystem backend.
 // Use functional options for write-allowed and read-restricted paths.
-func NewOzzieBackend(bus *events.Bus, perms *ToolPermissions, opts ...OzzieBackendOption) *OzzieBackend {
+func NewOzzieBackend(bus events.EventBus, perms *ToolPermissions, opts ...OzzieBackendOption) *OzzieBackend {
 	b := &OzzieBackend{bus: bus, perms: perms}
 	for _, opt := range opts {
 		opt(b)
