@@ -145,6 +145,29 @@
       // }
     }
   },
+  // Policies: customize predefined session policies (admin, support, executor, readonly).
+  // Each policy controls tool access, approval mode, persona injection, and concurrency.
+  // "policies": {
+  //   "overrides": {
+  //     "support": {
+  //       "denied_tools": ["run_command", "write_file", "edit_file", "str_replace_editor"],
+  //       "max_concurrent": 1
+  //     },
+  //     "executor": {
+  //       "allowed_tools": ["submit_task", "check_task", "query_memories"],
+  //       "approval_mode": "none"
+  //     }
+  //   }
+  // },
+  // Connectors: external platform integrations (Discord, Slack, etc.).
+  // Each connector bridges messages between the platform and Ozzie's event bus.
+  // Users must be paired (via approve_pairing tool) before they can interact.
+  // "connectors": {
+  //   "discord": {
+  //     "token": "${{ .Env.DISCORD_TOKEN }}",
+  //     "admin_channel": "1234567890"  // channel ID for pairing notifications
+  //   }
+  // },
   // Layered context: three-tier progressive compression (L0/L1/L2).
   // Replaces monolithic summarization with BM25-based relevance retrieval.
   // Disabled by default — enable to reduce token usage by 80-90% on long conversations.

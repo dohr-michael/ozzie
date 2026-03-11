@@ -44,6 +44,7 @@ type Session struct {
 	Metadata        map[string]string                 `json:"metadata,omitempty"`
 	ApprovedTools   []string                          `json:"approved_tools,omitempty"`   // dangerous tools approved for this session
 	ToolConstraints map[string]*events.ToolConstraint `json:"tool_constraints,omitempty"` // per-tool argument constraints
+	PolicyName      string                            `json:"policy_name,omitempty"`      // policy applied to this session
 }
 
 // Message is a single turn in a conversation, serializable to JSONL.

@@ -44,6 +44,8 @@ type TaskRunner struct {
 	tier            agent.ModelTier       // model tier for prompt adaptation
 	promptPrefix    string                // overlay-specific prompt prefix
 	perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	clientFacing    bool                  // inject persona into sub-agent instruction
+	persona         string                // persona text (from LoadPersona)
 }
 
 // TaskRunnerConfig holds dependencies for creating a TaskRunner.
@@ -59,6 +61,8 @@ type TaskRunnerConfig struct {
 	Tier            agent.ModelTier       // model tier for prompt adaptation
 	PromptPrefix    string                // overlay-specific prompt prefix (optional)
 	Perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	ClientFacing    bool                  // inject persona into sub-agent instruction
+	Persona         string                // persona text (from LoadPersona)
 }
 
 // NewTaskRunner creates a runner for a specific task.
@@ -84,6 +88,8 @@ func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
 		tier:            cfg.Tier,
 		promptPrefix:    cfg.PromptPrefix,
 		perms:           cfg.Perms,
+		clientFacing:    cfg.ClientFacing,
+		persona:         cfg.Persona,
 	}
 }
 
@@ -172,6 +178,9 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 	memoryContext := r.buildMemoryContext(ctx)
 	instruction := r.prefixedInstruction(fmt.Sprintf("Execute the following task.\n\nTitle: %s\nDescription: %s%s%s%s",
 		task.Title, task.Description, formatContextBlock(task.Config), depContext, memoryContext))
+	if r.clientFacing && r.persona != "" {
+		instruction = r.persona + "\n\n" + instruction
+	}
 
 	toolNames := make([]string, len(tools))
 	for i, t := range tools {

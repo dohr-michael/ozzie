@@ -227,6 +227,95 @@ func TestTypedEventWithSession(t *testing.T) {
 	}
 }
 
+func TestTypedEvent_IncomingMessage(t *testing.T) {
+	payload := IncomingMessagePayload{
+		Connector: "discord",
+		ChannelID: "c1",
+		UserID:    "u1",
+		UserName:  "Alice",
+		Content:   "hello",
+		MessageID: "m1",
+	}
+	evt := NewTypedEvent(SourceConnector, payload)
+
+	if evt.Type != EventIncomingMessage {
+		t.Fatalf("expected type %q, got %q", EventIncomingMessage, evt.Type)
+	}
+	got, ok := GetIncomingMessagePayload(evt)
+	if !ok {
+		t.Fatal("GetIncomingMessagePayload returned false")
+	}
+	if got.Connector != "discord" || got.UserName != "Alice" || got.Content != "hello" {
+		t.Fatalf("unexpected payload: %+v", got)
+	}
+}
+
+func TestTypedEvent_OutgoingMessage(t *testing.T) {
+	payload := OutgoingMessagePayload{
+		Connector: "discord",
+		ChannelID: "c1",
+		Content:   "response",
+		ReplyToID: "m1",
+	}
+	evt := NewTypedEvent(SourceConnector, payload)
+
+	if evt.Type != EventOutgoingMessage {
+		t.Fatalf("expected type %q, got %q", EventOutgoingMessage, evt.Type)
+	}
+	got, ok := GetOutgoingMessagePayload(evt)
+	if !ok {
+		t.Fatal("GetOutgoingMessagePayload returned false")
+	}
+	if got.Content != "response" || got.ReplyToID != "m1" {
+		t.Fatalf("unexpected payload: %+v", got)
+	}
+}
+
+func TestTypedEvent_PairingRequest(t *testing.T) {
+	payload := PairingRequestPayload{
+		Platform:  "discord",
+		ServerID:  "g1",
+		ChannelID: "c1",
+		UserID:    "u1",
+		UserName:  "Bob",
+		Content:   "hello",
+	}
+	evt := NewTypedEvent(SourceConnector, payload)
+
+	if evt.Type != EventPairingRequest {
+		t.Fatalf("expected type %q, got %q", EventPairingRequest, evt.Type)
+	}
+	got, ok := GetPairingRequestPayload(evt)
+	if !ok {
+		t.Fatal("GetPairingRequestPayload returned false")
+	}
+	if got.Platform != "discord" || got.UserName != "Bob" {
+		t.Fatalf("unexpected payload: %+v", got)
+	}
+}
+
+func TestTypedEvent_PairingApproved(t *testing.T) {
+	payload := PairingApprovedPayload{
+		Platform:   "discord",
+		ServerID:   "g1",
+		ChannelID:  "*",
+		UserID:     "u1",
+		PolicyName: "support",
+	}
+	evt := NewTypedEvent(SourceConnector, payload)
+
+	if evt.Type != EventPairingApproved {
+		t.Fatalf("expected type %q, got %q", EventPairingApproved, evt.Type)
+	}
+	got, ok := GetPairingApprovedPayload(evt)
+	if !ok {
+		t.Fatal("GetPairingApprovedPayload returned false")
+	}
+	if got.PolicyName != "support" || got.UserID != "u1" {
+		t.Fatalf("unexpected payload: %+v", got)
+	}
+}
+
 func TestExtractPayload_WrongType(t *testing.T) {
 	// Create a UserMessage event, try to extract as ToolCallPayload
 	payload := UserMessagePayload{Content: "hello"}

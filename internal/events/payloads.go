@@ -444,3 +444,68 @@ func (TaskVerificationPayload) EventType() EventType { return EventTaskVerificat
 func GetTaskVerificationPayload(e Event) (TaskVerificationPayload, bool) {
 	return ExtractPayload[TaskVerificationPayload](e)
 }
+
+// =============================================================================
+// CONNECTOR EVENTS
+// =============================================================================
+
+// IncomingMessagePayload is published when a connector receives a message.
+type IncomingMessagePayload struct {
+	Connector string `json:"connector"`
+	ChannelID string `json:"channel_id"`
+	UserID    string `json:"user_id"`
+	UserName  string `json:"user_name"`
+	Content   string `json:"content"`
+	MessageID string `json:"message_id"`
+}
+
+func (IncomingMessagePayload) EventType() EventType { return EventIncomingMessage }
+
+func GetIncomingMessagePayload(e Event) (IncomingMessagePayload, bool) {
+	return ExtractPayload[IncomingMessagePayload](e)
+}
+
+// OutgoingMessagePayload is published when a connector sends a response.
+type OutgoingMessagePayload struct {
+	Connector string `json:"connector"`
+	ChannelID string `json:"channel_id"`
+	Content   string `json:"content"`
+	ReplyToID string `json:"reply_to_id,omitempty"`
+}
+
+func (OutgoingMessagePayload) EventType() EventType { return EventOutgoingMessage }
+
+func GetOutgoingMessagePayload(e Event) (OutgoingMessagePayload, bool) {
+	return ExtractPayload[OutgoingMessagePayload](e)
+}
+
+// PairingRequestPayload is published when an unknown user tries to interact.
+type PairingRequestPayload struct {
+	Platform  string `json:"platform"`
+	ServerID  string `json:"server_id"`
+	ChannelID string `json:"channel_id"`
+	UserID    string `json:"user_id"`
+	UserName  string `json:"user_name"`
+	Content   string `json:"content"`
+}
+
+func (PairingRequestPayload) EventType() EventType { return EventPairingRequest }
+
+func GetPairingRequestPayload(e Event) (PairingRequestPayload, bool) {
+	return ExtractPayload[PairingRequestPayload](e)
+}
+
+// PairingApprovedPayload is published when an admin approves a pairing.
+type PairingApprovedPayload struct {
+	Platform   string `json:"platform"`
+	ServerID   string `json:"server_id"`
+	ChannelID  string `json:"channel_id"`
+	UserID     string `json:"user_id"`
+	PolicyName string `json:"policy_name"`
+}
+
+func (PairingApprovedPayload) EventType() EventType { return EventPairingApproved }
+
+func GetPairingApprovedPayload(e Event) (PairingApprovedPayload, bool) {
+	return ExtractPayload[PairingApprovedPayload](e)
+}

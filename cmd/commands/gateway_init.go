@@ -20,18 +20,22 @@ import (
 	"github.com/dohr-michael/ozzie/internal/agent"
 	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/connectors"
+	"github.com/dohr-michael/ozzie/clients/discord"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
 	"github.com/dohr-michael/ozzie/internal/layeredctx"
 	"github.com/dohr-michael/ozzie/internal/membridge"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/skills"
 	"github.com/dohr-michael/ozzie/internal/storage"
 	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/pkg/connector"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 	memtools "github.com/dohr-michael/ozzie/pkg/memory/tools"
 )
@@ -260,6 +264,28 @@ func (g *gateway) initStores() error {
 	slog.Info("default model tier", "tier", g.defaultTier)
 
 	return nil
+}
+
+// initPolicy creates the policy resolver and pairing store.
+func (g *gateway) initPolicy() {
+	// Convert config overrides to policy.Override
+	overrides := make(map[string]policy.Override, len(g.cfg.Policies.Overrides))
+	for name, ov := range g.cfg.Policies.Overrides {
+		overrides[name] = policy.Override{
+			AllowedSkills: ov.AllowedSkills,
+			AllowedTools:  ov.AllowedTools,
+			DeniedTools:   ov.DeniedTools,
+			ApprovalMode:  ov.ApprovalMode,
+			ClientFacing:  ov.ClientFacing,
+			MaxConcurrent: ov.MaxConcurrent,
+		}
+	}
+	g.policyResolver = policy.NewPolicyResolver(overrides)
+
+	pairingsDir := filepath.Join(config.OzziePath(), "pairings")
+	g.pairingStore = policy.NewPairingStore(pairingsDir)
+
+	slog.Info("policy system initialized", "policies", g.policyResolver.Names())
 }
 
 // initMemory opens the SQLite memory store, optionally creates the vector
@@ -507,6 +533,12 @@ func (g *gateway) registerTools() {
 		slog.Warn("failed to register trigger_schedule tool", "error", err)
 	}
 
+	// Register approve_pairing tool (needs policy resolver + pairing store)
+	approvePairingTool := plugins.NewApprovePairingTool(g.pairingStore, g.policyResolver, g.bus)
+	if err := g.toolRegistry.RegisterNative("approve_pairing", approvePairingTool, plugins.ApprovePairingManifest()); err != nil {
+		slog.Warn("failed to register approve_pairing tool", "error", err)
+	}
+
 	// ToolSet: all native tools are always active (core).
 	// Only MCP tools require on-demand activation via activate_tools.
 	// Gemini Flash doesn't handle the activate-then-use pattern reliably.
@@ -668,4 +700,56 @@ func (g *gateway) initAgent() error {
 	g.closers = append(g.closers, func() { g.eventRunner.Close() })
 
 	return nil
+}
+
+// initConnectors creates and starts external platform connectors (Discord, etc.).
+// Must be called after initAgent (EventRunner must be ready).
+func (g *gateway) initConnectors() {
+	var conns []connector.Connector
+
+	// Discord connector
+	if dc := g.cfg.Connectors.Discord; dc != nil && dc.Token != "" {
+		discordConn, err := discord.New(discord.Config{
+			Token:        dc.Token,
+			AdminChannel: dc.AdminChannel,
+		})
+		if err != nil {
+			slog.Error("failed to create discord connector", "error", err)
+		} else {
+			conns = append(conns, discordConn)
+
+			// Pairing notifier → admin channel
+			pn := connectors.NewPairingNotifier(g.bus, discordConn)
+			g.closers = append(g.closers, func() { pn.Stop() })
+		}
+	}
+
+	if len(conns) == 0 {
+		return
+	}
+
+	// Session map
+	sessionMapDir := filepath.Join(config.OzziePath(), "connectors")
+	sessionMap := connectors.NewSessionMap(sessionMapDir)
+
+	// Manager
+	g.connectorManager = connectors.NewManager(connectors.ManagerConfig{
+		Bus:          g.bus,
+		SessionStore: g.sessionStore,
+		PairingStore: g.pairingStore,
+		SessionMap:   sessionMap,
+		Connectors:   conns,
+	})
+	g.connectorManager.Start()
+	g.closers = append(g.closers, func() { g.connectorManager.Stop() })
+
+	// Progress reactor — emoji reactions on connector messages
+	pr := connectors.NewProgressReactor(connectors.ProgressReactorConfig{
+		Bus:        g.bus,
+		Connectors: g.connectorManager.ConnectorsByName(),
+		SessionMap: sessionMap,
+	})
+	g.closers = append(g.closers, func() { pr.Stop() })
+
+	slog.Info("connectors started", "count", len(conns))
 }

@@ -62,6 +62,10 @@ const (
 	// Tool approval
 	EventToolApproved EventType = "tool.approved"
 
+	// Pairing
+	EventPairingRequest  EventType = "pairing.request"
+	EventPairingApproved EventType = "pairing.approved"
+
 	// Tasks
 	EventTaskCreated      EventType = "task.created"
 	EventTaskStarted      EventType = "task.started"
@@ -84,6 +88,7 @@ const (
 	SourceTask      EventSource = "task"
 	SourceScheduler EventSource = "scheduler"
 	SourceMCP       EventSource = "mcp"
+	SourceConnector EventSource = "connector"
 )
 
 // Event represents an event in the system.

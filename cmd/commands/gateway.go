@@ -19,11 +19,13 @@ import (
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/auth"
 	"github.com/dohr-michael/ozzie/internal/config"
+	"github.com/dohr-michael/ozzie/internal/connectors"
 	"github.com/dohr-michael/ozzie/internal/events"
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
 	"github.com/dohr-michael/ozzie/internal/layeredctx"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
@@ -95,6 +97,10 @@ type gateway struct {
 	pipeline        *memory.Pipeline
 	embFingerprint  string
 
+	// Policy
+	policyResolver *policy.PolicyResolver
+	pairingStore   *policy.PairingStore
+
 	// Runtime
 	pool  *actors.ActorPool
 	sched *scheduler.Scheduler
@@ -105,6 +111,9 @@ type gateway struct {
 	eventRunner *agent.EventRunner
 	taskMws     []adk.AgentMiddleware
 	layered     *layeredctx.Manager
+
+	// Connectors
+	connectorManager *connectors.Manager
 
 	closers []func()
 }
@@ -136,6 +145,7 @@ func runGateway(parentCtx context.Context, cmd *cli.Command) error {
 	if err := g.initStores(); err != nil {
 		return err
 	}
+	g.initPolicy()
 	if err := g.initMemory(); err != nil {
 		return err
 	}
@@ -146,6 +156,7 @@ func runGateway(parentCtx context.Context, cmd *cli.Command) error {
 	if err := g.initAgent(); err != nil {
 		return err
 	}
+	g.initConnectors()
 	return g.serve()
 }
 

@@ -70,3 +70,18 @@ func TestTaskEnvEmptyMapNoOp(t *testing.T) {
 		t.Error("expected same context when env is empty")
 	}
 }
+
+func TestPolicyNameRoundTrip(t *testing.T) {
+	ctx := ContextWithPolicyName(context.Background(), "admin")
+	got := PolicyNameFromContext(ctx)
+	if got != "admin" {
+		t.Errorf("got %q, want %q", got, "admin")
+	}
+}
+
+func TestPolicyNameFromEmptyContext(t *testing.T) {
+	got := PolicyNameFromContext(context.Background())
+	if got != "" {
+		t.Errorf("got %q, want empty string", got)
+	}
+}

@@ -160,6 +160,19 @@ func mergeSlice(a, b []string) []string {
 	return result
 }
 
+type policyNameKey struct{}
+
+// ContextWithPolicyName returns a context carrying the active policy name.
+func ContextWithPolicyName(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, policyNameKey{}, name)
+}
+
+// PolicyNameFromContext extracts the policy name from the context, or "" if absent.
+func PolicyNameFromContext(ctx context.Context) string {
+	name, _ := ctx.Value(policyNameKey{}).(string)
+	return name
+}
+
 type taskIDKey struct{}
 
 // ContextWithTaskID returns a context carrying the current task ID.

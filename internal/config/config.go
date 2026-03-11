@@ -20,6 +20,35 @@ type Config struct {
 	Web            WebConfig            `json:"web"`
 	MCP            MCPConfig            `json:"mcp"`
 	LayeredContext LayeredContextConfig `json:"layered_context"`
+	Policies       PoliciesConfig       `json:"policies"`
+	Connectors     ConnectorsConfig     `json:"connectors"`
+}
+
+// ConnectorsConfig configures external platform connectors.
+type ConnectorsConfig struct {
+	Discord *DiscordConnectorConfig `json:"discord,omitempty"`
+}
+
+// DiscordConnectorConfig configures the Discord connector.
+type DiscordConnectorConfig struct {
+	Token        string `json:"token"`                   // bot token (supports ${{ .Env.DISCORD_TOKEN }})
+	AdminChannel string `json:"admin_channel,omitempty"` // channel ID for admin notifications
+}
+
+// PoliciesConfig configures policy overrides for the predefined policies.
+type PoliciesConfig struct {
+	Overrides map[string]PolicyOverride `json:"overrides,omitempty"`
+}
+
+// PolicyOverride allows customizing a predefined policy via config.
+// Zero values are ignored (the default is kept).
+type PolicyOverride struct {
+	AllowedSkills []string `json:"allowed_skills,omitempty"`
+	AllowedTools  []string `json:"allowed_tools,omitempty"`
+	DeniedTools   []string `json:"denied_tools,omitempty"`
+	ApprovalMode  string   `json:"approval_mode,omitempty"`
+	ClientFacing  *bool    `json:"client_facing,omitempty"`
+	MaxConcurrent int      `json:"max_concurrent,omitempty"`
 }
 
 // MCPConfig configures external MCP server connections.
