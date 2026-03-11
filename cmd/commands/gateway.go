@@ -22,7 +22,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/connectors"
 	"github.com/dohr-michael/ozzie/internal/events"
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
-	"github.com/dohr-michael/ozzie/internal/layeredctx"
+	layeredctx "github.com/dohr-michael/ozzie/internal/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/policy"

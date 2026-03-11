@@ -10,28 +10,32 @@ Ozzie follows the **gateway pattern**: one persistent process (`ozzie gateway`) 
 ## Package layout
 
 ```
-cmd/ozzie/          → entry point
-cmd/commands/       → CLI commands (urfave/cli v3)
-internal/config/    → JSONC config loader
-internal/events/    → event bus (in-memory channels, typed payloads)
-internal/models/    → LLM model registry (Anthropic, OpenAI, Gemini, Mistral, Ollama via Eino)
-internal/gateway/   → HTTP server (chi) + WebSocket hub
-internal/agent/     → Eino ADK agent + EventRunner + AgentFactory + ToolSet
-internal/callbacks/ → Eino callbacks → event bus bridge
-internal/plugins/   → native tools, WASM plugins, MCP client, dangerous wrapper, sandbox
-internal/tasks/     → async task runner + pool
-internal/actors/    → capacity-aware actor pool
-pkg/names/          → friendly ID generation (SF-themed, importable)
-pkg/memory/         → semantic memory library (hybrid keyword + vector, importable)
-pkg/memory/tools/   → memory tools (store, query, forget — Eino InvokableTool)
-internal/membridge/ → memory wiring (embedder factory, cross-task extractor)
-internal/skills/    → DAG workflow engine
-internal/scheduler/ → cron + event-based scheduler
-internal/sessions/  → session store (approved tools, metadata)
-internal/layeredctx/→ layered context compression (L0/L1/L2)
-internal/mcp/       → MCP client (external server connections)
-clients/ws/         → WS client library
-clients/tui/        → TUI client (Bubbletea)
+cmd/ozzie/                    → entry point
+cmd/commands/                 → CLI commands (urfave/cli v3)
+internal/config/              → JSONC config loader
+internal/events/              → event bus + event logger
+internal/models/              → LLM model registry (Anthropic, OpenAI, Gemini, Mistral, Ollama via Eino)
+internal/gateway/             → HTTP server (chi) + WebSocket hub
+internal/agent/               → Eino ADK agent + EventRunner + AgentFactory + ToolSet + callbacks bridge
+internal/prompt/              → prompt template registry, auditable composer, section builders
+internal/plugins/             → native tools, WASM plugins, MCP client, dangerous wrapper, sandbox
+internal/tasks/               → async task runner + pool
+internal/actors/              → capacity-aware actor pool
+internal/connectors/          → connector wiring + manager
+internal/connectors/discord/  → Discord connector implementation
+internal/memory/bridge/       → memory wiring (embedder factory, cross-task extractor)
+internal/memory/layered/      → L0/L1/L2 context compression
+internal/sessions/            → session store + cost tracker
+internal/skills/              → DAG workflow engine
+internal/scheduler/           → cron + event-based scheduler
+internal/storage/dirstore/    → generic directory-based persistence
+internal/mcp/                 → MCP client (external server connections)
+pkg/names/                    → friendly ID generation (SF-themed, importable)
+pkg/memory/                   → semantic memory library (hybrid keyword + vector, importable)
+pkg/memory/tools/             → memory tools (store, query, forget — Eino InvokableTool)
+pkg/connector/                → connector interfaces (importable)
+clients/ws/                   → WS client library
+clients/tui/                  → TUI client (Bubbletea)
 ```
 
 ## OZZIE_PATH

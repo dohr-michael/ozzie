@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 
+	"github.com/dohr-michael/ozzie/internal/prompt"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -192,7 +193,8 @@ func (c *Compressor) findSplitIndex(messages []*schema.Message, preserveBudget i
 func (c *Compressor) buildSummarizePrompt(session *sessions.Session, oldMessages []*schema.Message) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are summarizing a conversation between a user and an AI assistant.\n\n")
+	sb.WriteString(prompt.SummarizeCompressorInstructions)
+	sb.WriteString("\n\n")
 
 	// Cumulative: include previous summary
 	if session != nil && session.Summary != "" {

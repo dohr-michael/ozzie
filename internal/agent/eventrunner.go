@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/layeredctx"
+	layeredctx "github.com/dohr-michael/ozzie/internal/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 

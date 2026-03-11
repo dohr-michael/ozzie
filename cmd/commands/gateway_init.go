@@ -18,22 +18,21 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
-	ozzieCallbacks "github.com/dohr-michael/ozzie/internal/callbacks"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/connectors"
-	"github.com/dohr-michael/ozzie/clients/discord"
+	"github.com/dohr-michael/ozzie/internal/connectors/discord"
 	"github.com/dohr-michael/ozzie/internal/events"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
-	"github.com/dohr-michael/ozzie/internal/layeredctx"
-	"github.com/dohr-michael/ozzie/internal/membridge"
+	membridge "github.com/dohr-michael/ozzie/internal/memory/bridge"
+	layeredctx "github.com/dohr-michael/ozzie/internal/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/policy"
+	"github.com/dohr-michael/ozzie/internal/prompt"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/skills"
-	"github.com/dohr-michael/ozzie/internal/storage"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 	"github.com/dohr-michael/ozzie/pkg/connector"
 	"github.com/dohr-michael/ozzie/pkg/memory"
@@ -117,12 +116,12 @@ func (g *gateway) initInfra() error {
 	g.closers = append(g.closers, func() { g.bus.Close() })
 
 	// Register Eino callbacks → event bus bridge
-	cbHandler := ozzieCallbacks.NewEventBusHandler(g.bus, events.SourceAgent)
+	cbHandler := agent.NewEventBusHandler(g.bus, events.SourceAgent)
 	einoCallbacks.AppendGlobalHandlers(cbHandler)
 
 	// Event persistence
 	logsDir := filepath.Join(config.OzziePath(), "logs")
-	eventLogger := storage.NewEventLogger(logsDir, g.bus)
+	eventLogger := events.NewEventLogger(logsDir, g.bus)
 	g.closers = append(g.closers, func() { eventLogger.Close() })
 
 	// Validate provider capabilities (warning only — allows future extensibility)
@@ -608,8 +607,8 @@ func (g *gateway) initAgent() error {
 	}
 
 	// Build runtime instruction (system tools + environment awareness)
-	systemTools := agent.LoadSystemTools(g.cfg.Runtime.SystemToolsFile)
-	runtimeInstruction := agent.BuildRuntimeInstruction(g.cfg.Runtime.Environment, systemTools)
+	systemTools := prompt.LoadSystemTools(g.cfg.Runtime.SystemToolsFile)
+	runtimeInstruction := prompt.RuntimeSection(g.cfg.Runtime.Environment, systemTools)
 
 	// SubAgent middleware — injects SubAgentInstructions + runtime (tool reference + workflow)
 	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction, g.defaultTier)
@@ -621,12 +620,12 @@ func (g *gateway) initAgent() error {
 	allToolDescs := g.toolRegistry.AllToolDescriptions()
 
 	// Build actor descriptions for the planner prompt (non-default providers only)
-	var actorDescs []agent.ActorDescription
+	var actorDescs []prompt.ActorInfo
 	for name, prov := range g.cfg.Models.Providers {
 		if name == g.cfg.Models.Default {
 			continue // skip the default provider — it's the planner itself
 		}
-		actorDescs = append(actorDescs, agent.ActorDescription{
+		actorDescs = append(actorDescs, prompt.ActorInfo{
 			Name:         name,
 			Tags:         prov.Tags,
 			Capabilities: prov.Capabilities,
@@ -656,7 +655,7 @@ func (g *gateway) initAgent() error {
 
 	// Cost tracker — accumulates token usage per session
 	sessionsDir := filepath.Join(config.OzziePath(), "sessions")
-	costTracker := storage.NewCostTracker(g.bus, g.sessionStore)
+	costTracker := sessions.NewCostTracker(g.bus, g.sessionStore)
 	g.closers = append(g.closers, func() { costTracker.Close() })
 
 	// Layered context manager (optional)

@@ -1,23 +1,27 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/dohr-michael/ozzie/internal/prompt"
+)
 
 func TestPersonaForTier(t *testing.T) {
 	t.Run("large returns full", func(t *testing.T) {
-		got := PersonaForTier(DefaultPersona, TierLarge)
-		if got != DefaultPersona {
+		got := PersonaForTier(prompt.DefaultPersona, TierLarge)
+		if got != prompt.DefaultPersona {
 			t.Errorf("expected DefaultPersona for TierLarge")
 		}
 	})
 	t.Run("medium returns full", func(t *testing.T) {
-		got := PersonaForTier(DefaultPersona, TierMedium)
-		if got != DefaultPersona {
+		got := PersonaForTier(prompt.DefaultPersona, TierMedium)
+		if got != prompt.DefaultPersona {
 			t.Errorf("expected DefaultPersona for TierMedium")
 		}
 	})
 	t.Run("small returns compact", func(t *testing.T) {
-		got := PersonaForTier(DefaultPersona, TierSmall)
-		if got != DefaultPersonaCompact {
+		got := PersonaForTier(prompt.DefaultPersona, TierSmall)
+		if got != prompt.DefaultPersonaCompact {
 			t.Errorf("expected DefaultPersonaCompact for TierSmall")
 		}
 	})
@@ -31,20 +35,19 @@ func TestPersonaForTier(t *testing.T) {
 }
 
 func TestAgentInstructionsForTier(t *testing.T) {
-	if AgentInstructionsForTier(TierLarge) != AgentInstructions {
+	if AgentInstructionsForTier(TierLarge) != prompt.AgentInstructions {
 		t.Error("expected full instructions for TierLarge")
 	}
-	if AgentInstructionsForTier(TierSmall) != AgentInstructionsCompact {
+	if AgentInstructionsForTier(TierSmall) != prompt.AgentInstructionsCompact {
 		t.Error("expected compact instructions for TierSmall")
 	}
 }
 
 func TestSubAgentInstructionsForTier(t *testing.T) {
-	if SubAgentInstructionsForTier(TierLarge) != SubAgentInstructions {
+	if SubAgentInstructionsForTier(TierLarge) != prompt.SubAgentInstructions {
 		t.Error("expected full instructions for TierLarge")
 	}
-	if SubAgentInstructionsForTier(TierSmall) != SubAgentInstructionsCompact {
+	if SubAgentInstructionsForTier(TierSmall) != prompt.SubAgentInstructionsCompact {
 		t.Error("expected compact instructions for TierSmall")
 	}
 }
-
