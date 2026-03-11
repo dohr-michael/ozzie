@@ -29,6 +29,15 @@ func NewManager(store *Store, cfg Config, llm LLMSummarizerFunc) *Manager {
 	}
 }
 
+// ApplyResult holds stats about a layered context compression pass.
+// Nil when no compression was needed.
+type ApplyResult struct {
+	Escalation   string  // deepest layer reached (L0, L1, L2)
+	Nodes        int     // number of archive nodes selected
+	Tokens       int     // total tokens used by selected context
+	SavingsRatio float64 // 1 - (used / budget)
+}
+
 // Apply runs the full layered context pipeline and returns the compressed
 // message list ready for the LLM.
 //
@@ -37,16 +46,17 @@ func NewManager(store *Store, cfg Config, llm LLMSummarizerFunc) *Manager {
 //   - messages: current schema messages (as built from history)
 //   - history: the full raw session message history
 //
-// Returns the modified message list with layered context injected.
+// Returns the modified message list with layered context injected,
+// and an ApplyResult with compression stats (nil if no compression).
 func (m *Manager) Apply(
 	ctx context.Context,
 	sessionID string,
 	messages []*schema.Message,
 	history []sessions.Message,
-) ([]*schema.Message, error) {
+) ([]*schema.Message, *ApplyResult, error) {
 	// Not enough messages to warrant compression
 	if len(history) <= m.cfg.MaxRecentMessages {
-		return messages, nil
+		return messages, nil, nil
 	}
 
 	// Split history: archived + recent
@@ -57,7 +67,7 @@ func (m *Manager) Apply(
 	// Build or update the index
 	index, err := m.indexer.BuildOrUpdate(ctx, sessionID, archived)
 	if err != nil {
-		return nil, fmt.Errorf("build index: %w", err)
+		return nil, nil, fmt.Errorf("build index: %w", err)
 	}
 
 	// Extract query from the last user message
@@ -66,7 +76,7 @@ func (m *Manager) Apply(
 	// Retrieve relevant context
 	result, err := m.retriever.Retrieve(sessionID, index, query)
 	if err != nil {
-		return nil, fmt.Errorf("retrieve: %w", err)
+		return nil, nil, fmt.Errorf("retrieve: %w", err)
 	}
 
 	// Build the layered context message
@@ -89,7 +99,15 @@ func (m *Manager) Apply(
 	}
 	out = append(out, recentMsgs...)
 
-	return out, nil
+	// Build stats
+	ar := &ApplyResult{
+		Escalation:   string(result.Decision.ReachedLayer),
+		Nodes:        len(result.Selections),
+		Tokens:       result.TokenUsage.Used,
+		SavingsRatio: result.TokenUsage.SavingsRatio,
+	}
+
+	return out, ar, nil
 }
 
 // lastUserMessageContent extracts the content of the last user message.

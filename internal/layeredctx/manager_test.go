@@ -28,9 +28,12 @@ func TestManagerApplyShortHistory(t *testing.T) {
 		{Role: "assistant", Content: "hi there", Ts: time.Now()},
 	}
 
-	result, err := mgr.Apply(context.Background(), "sess_short", msgs, history)
+	result, ar, err := mgr.Apply(context.Background(), "sess_short", msgs, history)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	if ar != nil {
+		t.Errorf("expected nil ApplyResult for short history, got %+v", ar)
 	}
 
 	// Short history — should return messages unchanged
@@ -73,9 +76,15 @@ func TestManagerApplyLongHistory(t *testing.T) {
 		msgs[i] = h.ToSchemaMessage()
 	}
 
-	result, err := mgr.Apply(context.Background(), sessionID, msgs, history)
+	result, ar, err := mgr.Apply(context.Background(), sessionID, msgs, history)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
+	}
+	if ar == nil {
+		t.Fatal("expected non-nil ApplyResult for long history")
+	}
+	if ar.Nodes == 0 {
+		t.Error("expected Nodes > 0 in ApplyResult")
 	}
 
 	// Should have fewer messages than original (archived + recent)
@@ -129,7 +138,7 @@ func TestManagerApplyCreatesIndex(t *testing.T) {
 		msgs[i] = h.ToSchemaMessage()
 	}
 
-	_, err := mgr.Apply(context.Background(), sessionID, msgs, history)
+	_, _, err := mgr.Apply(context.Background(), sessionID, msgs, history)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

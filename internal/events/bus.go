@@ -31,8 +31,7 @@ const (
 	EventAssistantMessage EventType = "assistant.message"
 
 	// Agent → Client: Tools
-	EventToolCall             EventType = "tool.call"
-	EventToolCallConfirmation EventType = "tool.call.confirmation"
+	EventToolCall EventType = "tool.call"
 
 	// Agent ↔ Client: Prompts
 	EventPromptRequest  EventType = "prompt.request"

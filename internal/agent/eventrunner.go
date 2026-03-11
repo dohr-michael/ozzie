@@ -52,8 +52,8 @@ type EventRunner struct {
 	processTimeout  time.Duration
 
 	mu           sync.Mutex
-	running      map[string]bool           // per-session lock
-	streamSeqIdx map[string]*atomic.Int32  // per-session stream sequence counter
+	running      map[string]bool          // per-session lock
+	streamSeqIdx map[string]*atomic.Int32 // per-session stream sequence counter
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -67,12 +67,12 @@ type EventRunnerConfig struct {
 	Registry        ToolLookup
 	EventBus        events.EventBus
 	Store           sessions.Store
-	Pool            CapacityPool     // actor pool for capacity management (optional)
-	DefaultProvider string           // default provider name for AcquireInteractive
-	ContextWindow   int              // total context window in tokens (for compression)
-	Tier            ModelTier        // model tier for adaptive compression
+	Pool            CapacityPool        // actor pool for capacity management (optional)
+	DefaultProvider string              // default provider name for AcquireInteractive
+	ContextWindow   int                 // total context window in tokens (for compression)
+	Tier            ModelTier           // model tier for adaptive compression
 	Layered         *layeredctx.Manager // layered context manager (optional)
-	ProcessTimeout  time.Duration    // max time for a single processMessage call (default 5m)
+	ProcessTimeout  time.Duration       // max time for a single processMessage call (default 5m)
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -202,9 +202,17 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 	// Context compression — layered context takes priority, compressor is fallback.
 	compressed := false
 	if er.layered != nil {
-		if lmsgs, layeredErr := er.layered.Apply(ctx, sessionID, messages, history); layeredErr == nil {
+		if lmsgs, ar, layeredErr := er.layered.Apply(ctx, sessionID, messages, history); layeredErr == nil {
 			messages = lmsgs
 			compressed = true
+			if ar != nil {
+				er.bus.Publish(events.NewTypedEventWithSession(events.SourceAgent, events.ContextLayeredPayload{
+					Escalation:   ar.Escalation,
+					Nodes:        ar.Nodes,
+					Tokens:       ar.Tokens,
+					SavingsRatio: ar.SavingsRatio,
+				}, sessionID))
+			}
 		} else {
 			slog.Warn("layered context failed, falling back to compressor", "error", layeredErr)
 		}
