@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	ws "github.com/dohr-michael/ozzie/internal/gateway/ws"
+	ws "github.com/dohr-michael/ozzie/internal/infra/gateway/ws"
 )
 
 // Project converts a gateway WS Frame into a typed tea.Msg.

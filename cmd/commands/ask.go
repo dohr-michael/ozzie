@@ -12,7 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	wsprotocol "github.com/dohr-michael/ozzie/internal/gateway/ws"
+	wsprotocol "github.com/dohr-michael/ozzie/internal/infra/gateway/ws"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
 
 	"context"

@@ -10,7 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	wsprotocol "github.com/dohr-michael/ozzie/internal/gateway/ws"
+	wsprotocol "github.com/dohr-michael/ozzie/internal/infra/gateway/ws"
 )
 
 // DialOption configures the WS dial.
