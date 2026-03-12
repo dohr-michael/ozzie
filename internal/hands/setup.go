@@ -7,7 +7,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/core/brain"
-	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/pkg/editor"

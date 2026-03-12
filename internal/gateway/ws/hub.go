@@ -10,7 +10,7 @@ import (
 	"filippo.io/age"
 	"github.com/coder/websocket"
 
-	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"

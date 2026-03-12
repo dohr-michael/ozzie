@@ -17,7 +17,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	layeredctx "github.com/dohr-michael/ozzie/internal/brain/memory/layered"
+	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 

@@ -15,7 +15,7 @@ import (
 	"github.com/cloudwego/eino/adk/filesystem"
 	"github.com/google/uuid"
 
-	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/pkg/editor"
 )

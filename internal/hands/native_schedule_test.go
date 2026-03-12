@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dohr-michael/ozzie/internal/brain/actors"
+	"github.com/dohr-michael/ozzie/internal/core/actors"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/tasks"
