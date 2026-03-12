@@ -14,7 +14,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/dohr-michael/ozzie/internal/auth"
+	"github.com/dohr-michael/ozzie/internal/infra/auth"
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
