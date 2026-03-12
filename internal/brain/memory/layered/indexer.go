@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/brain"
-	"github.com/dohr-michael/ozzie/internal/brain/prompt"
+	"github.com/dohr-michael/ozzie/internal/core/prompt"
 )
 
 // Summarizer produces a summary of text within a target token budget.

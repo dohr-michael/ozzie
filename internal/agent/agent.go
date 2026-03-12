@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/brain/prompt"
+	"github.com/dohr-michael/ozzie/internal/core/prompt"
 )
 
 // LoadPersona reads SOUL.md from OZZIE_PATH if it exists,

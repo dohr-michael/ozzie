@@ -2,7 +2,7 @@ package agent
 
 import (
 	"github.com/dohr-michael/ozzie/internal/brain"
-	"github.com/dohr-michael/ozzie/internal/brain/prompt"
+	"github.com/dohr-michael/ozzie/internal/core/prompt"
 )
 
 // PersonaForTier returns the full persona for non-small tiers, or a compact

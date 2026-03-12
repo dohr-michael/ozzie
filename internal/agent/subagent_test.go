@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/dohr-michael/ozzie/internal/brain"
-	"github.com/dohr-michael/ozzie/internal/brain/prompt"
+	"github.com/dohr-michael/ozzie/internal/core/prompt"
 )
 
 func TestSubAgentInstructions_ContainsKeySections(t *testing.T) {
