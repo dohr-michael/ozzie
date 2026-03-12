@@ -8,8 +8,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
-	"github.com/dohr-michael/ozzie/internal/ui/components"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/components"
 )
 
 // Phase constants for embedding configuration.

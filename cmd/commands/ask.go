@@ -13,7 +13,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	wsprotocol "github.com/dohr-michael/ozzie/internal/infra/gateway/ws"
-	"github.com/dohr-michael/ozzie/internal/ui/components"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/components"
 
 	"context"
 

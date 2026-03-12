@@ -9,7 +9,7 @@ import (
 
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/ui/components"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/components"
 )
 
 // AppOption configures optional App behavior (functional options).

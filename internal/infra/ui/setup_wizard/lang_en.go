@@ -1,6 +1,6 @@
 package setup_wizard
 
-import "github.com/dohr-michael/ozzie/internal/i18n"
+import "github.com/dohr-michael/ozzie/internal/infra/i18n"
 
 func init() {
 	i18n.Register("en", map[string]string{

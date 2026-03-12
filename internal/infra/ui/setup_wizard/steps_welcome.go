@@ -8,8 +8,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/i18n"
-	"github.com/dohr-michael/ozzie/internal/ui/components"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/components"
 )
 
 const (

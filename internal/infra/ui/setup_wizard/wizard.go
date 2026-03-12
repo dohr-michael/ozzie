@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
-	"github.com/dohr-michael/ozzie/internal/ui/components"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/components"
 )
 
 // Wizard is the top-level Bubbletea model that orchestrates wizard steps.

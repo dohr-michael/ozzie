@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 

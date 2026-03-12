@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 )
 
 // ToolCallStatus represents the state of a tool call.

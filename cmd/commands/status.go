@@ -9,7 +9,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/heartbeat"
+	"github.com/dohr-michael/ozzie/internal/infra/heartbeat"
 )
 
 // NewStatusCommand returns the status subcommand.

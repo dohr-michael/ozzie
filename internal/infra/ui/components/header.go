@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 )
 
 // Header displays LLM context and token usage as a compact footer.

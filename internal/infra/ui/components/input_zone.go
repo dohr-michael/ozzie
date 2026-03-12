@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 )
 
 // InputMode represents the current input mode.

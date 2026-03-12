@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/dohr-michael/ozzie/internal/ui/setup_wizard"
+	"github.com/dohr-michael/ozzie/internal/infra/ui/setup_wizard"
 	"github.com/urfave/cli/v3"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
-	_ "github.com/dohr-michael/ozzie/internal/ui/components" // register component translations
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
+	_ "github.com/dohr-michael/ozzie/internal/infra/ui/components" // register component translations
 )
 
 // NewWakeCommand returns the onboarding subcommand.

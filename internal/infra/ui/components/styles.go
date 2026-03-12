@@ -4,7 +4,7 @@ package components
 import (
 	"charm.land/lipgloss/v2"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 )
 
 // =============================================================================

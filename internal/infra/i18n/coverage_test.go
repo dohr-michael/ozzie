@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dohr-michael/ozzie/internal/i18n"
+	"github.com/dohr-michael/ozzie/internal/infra/i18n"
 	// Import component and wizard packages to trigger their init() registrations.
-	_ "github.com/dohr-michael/ozzie/internal/ui/components"
-	_ "github.com/dohr-michael/ozzie/internal/ui/setup_wizard"
+	_ "github.com/dohr-michael/ozzie/internal/infra/ui/components"
+	_ "github.com/dohr-michael/ozzie/internal/infra/ui/setup_wizard"
 )
 
 // TestFRCoverage verifies that every EN key has a corresponding FR translation.

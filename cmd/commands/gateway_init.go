@@ -25,7 +25,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/infra/eyes"
 	"github.com/dohr-michael/ozzie/internal/infra/eyes/discord"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/heartbeat"
+	"github.com/dohr-michael/ozzie/internal/infra/heartbeat"
 	"github.com/dohr-michael/ozzie/internal/infra/membridge"
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
 	"github.com/dohr-michael/ozzie/internal/infra/models"
