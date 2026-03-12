@@ -12,7 +12,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/core/prompt"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 

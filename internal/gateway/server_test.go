@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 )
 
 // waitForEvents polls the bus history until at least n events are present.

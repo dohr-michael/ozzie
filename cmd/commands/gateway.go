@@ -28,7 +28,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 	"github.com/dohr-michael/ozzie/internal/core/skills"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 	"github.com/dohr-michael/ozzie/pkg/memory"

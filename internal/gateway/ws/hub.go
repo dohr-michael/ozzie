@@ -13,7 +13,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 )
 
 // Client represents a connected WebSocket client.

@@ -18,7 +18,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 )
 
 // EinoToolLookup resolves tool subsets from the registry as Eino tools.
