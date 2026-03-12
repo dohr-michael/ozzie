@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/policy"
+	"github.com/dohr-michael/ozzie/internal/core/policy"
 )
 
 // ApprovePairingTool allows the agent to approve a pairing request.

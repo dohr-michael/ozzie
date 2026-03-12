@@ -25,7 +25,7 @@ import (
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
 	"github.com/dohr-michael/ozzie/internal/models"
 	"github.com/dohr-michael/ozzie/internal/hands"
-	"github.com/dohr-michael/ozzie/internal/policy"
+	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/policy"
+	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/pkg/connector"
 )
