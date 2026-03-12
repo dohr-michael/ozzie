@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/storage/dirstore"
+	"github.com/dohr-michael/ozzie/internal/infra/storage/dirstore"
 	"github.com/dohr-michael/ozzie/pkg/names"
 )
 
