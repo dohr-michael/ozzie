@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/llmutil"
+	"github.com/dohr-michael/ozzie/pkg/llmutil"
 )
 
 // LLMSummarizer generates a text summary from a prompt.

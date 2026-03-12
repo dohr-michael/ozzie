@@ -7,10 +7,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/cloudwego/eino/schema"
-
-	"github.com/dohr-michael/ozzie/internal/llmutil"
-	"github.com/dohr-michael/ozzie/internal/models"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/pkg/llmutil"
 )
 
 // VerifyResult holds the outcome of a verification check.
@@ -23,43 +21,24 @@ type VerifyResult struct {
 
 // Verifier checks step outputs against acceptance criteria using an LLM.
 type Verifier struct {
-	models *models.Registry
+	llmCall brain.SummarizeFunc
 }
 
 // NewVerifier creates a new Verifier.
-func NewVerifier(models *models.Registry) *Verifier {
-	return &Verifier{models: models}
+func NewVerifier(llmCall brain.SummarizeFunc) *Verifier {
+	return &Verifier{llmCall: llmCall}
 }
 
 // Verify checks if the step output meets the acceptance criteria.
 func (v *Verifier) Verify(ctx context.Context, criteria *AcceptanceCriteria, stepTitle, output string) (*VerifyResult, error) {
-	modelName := criteria.Model
-	if modelName == "" {
-		// Default to a fast model for verification
-		modelName = v.models.DefaultName()
-	}
-
-	chatModel, err := v.models.Get(ctx, modelName)
-	if err != nil {
-		// Fallback to default
-		chatModel, err = v.models.Default(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("verifier: get model: %w", err)
-		}
-	}
-
 	prompt := buildVerifyPrompt(criteria, stepTitle, output)
 
-	msgs := []*schema.Message{
-		{Role: schema.User, Content: prompt},
-	}
-
-	result, err := chatModel.Generate(ctx, msgs)
+	response, err := v.llmCall(ctx, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("verifier: generate: %w", err)
 	}
 
-	vr := parseVerifyResponse(result.Content)
+	vr := parseVerifyResponse(response)
 	return vr, nil
 }
 

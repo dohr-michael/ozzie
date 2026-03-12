@@ -1,4 +1,4 @@
-package bridge
+package membridge
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/llmutil"
-	"github.com/dohr-michael/ozzie/internal/prompt"
+	"github.com/dohr-michael/ozzie/internal/brain/events"
+	"github.com/dohr-michael/ozzie/pkg/llmutil"
+	"github.com/dohr-michael/ozzie/internal/brain/prompt"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 
