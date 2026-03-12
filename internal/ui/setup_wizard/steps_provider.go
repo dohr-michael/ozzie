@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dohr-michael/ozzie/internal/i18n"
-	"github.com/dohr-michael/ozzie/internal/models"
+	"github.com/dohr-michael/ozzie/internal/infra/models"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
 

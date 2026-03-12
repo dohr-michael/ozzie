@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dohr-michael/ozzie/internal/core/brain"
-	"github.com/dohr-michael/ozzie/internal/models"
+	"github.com/dohr-michael/ozzie/internal/infra/models"
 )
 
 // EinoRunnerFactory implements brain.RunnerFactory using the Eino ADK.

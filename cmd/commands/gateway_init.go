@@ -28,7 +28,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
 	"github.com/dohr-michael/ozzie/internal/membridge"
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
-	"github.com/dohr-michael/ozzie/internal/models"
+	"github.com/dohr-michael/ozzie/internal/infra/models"
 	"github.com/dohr-michael/ozzie/internal/hands"
 	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/core/prompt"
