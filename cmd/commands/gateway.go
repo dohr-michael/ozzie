@@ -19,7 +19,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/infra/auth"
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/eyes"
+	"github.com/dohr-michael/ozzie/internal/infra/eyes"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/infra/gateway"
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
