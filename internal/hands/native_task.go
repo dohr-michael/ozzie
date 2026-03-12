@@ -10,7 +10,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
 // =============================================================================

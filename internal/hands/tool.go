@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	extism "github.com/extism/go-sdk"
 
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
 // WasmTool adapts an Extism WASM plugin to Eino's tool.InvokableTool interface.

@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
 func newTestPool(t *testing.T, providers map[string]ProviderSpec) *ActorPool {

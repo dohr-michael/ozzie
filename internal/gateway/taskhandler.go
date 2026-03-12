@@ -1,7 +1,7 @@
 package gateway
 
 import (
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
 // WSTaskHandler implements ws.TaskHandler using the task submitter.

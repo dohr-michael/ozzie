@@ -30,7 +30,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 	"github.com/dohr-michael/ozzie/internal/core/skills"
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
 

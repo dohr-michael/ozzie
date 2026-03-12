@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
 // PlanTaskTool creates a structured execution plan with dependent sub-tasks.
