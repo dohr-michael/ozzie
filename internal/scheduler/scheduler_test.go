@@ -4,9 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/actors"
-	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/brain/actors"
+	"github.com/dohr-michael/ozzie/internal/brain/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 )
 
@@ -21,7 +20,7 @@ func newTestPool(t *testing.T, bus *events.Bus) *actors.ActorPool {
 	dir := t.TempDir()
 	store := tasks.NewFileStore(dir)
 	return actors.NewActorPool(actors.ActorPoolConfig{
-		Providers: map[string]config.ProviderConfig{
+		Providers: map[string]actors.ProviderSpec{
 			"test": {MaxConcurrent: 1},
 		},
 		Store: store,

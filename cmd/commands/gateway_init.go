@@ -16,23 +16,26 @@ import (
 	einoFs "github.com/cloudwego/eino/adk/middlewares/filesystem"
 	einoReduction "github.com/cloudwego/eino/adk/middlewares/reduction"
 
-	"github.com/dohr-michael/ozzie/internal/actors"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/brain/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/brain/introspection"
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/connectors"
-	"github.com/dohr-michael/ozzie/internal/connectors/discord"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/eyes"
+	"github.com/dohr-michael/ozzie/internal/eyes/discord"
+	"github.com/dohr-michael/ozzie/internal/brain/events"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
-	membridge "github.com/dohr-michael/ozzie/internal/memory/bridge"
-	layeredctx "github.com/dohr-michael/ozzie/internal/memory/layered"
+	"github.com/dohr-michael/ozzie/internal/membridge"
+	layeredctx "github.com/dohr-michael/ozzie/internal/brain/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/models"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/hands"
 	"github.com/dohr-michael/ozzie/internal/policy"
-	"github.com/dohr-michael/ozzie/internal/prompt"
+	"github.com/dohr-michael/ozzie/internal/brain/prompt"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
-	"github.com/dohr-michael/ozzie/internal/skills"
+	"github.com/dohr-michael/ozzie/internal/brain/skills"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 	"github.com/dohr-michael/ozzie/pkg/connector"
 	"github.com/dohr-michael/ozzie/pkg/memory"
@@ -76,11 +79,11 @@ func (g *gateway) loadConfig() error {
 	g.cfg = cfg
 
 	// Setup log level: config value, with --debug CLI override
-	logLevel := resolveLogLevel(cfg.Events.LogLevel)
+	logLevel := introspection.ResolveLogLevel(cfg.Events.LogLevel)
 	if g.cmd.Bool("debug") {
 		logLevel = slog.LevelDebug
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
+	introspection.SetupLogger(logLevel)
 
 	// CLI flags override config
 	if g.cmd.IsSet("host") {
@@ -161,19 +164,19 @@ func (g *gateway) initModels() error {
 func (g *gateway) initToolPipeline() error {
 	// Plugin registry — load WASM plugins + register native tools
 	var err error
-	g.toolRegistry, err = plugins.SetupToolRegistry(g.ctx, g.cfg, g.bus)
+	g.toolRegistry, err = hands.SetupToolRegistry(g.ctx, g.cfg, g.bus)
 	if err != nil {
 		return fmt.Errorf("setup tools: %w", err)
 	}
 	g.closers = append(g.closers, func() { g.toolRegistry.Close(g.ctx) })
 
 	// MCP servers — connect to external MCP tool servers
-	if err := plugins.SetupMCPServers(g.ctx, g.cfg.MCP, g.toolRegistry, g.bus); err != nil {
+	if err := hands.SetupMCPServers(g.ctx, g.cfg.MCP, g.toolRegistry, g.bus); err != nil {
 		slog.Warn("failed to setup MCP servers", "error", err)
 	}
 
 	// Tool permissions — global auto-approved tools from config
-	g.toolPerms = plugins.NewToolPermissions(g.cfg.Tools.AllowedDangerous)
+	g.toolPerms = conscience.NewToolPermissions(g.cfg.Tools.AllowedDangerous)
 
 	// Prepare tmp dir early — needed by both sandbox guard and filesystem middleware
 	g.tmpDir = filepath.Join(config.OzziePath(), "tmp")
@@ -184,14 +187,14 @@ func (g *gateway) initToolPipeline() error {
 	// Sandbox guard — validates command content in autonomous mode (before dangerous wrapper)
 	if g.cfg.Sandbox.IsSandboxEnabled() {
 		sandboxPaths := append([]string{g.tmpDir}, g.cfg.Sandbox.AllowedPaths...)
-		plugins.WrapRegistrySandbox(g.toolRegistry, sandboxPaths)
+		hands.WrapRegistrySandbox(g.toolRegistry, sandboxPaths)
 	}
 
 	// Constraint guard — per-tool argument validation (between sandbox and dangerous)
-	plugins.WrapRegistryConstraints(g.toolRegistry)
+	hands.WrapRegistryConstraints(g.toolRegistry)
 
 	// Wrap dangerous tools with confirmation for interactive gateway
-	plugins.WrapRegistryDangerous(g.toolRegistry, g.bus, g.toolPerms)
+	hands.WrapRegistryDangerous(g.toolRegistry, g.bus, g.toolPerms)
 
 	return nil
 }
@@ -208,12 +211,24 @@ func (g *gateway) initSkills() error {
 	}
 	slog.Info("skills loaded", "count", len(g.skillRegistry.All()))
 
-	// Verifier for acceptance criteria
-	verifier := skills.NewVerifier(g.registry)
+	// Verifier for acceptance criteria — uses a SummarizeFunc closure
+	verifier := skills.NewVerifier(func(ctx context.Context, prompt string) (string, error) {
+		chatModel, err := g.registry.Default(ctx)
+		if err != nil {
+			return "", err
+		}
+		resp, err := chatModel.Generate(ctx, []*schema.Message{
+			{Role: schema.User, Content: prompt},
+		})
+		if err != nil {
+			return "", err
+		}
+		return resp.Content, nil
+	})
 
 	g.skillRunCfg = skills.RunnerConfig{
-		ModelRegistry: g.registry,
-		ToolRegistry:  g.toolRegistry,
+		RunnerFactory: agent.NewRunnerFactory(g.registry),
+		ToolLookup:    g.toolRegistry.AsDomainToolLookup(),
 		EventBus:      g.bus,
 		Verifier:      verifier,
 	}
@@ -253,8 +268,8 @@ func (g *gateway) initStores() error {
 	g.closers = append(g.closers, func() { hbWriter.Stop() })
 
 	// Register update_session tool (needs session store, so registered here)
-	updateSessionTool := plugins.NewUpdateSessionTool(g.sessionStore)
-	if err := g.toolRegistry.RegisterNative("update_session", updateSessionTool, plugins.UpdateSessionManifest()); err != nil {
+	updateSessionTool := hands.NewUpdateSessionTool(g.sessionStore)
+	if err := g.toolRegistry.RegisterNative("update_session", updateSessionTool, hands.UpdateSessionManifest()); err != nil {
 		slog.Warn("failed to register update_session tool", "error", err)
 	}
 
@@ -416,16 +431,27 @@ func (g *gateway) initMemory() error {
 // and the scheduler.
 func (g *gateway) initRuntime() error {
 	// Actor pool — capacity-aware LLM orchestration (replaces WorkerPool)
+	providerSpecs := make(map[string]actors.ProviderSpec, len(g.cfg.Models.Providers))
+	for name, prov := range g.cfg.Models.Providers {
+		providerSpecs[name] = actors.ProviderSpec{
+			MaxConcurrent: prov.MaxConcurrent,
+			Tags:          prov.Tags,
+			Capabilities:  prov.Capabilities,
+			PromptPrefix:  prov.PromptPrefix,
+		}
+	}
 	g.pool = actors.NewActorPool(actors.ActorPoolConfig{
-		Providers:       g.cfg.Models.Providers,
+		Providers:       providerSpecs,
 		Store:           g.taskStore,
 		Bus:             g.bus,
-		Models:          g.registry,
-		ToolRegistry:    g.toolRegistry,
+		RunnerFactory:   agent.NewRunnerFactory(g.registry),
+		TierResolver:    g.registry,
+		ToolLookup:      g.toolRegistry.AsDomainToolLookup(),
 		SkillRunner:     g.skillExecutor,
 		TaskMiddlewares: g.taskMws,
 		Retriever:       g.memoryRetriever,
 		Perms:           g.toolPerms,
+		ExecutorFactory: tasks.NewTaskExecutorFactory(),
 	})
 	g.pool.Start()
 	g.closers = append(g.closers, func() { g.pool.Stop() })
@@ -471,70 +497,70 @@ func (g *gateway) initRuntime() error {
 func (g *gateway) registerTools() {
 	// Register memory tools
 	storeMemTool := memtools.NewStoreMemoryTool(g.memoryStore, g.pipeline)
-	if err := g.toolRegistry.RegisterNative("store_memory", storeMemTool, plugins.StoreMemoryManifest()); err != nil {
+	if err := g.toolRegistry.RegisterNative("store_memory", storeMemTool, hands.StoreMemoryManifest()); err != nil {
 		slog.Warn("failed to register store_memory tool", "error", err)
 	}
 
 	queryMemTool := memtools.NewQueryMemoriesTool(g.memoryRetriever)
-	if err := g.toolRegistry.RegisterNative("query_memories", queryMemTool, plugins.QueryMemoriesManifest()); err != nil {
+	if err := g.toolRegistry.RegisterNative("query_memories", queryMemTool, hands.QueryMemoriesManifest()); err != nil {
 		slog.Warn("failed to register query_memories tool", "error", err)
 	}
 
 	forgetMemTool := memtools.NewForgetMemoryTool(g.memoryStore, g.pipeline)
-	if err := g.toolRegistry.RegisterNative("forget_memory", forgetMemTool, plugins.ForgetMemoryManifest()); err != nil {
+	if err := g.toolRegistry.RegisterNative("forget_memory", forgetMemTool, hands.ForgetMemoryManifest()); err != nil {
 		slog.Warn("failed to register forget_memory tool", "error", err)
 	}
 
 	// Register task tools
-	submitTool := plugins.NewSubmitTaskTool(g.pool, g.toolRegistry, g.toolPerms, g.bus)
-	if err := g.toolRegistry.RegisterNative("submit_task", submitTool, plugins.SubmitTaskManifest()); err != nil {
+	submitTool := hands.NewSubmitTaskTool(g.pool, g.toolRegistry, g.toolPerms, g.bus)
+	if err := g.toolRegistry.RegisterNative("submit_task", submitTool, hands.SubmitTaskManifest()); err != nil {
 		slog.Warn("failed to register submit_task tool", "error", err)
 	}
 
-	checkTool := plugins.NewCheckTaskTool(g.taskStore)
-	if err := g.toolRegistry.RegisterNative("check_task", checkTool, plugins.CheckTaskManifest()); err != nil {
+	checkTool := hands.NewCheckTaskTool(g.taskStore)
+	if err := g.toolRegistry.RegisterNative("check_task", checkTool, hands.CheckTaskManifest()); err != nil {
 		slog.Warn("failed to register check_task tool", "error", err)
 	}
 
-	cancelTool := plugins.NewCancelTaskTool(g.pool)
-	if err := g.toolRegistry.RegisterNative("cancel_task", cancelTool, plugins.CancelTaskManifest()); err != nil {
+	cancelTool := hands.NewCancelTaskTool(g.pool)
+	if err := g.toolRegistry.RegisterNative("cancel_task", cancelTool, hands.CancelTaskManifest()); err != nil {
 		slog.Warn("failed to register cancel_task tool", "error", err)
 	}
 
-	planTool := plugins.NewPlanTaskTool(g.pool)
-	if err := g.toolRegistry.RegisterNative("plan_task", planTool, plugins.PlanTaskManifest()); err != nil {
+	planTool := hands.NewPlanTaskTool(g.pool)
+	if err := g.toolRegistry.RegisterNative("plan_task", planTool, hands.PlanTaskManifest()); err != nil {
 		slog.Warn("failed to register plan_task tool", "error", err)
 	}
 
-	listTasksTool := plugins.NewListTasksTool(g.taskStore)
-	if err := g.toolRegistry.RegisterNative("list_tasks", listTasksTool, plugins.ListTasksManifest()); err != nil {
+	listTasksTool := hands.NewListTasksTool(g.taskStore)
+	if err := g.toolRegistry.RegisterNative("list_tasks", listTasksTool, hands.ListTasksManifest()); err != nil {
 		slog.Warn("failed to register list_tasks tool", "error", err)
 	}
 
 	// Register schedule tools
-	scheduleTaskTool := plugins.NewScheduleTaskTool(g.sched, g.bus, g.toolRegistry, g.toolPerms)
-	if err := g.toolRegistry.RegisterNative("schedule_task", scheduleTaskTool, plugins.ScheduleTaskManifest()); err != nil {
+	scheduleTaskTool := hands.NewScheduleTaskTool(g.sched, g.bus, g.toolRegistry, g.toolPerms)
+	if err := g.toolRegistry.RegisterNative("schedule_task", scheduleTaskTool, hands.ScheduleTaskManifest()); err != nil {
 		slog.Warn("failed to register schedule_task tool", "error", err)
 	}
 
-	unscheduleTaskTool := plugins.NewUnscheduleTaskTool(g.sched, g.bus)
-	if err := g.toolRegistry.RegisterNative("unschedule_task", unscheduleTaskTool, plugins.UnscheduleTaskManifest()); err != nil {
+	unscheduleTaskTool := hands.NewUnscheduleTaskTool(g.sched, g.bus)
+	if err := g.toolRegistry.RegisterNative("unschedule_task", unscheduleTaskTool, hands.UnscheduleTaskManifest()); err != nil {
 		slog.Warn("failed to register unschedule_task tool", "error", err)
 	}
 
-	listSchedulesTool := plugins.NewListSchedulesTool(g.sched)
-	if err := g.toolRegistry.RegisterNative("list_schedules", listSchedulesTool, plugins.ListSchedulesManifest()); err != nil {
+	listSchedulesTool := hands.NewListSchedulesTool(g.sched)
+	if err := g.toolRegistry.RegisterNative("list_schedules", listSchedulesTool, hands.ListSchedulesManifest()); err != nil {
 		slog.Warn("failed to register list_schedules tool", "error", err)
 	}
 
-	triggerScheduleTool := plugins.NewTriggerScheduleTool(g.sched)
-	if err := g.toolRegistry.RegisterNative("trigger_schedule", triggerScheduleTool, plugins.TriggerScheduleManifest()); err != nil {
+	triggerScheduleTool := hands.NewTriggerScheduleTool(g.sched)
+	if err := g.toolRegistry.RegisterNative("trigger_schedule", triggerScheduleTool, hands.TriggerScheduleManifest()); err != nil {
 		slog.Warn("failed to register trigger_schedule tool", "error", err)
 	}
 
 	// Register approve_pairing tool (needs policy resolver + pairing store)
-	approvePairingTool := plugins.NewApprovePairingTool(g.pairingStore, g.policyResolver, g.bus)
-	if err := g.toolRegistry.RegisterNative("approve_pairing", approvePairingTool, plugins.ApprovePairingManifest()); err != nil {
+	approvePairingTool := hands.NewApprovePairingTool(g.pairingStore, g.policyResolver, g.bus)
+	if err := g.toolRegistry.RegisterNative("approve_pairing", approvePairingTool, hands.ApprovePairingManifest()); err != nil {
 		slog.Warn("failed to register approve_pairing tool", "error", err)
 	}
 
@@ -542,26 +568,26 @@ func (g *gateway) registerTools() {
 	// Only MCP tools require on-demand activation via activate_tools.
 	// Gemini Flash doesn't handle the activate-then-use pattern reliably.
 	coreTools := g.toolRegistry.NativeToolNames()
-	g.toolSet = agent.NewToolSet(coreTools, g.toolRegistry.ToolNames())
+	g.toolSet = brain.NewToolSet(coreTools, g.toolRegistry.ToolNames())
 
 	// Register activate_tools meta-tool (needs toolSet + toolRegistry).
 	// Registered AFTER NewToolSet, so we must explicitly add it to core.
-	activateTool := plugins.NewActivateToolsTool(g.toolSet, g.toolRegistry)
-	if err := g.toolRegistry.RegisterNative("activate_tools", activateTool, plugins.ActivateToolsManifest()); err != nil {
+	activateTool := hands.NewActivateToolsTool(g.toolSet, g.toolRegistry)
+	if err := g.toolRegistry.RegisterNative("activate_tools", activateTool, hands.ActivateToolsManifest()); err != nil {
 		slog.Warn("failed to register activate_tools tool", "error", err)
 	}
 	g.toolSet.RegisterCore("activate_tools")
 
 	// Register activate_skill (core tool — always active, progressive disclosure)
-	activateSkillTool := plugins.NewActivateSkillTool(g.skillRegistry, g.toolSet, g.toolRegistry)
-	if err := g.toolRegistry.RegisterNative("activate_skill", activateSkillTool, plugins.ActivateSkillManifest()); err != nil {
+	activateSkillTool := hands.NewActivateSkillTool(g.skillRegistry, g.toolSet, g.toolRegistry)
+	if err := g.toolRegistry.RegisterNative("activate_skill", activateSkillTool, hands.ActivateSkillManifest()); err != nil {
 		slog.Warn("failed to register activate_skill tool", "error", err)
 	}
 	g.toolSet.RegisterCore("activate_skill")
 
 	// Register run_workflow (on-demand — activated via activate_skill or explicitly)
-	runWorkflowTool := plugins.NewRunWorkflowTool(g.skillExecutor)
-	if err := g.toolRegistry.RegisterNative("run_workflow", runWorkflowTool, plugins.RunWorkflowManifest()); err != nil {
+	runWorkflowTool := hands.NewRunWorkflowTool(g.skillExecutor)
+	if err := g.toolRegistry.RegisterNative("run_workflow", runWorkflowTool, hands.RunWorkflowManifest()); err != nil {
 		slog.Warn("failed to register run_workflow tool", "error", err)
 	}
 
@@ -577,14 +603,14 @@ func (g *gateway) initAgent() error {
 	slog.Debug("loaded persona", "length", len(g.persona), "persona", g.persona)
 
 	// Filesystem middleware — provides ls, read_file, write_file, edit_file, glob, grep via Eino ADK
-	fsOpts := []plugins.OzzieBackendOption{
-		plugins.WithWriteAllowedPaths(g.tmpDir),
-		plugins.WithReadRestrictedPaths(secrets.AgeDirPath()),
+	fsOpts := []agent.OzzieBackendOption{
+		agent.WithWriteAllowedPaths(g.tmpDir),
+		agent.WithReadRestrictedPaths(secrets.AgeDirPath()),
 	}
-	fsBackend := plugins.NewOzzieBackend(g.bus, g.toolPerms, fsOpts...)
+	fsBackend := agent.NewOzzieBackend(g.bus, g.toolPerms, fsOpts...)
 
 	// Register str_replace_editor (filesystem-based, needs fsBackend)
-	plugins.RegisterFilesystemTools(g.toolRegistry, fsBackend)
+	hands.RegisterFilesystemTools(g.toolRegistry, fsBackend)
 	g.toolSet.RegisterCore("str_replace_editor")
 
 	fsMw, err := einoFs.NewMiddleware(g.ctx, &einoFs.Config{
@@ -614,7 +640,8 @@ func (g *gateway) initAgent() error {
 	subAgentMw := agent.NewSubAgentMiddleware(runtimeInstruction, g.defaultTier)
 
 	// Task middlewares — subagent instructions + filesystem + reduction for sub-agents (no context middleware)
-	g.taskMws = []adk.AgentMiddleware{subAgentMw, fsMw, reductionMw}
+	// Stored as []any (opaque) — the RunnerFactory adapter casts them back to adk.AgentMiddleware.
+	g.taskMws = []any{subAgentMw, fsMw, reductionMw}
 
 	// Build full tool descriptions for prompt composer
 	allToolDescs := g.toolRegistry.AllToolDescriptions()
@@ -718,7 +745,7 @@ func (g *gateway) initConnectors() {
 			conns = append(conns, discordConn)
 
 			// Pairing notifier → admin channel
-			pn := connectors.NewPairingNotifier(g.bus, discordConn)
+			pn := eyes.NewPairingNotifier(g.bus, discordConn)
 			g.closers = append(g.closers, func() { pn.Stop() })
 		}
 	}
@@ -729,10 +756,10 @@ func (g *gateway) initConnectors() {
 
 	// Session map
 	sessionMapDir := filepath.Join(config.OzziePath(), "connectors")
-	sessionMap := connectors.NewSessionMap(sessionMapDir)
+	sessionMap := eyes.NewSessionMap(sessionMapDir)
 
 	// Manager
-	g.connectorManager = connectors.NewManager(connectors.ManagerConfig{
+	g.connectorManager = eyes.NewManager(eyes.ManagerConfig{
 		Bus:          g.bus,
 		SessionStore: g.sessionStore,
 		PairingStore: g.pairingStore,
@@ -743,7 +770,7 @@ func (g *gateway) initConnectors() {
 	g.closers = append(g.closers, func() { g.connectorManager.Stop() })
 
 	// Progress reactor — emoji reactions on connector messages
-	pr := connectors.NewProgressReactor(connectors.ProgressReactorConfig{
+	pr := eyes.NewProgressReactor(eyes.ProgressReactorConfig{
 		Bus:        g.bus,
 		Connectors: g.connectorManager.ConnectorsByName(),
 		SessionMap: sessionMap,

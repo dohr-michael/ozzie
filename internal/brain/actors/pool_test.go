@@ -4,12 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/brain/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 )
 
-func newTestPool(t *testing.T, providers map[string]config.ProviderConfig) *ActorPool {
+func newTestPool(t *testing.T, providers map[string]ProviderSpec) *ActorPool {
 	t.Helper()
 	store := tasks.NewFileStore(t.TempDir())
 	bus := events.NewBus(64)
@@ -23,7 +22,7 @@ func newTestPool(t *testing.T, providers map[string]config.ProviderConfig) *Acto
 }
 
 func TestActorPoolStartStop(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2, Tags: []string{"coding"}},
 	})
 
@@ -37,7 +36,7 @@ func TestActorPoolStartStop(t *testing.T) {
 }
 
 func TestActorPoolSubmit(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -67,7 +66,7 @@ func TestActorPoolSubmit(t *testing.T) {
 }
 
 func TestActorPoolCancel(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -93,7 +92,7 @@ func TestActorPoolCancel(t *testing.T) {
 }
 
 func TestActorCreation(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2, Tags: []string{"coding", "chat"}},
 		"local":  {MaxConcurrent: 3, Tags: []string{"fast", "privacy"}},
 	})
@@ -174,7 +173,7 @@ func TestActorMatchesCapabilities(t *testing.T) {
 }
 
 func TestFindIdleActorWithCapabilities(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"coder": {MaxConcurrent: 1, Tags: []string{"coder"}, Capabilities: []string{"coding", "tool_use"}},
 		"writer": {MaxConcurrent: 1, Tags: []string{"writer"}, Capabilities: []string{"fast", "writing"}},
 	})
@@ -208,7 +207,7 @@ func TestFindIdleActorWithCapabilities(t *testing.T) {
 }
 
 func TestActorPoolPropagatesCapabilities(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"overlay": {
 			MaxConcurrent: 1,
 			Tags:          []string{"coder"},
@@ -231,7 +230,7 @@ func TestActorPoolPropagatesCapabilities(t *testing.T) {
 }
 
 func TestAcquireInteractiveIdle(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2},
 	})
 
@@ -257,7 +256,7 @@ func TestAcquireInteractiveIdle(t *testing.T) {
 }
 
 func TestAcquireInteractiveNoProvider(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -278,7 +277,7 @@ func TestAcquireInteractiveNoProvider(t *testing.T) {
 }
 
 func TestSubmitDefaultMaxRetries(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -295,7 +294,7 @@ func TestSubmitDefaultMaxRetries(t *testing.T) {
 }
 
 func TestSubmitExplicitMaxRetries(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -313,7 +312,7 @@ func TestSubmitExplicitMaxRetries(t *testing.T) {
 }
 
 func TestRequeueForRetry(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -343,7 +342,7 @@ func TestRequeueForRetry(t *testing.T) {
 }
 
 func TestRequeueForRetry_ExceedsMax(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -366,7 +365,7 @@ func TestRequeueForRetry_ExceedsMax(t *testing.T) {
 }
 
 func TestProviderCooldown(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"broken": {MaxConcurrent: 1},
 		"healthy": {MaxConcurrent: 1},
 	})
@@ -389,7 +388,7 @@ func TestProviderCooldown(t *testing.T) {
 }
 
 func TestProviderCooldownExpired(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"ollama": {MaxConcurrent: 1},
 	})
 
@@ -430,7 +429,7 @@ func TestPriorityRank(t *testing.T) {
 // --- Dependency resolution tests ---
 
 func TestDependencyResolution(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -468,7 +467,7 @@ func TestDependencyResolution(t *testing.T) {
 }
 
 func TestDependencyResolution_NotCompleted(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -504,7 +503,7 @@ func TestDependencyResolution_NotCompleted(t *testing.T) {
 }
 
 func TestDependencyResolution_Failed(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 
@@ -540,7 +539,7 @@ func TestDependencyResolution_Failed(t *testing.T) {
 }
 
 func TestSchedulePicksUpResolvedDeps(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2},
 	})
 
@@ -583,7 +582,7 @@ func TestSchedulePicksUpResolvedDeps(t *testing.T) {
 }
 
 func TestScheduleCancelsUnresolvableDeps(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2},
 	})
 	pool.ctx = t.Context()
@@ -624,7 +623,7 @@ func TestScheduleCancelsUnresolvableDeps(t *testing.T) {
 }
 
 func TestEventDrivenSchedulerWake(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 	pool.Start()
@@ -646,7 +645,7 @@ func TestEventDrivenSchedulerWake(t *testing.T) {
 // --- Inline execution tests ---
 
 func TestShouldInline_SingleActor(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 	if !pool.ShouldInline() {
@@ -655,7 +654,7 @@ func TestShouldInline_SingleActor(t *testing.T) {
 }
 
 func TestShouldInline_MultiActor(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 2},
 	})
 	if pool.ShouldInline() {
@@ -664,7 +663,7 @@ func TestShouldInline_MultiActor(t *testing.T) {
 }
 
 func TestShouldInline_MultiProvider(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 		"ollama": {MaxConcurrent: 1},
 	})
@@ -674,7 +673,7 @@ func TestShouldInline_MultiProvider(t *testing.T) {
 }
 
 func TestExecuteInline_NoModelRegistry(t *testing.T) {
-	pool := newTestPool(t, map[string]config.ProviderConfig{
+	pool := newTestPool(t, map[string]ProviderSpec{
 		"claude": {MaxConcurrent: 1},
 	})
 	// pool.models is nil (no registry configured)

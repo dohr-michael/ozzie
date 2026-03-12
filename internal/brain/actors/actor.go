@@ -9,6 +9,15 @@ const (
 	ActorBusy ActorStatus = "busy"
 )
 
+// ProviderSpec holds the subset of provider configuration needed by the actor pool.
+// This decouples the domain package from internal/config.
+type ProviderSpec struct {
+	MaxConcurrent int      `json:"max_concurrent"`
+	Tags          []string `json:"tags,omitempty"`
+	Capabilities  []string `json:"capabilities,omitempty"`
+	PromptPrefix  string   `json:"prompt_prefix,omitempty"`
+}
+
 // Actor represents a single LLM capacity slot bound to a provider.
 type Actor struct {
 	ID           string      `json:"id"`

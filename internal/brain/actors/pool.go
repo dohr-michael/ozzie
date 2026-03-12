@@ -8,13 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
-
-	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/models"
-	"github.com/dohr-michael/ozzie/internal/tasks"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/brain/events"
 )
 
 // preemptionTimeout is the hard cancel delay after a cooperative preemption request.
@@ -40,15 +35,18 @@ type ActorPool struct {
 	actors           []*Actor
 	runners          map[string]*runningTask // taskID → running state
 	providerCooldown map[string]time.Time    // provider → cooldown expiry
-	store            tasks.Store
+	store            brain.TaskStore
 	bus              events.EventBus
-	models           *models.Registry
-	toolRegistry     agent.ToolLookup
+	runnerFactory    brain.RunnerFactory
+	tierResolver     brain.TierResolver
+	toolLookup       brain.ToolLookup
 
-	skillRunner     tasks.SkillExecutor
-	taskMiddlewares     []adk.AgentMiddleware
-	retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
-	perms               tasks.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	skillRunner     brain.SkillExecutor
+	taskMiddlewares []any                       // opaque, passed to RunnerFactory
+	retriever       brain.MemoryRetriever       // pre-task memory retrieval (optional)
+	perms           brain.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+
+	executorFactory brain.TaskExecutorFactory // creates a TaskExecutor for each task
 
 	scheduleCh chan struct{} // wake-up signal for the scheduler
 	ctx        context.Context
@@ -58,15 +56,17 @@ type ActorPool struct {
 
 // ActorPoolConfig holds configuration for building an ActorPool.
 type ActorPoolConfig struct {
-	Providers           map[string]config.ProviderConfig
-	Store               tasks.Store
-	Bus                 events.EventBus
-	Models              *models.Registry
-	ToolRegistry        agent.ToolLookup
-	SkillRunner         tasks.SkillExecutor         // optional skill executor for direct skill tasks
-	TaskMiddlewares     []adk.AgentMiddleware       // middlewares for sub-agents (filesystem, reduction)
-	Retriever           agent.MemoryRetriever       // pre-task memory retrieval (optional)
-	Perms               tasks.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	Providers        map[string]ProviderSpec
+	Store            brain.TaskStore
+	Bus              events.EventBus
+	RunnerFactory    brain.RunnerFactory
+	TierResolver     brain.TierResolver
+	ToolLookup       brain.ToolLookup
+	SkillRunner      brain.SkillExecutor         // optional skill executor for direct skill tasks
+	TaskMiddlewares  []any                       // opaque middlewares for sub-agents (filesystem, reduction)
+	Retriever        brain.MemoryRetriever       // pre-task memory retrieval (optional)
+	Perms            brain.ToolPermissionsSeeder // for seeding pre-approved tools (optional)
+	ExecutorFactory  brain.TaskExecutorFactory   // creates a TaskExecutor for each task
 }
 
 // NewActorPool creates an ActorPool from provider configurations.
@@ -96,12 +96,14 @@ func NewActorPool(cfg ActorPoolConfig) *ActorPool {
 		providerCooldown:    make(map[string]time.Time),
 		store:               cfg.Store,
 		bus:                 cfg.Bus,
-		models:              cfg.Models,
-		toolRegistry:        cfg.ToolRegistry,
+		runnerFactory:       cfg.RunnerFactory,
+		tierResolver:        cfg.TierResolver,
+		toolLookup:          cfg.ToolLookup,
 		skillRunner:         cfg.SkillRunner,
 		taskMiddlewares:     cfg.TaskMiddlewares,
 		retriever:           cfg.Retriever,
 		perms:               cfg.Perms,
+		executorFactory:     cfg.ExecutorFactory,
 		scheduleCh:          make(chan struct{}, 1),
 	}
 }
@@ -142,17 +144,17 @@ func (p *ActorPool) Stop() {
 }
 
 // Store returns the underlying task store.
-func (p *ActorPool) Store() tasks.Store {
+func (p *ActorPool) Store() brain.TaskStore {
 	return p.store
 }
 
 // Submit creates a task and wakes the scheduler.
-func (p *ActorPool) Submit(t *tasks.Task) error {
+func (p *ActorPool) Submit(t *brain.Task) error {
 	if t.Status == "" {
-		t.Status = tasks.TaskPending
+		t.Status = brain.TaskPending
 	}
 	if t.Priority == "" {
-		t.Priority = tasks.PriorityNormal
+		t.Priority = brain.PriorityNormal
 	}
 	if t.MaxRetries == 0 {
 		t.MaxRetries = defaultMaxRetries
@@ -186,18 +188,18 @@ func (p *ActorPool) Cancel(taskID string, reason string) error {
 		return err
 	}
 
-	if task.Status == tasks.TaskCompleted || task.Status == tasks.TaskCancelled {
+	if task.Status == brain.TaskCompleted || task.Status == brain.TaskCancelled {
 		return nil
 	}
 
 	now := time.Now()
-	task.Status = tasks.TaskCancelled
+	task.Status = brain.TaskCancelled
 	task.CompletedAt = &now
 	if err := p.store.Update(task); err != nil {
 		return err
 	}
 
-	_ = p.store.AppendCheckpoint(taskID, tasks.Checkpoint{
+	_ = p.store.AppendCheckpoint(taskID, brain.Checkpoint{
 		Ts:      now,
 		Type:    "cancelled",
 		Summary: reason,
@@ -209,12 +211,12 @@ func (p *ActorPool) Cancel(taskID string, reason string) error {
 	}, task.SessionID))
 
 	// Cancel child tasks recursively
-	children, err := p.store.List(tasks.ListFilter{ParentID: taskID})
+	children, err := p.store.List(brain.ListFilter{ParentID: taskID})
 	if err != nil {
 		return nil // best effort
 	}
 	for _, child := range children {
-		if child.Status == tasks.TaskPending || child.Status == tasks.TaskRunning {
+		if child.Status == brain.TaskPending || child.Status == brain.TaskRunning {
 			_ = p.Cancel(child.ID, "parent cancelled")
 		}
 	}
@@ -286,7 +288,7 @@ func (p *ActorPool) scheduleLoop() {
 // It also cancels tasks whose dependencies can never be satisfied (failed/cancelled).
 func (p *ActorPool) schedule() {
 	// Fetch pending tasks outside the lock (store is independently thread-safe).
-	pending, _ := p.store.List(tasks.ListFilter{Status: tasks.TaskPending})
+	pending, _ := p.store.List(brain.ListFilter{Status: brain.TaskPending})
 
 	// List returns sorted by UpdatedAt DESC, iterate in reverse for oldest first
 	for i := len(pending) - 1; i >= 0; i-- {
@@ -297,10 +299,10 @@ func (p *ActorPool) schedule() {
 		if reason := p.unresolvableDep(t); reason != "" {
 			slog.Info("cancelling task with unresolvable dependency", "task_id", t.ID, "reason", reason)
 			now := time.Now()
-			t.Status = tasks.TaskCancelled
+			t.Status = brain.TaskCancelled
 			t.CompletedAt = &now
 			_ = p.store.Update(t)
-			_ = p.store.AppendCheckpoint(t.ID, tasks.Checkpoint{
+			_ = p.store.AppendCheckpoint(t.ID, brain.Checkpoint{
 				Ts:      now,
 				Type:    "cancelled",
 				Summary: reason,
@@ -367,7 +369,7 @@ func (p *ActorPool) findIdleActor(providerName string, requiredTags []string, re
 // Caller must hold p.mu.
 func (p *ActorPool) preemptLowest(providerName string) *Actor {
 	var lowestRT *runningTask
-	lowestPriority := priorityRank(tasks.PriorityHigh) + 1
+	lowestPriority := priorityRank(brain.PriorityHigh) + 1
 
 	for _, rt := range p.runners {
 		if rt.actor.ProviderName != providerName {
@@ -453,7 +455,7 @@ func (p *ActorPool) preemptLowest(providerName string) *Actor {
 
 // startTask launches a goroutine to execute a task on an actor.
 // Caller must hold p.mu.
-func (p *ActorPool) startTask(t *tasks.Task, actor *Actor) {
+func (p *ActorPool) startTask(t *brain.Task, actor *Actor) {
 	taskCtx, taskCancel := context.WithCancel(p.ctx)
 	preemptCh := make(chan struct{})
 
@@ -483,23 +485,16 @@ func (p *ActorPool) startTask(t *tasks.Task, actor *Actor) {
 }
 
 // executeTask runs a single task using the TaskRunner.
-func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor, preemptCh chan struct{}) {
+func (p *ActorPool) executeTask(ctx context.Context, t *brain.Task, actor *Actor, preemptCh chan struct{}) {
 	slog.Info("actor executing task", "actor", actor.ID, "task_id", t.ID, "title", t.Title, "provider", actor.ProviderName)
 
 	// Tag the task with actor info for traceability
 	t.ActorID = actor.ID
 	t.ProviderName = actor.ProviderName
 
-	if p.models == nil {
-		slog.Error("no model registry configured", "task_id", t.ID)
-		_ = p.failTaskDirect(t, fmt.Errorf("no model registry configured"))
-		return
-	}
-
-	chatModel, err := p.models.Get(ctx, actor.ProviderName)
-	if err != nil {
-		slog.Error("get model for task", "error", err, "task_id", t.ID, "provider", actor.ProviderName)
-		_ = p.failTaskDirect(t, fmt.Errorf("get model: %w", err))
+	if p.runnerFactory == nil {
+		slog.Error("no runner factory configured", "task_id", t.ID)
+		_ = p.failTaskDirect(t, fmt.Errorf("no runner factory configured"))
 		return
 	}
 
@@ -512,13 +507,17 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		}
 	}
 
-	tier := p.models.ProviderTier(actor.ProviderName)
+	var tier brain.ModelTier
+	if p.tierResolver != nil {
+		tier = p.tierResolver.ProviderTier(actor.ProviderName)
+	}
 
-	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
+	executor := p.executorFactory(t, brain.TaskExecutorConfig{
 		Store:           p.store,
 		Bus:             p.bus,
-		ChatModel:       chatModel,
-		ToolRegistry:    p.toolRegistry,
+		RunnerFactory:   p.runnerFactory,
+		ModelName:       actor.ProviderName,
+		ToolLookup:      p.toolLookup,
 		SkillRunner:     p.skillRunner,
 		PreemptionCheck: preemptionCheck,
 		Middlewares:     p.taskMiddlewares,
@@ -528,8 +527,8 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 		Perms:           p.perms,
 	})
 
-	if err := runner.Run(ctx); err != nil {
-		var unavail *models.ErrModelUnavailable
+	if err := executor.Run(ctx); err != nil {
+		var unavail *brain.ErrModelUnavailable
 		if errors.As(err, &unavail) {
 			// Mark provider as temporarily down and re-queue
 			p.mu.Lock()
@@ -549,40 +548,40 @@ func (p *ActorPool) executeTask(ctx context.Context, t *tasks.Task, actor *Actor
 }
 
 // requeueForRetry re-queues a task for retry on a different actor.
-func (p *ActorPool) requeueForRetry(t *tasks.Task) {
+func (p *ActorPool) requeueForRetry(t *brain.Task) {
 	t.RetryCount++
 	if t.RetryCount > t.MaxRetries {
 		slog.Error("task exceeded max retries", "task_id", t.ID, "retries", t.RetryCount)
 		_ = p.failTaskDirect(t, fmt.Errorf("model unavailable after %d retries", t.RetryCount))
 		return
 	}
-	t.Status = tasks.TaskPending
+	t.Status = brain.TaskPending
 	t.CompletedAt = nil
 	t.Result = nil
 	_ = p.store.Update(t)
 	slog.Info("task re-queued for retry", "task_id", t.ID, "retry", t.RetryCount, "max", t.MaxRetries)
 }
 
-func (p *ActorPool) failTaskDirect(t *tasks.Task, taskErr error) error {
+func (p *ActorPool) failTaskDirect(t *brain.Task, taskErr error) error {
 	now := time.Now()
-	t.Status = tasks.TaskFailed
+	t.Status = brain.TaskFailed
 	t.CompletedAt = &now
-	t.Result = &tasks.TaskResult{Error: taskErr.Error()}
+	t.Result = &brain.TaskResult{Error: taskErr.Error()}
 	return p.store.Update(t)
 }
 
 // unresolvableDep returns a non-empty reason if any dependency of the task has
 // failed or been cancelled (meaning this task can never be scheduled).
-func (p *ActorPool) unresolvableDep(t *tasks.Task) string {
+func (p *ActorPool) unresolvableDep(t *brain.Task) string {
 	for _, depID := range t.DependsOn {
 		dep, err := p.store.Get(depID)
 		if err != nil {
 			continue // don't cancel on store errors, just skip
 		}
-		if dep.Status == tasks.TaskFailed {
+		if dep.Status == brain.TaskFailed {
 			return fmt.Sprintf("dependency %s (%s) failed", depID, dep.Title)
 		}
-		if dep.Status == tasks.TaskCancelled {
+		if dep.Status == brain.TaskCancelled {
 			return fmt.Sprintf("dependency %s (%s) cancelled", depID, dep.Title)
 		}
 	}
@@ -590,7 +589,7 @@ func (p *ActorPool) unresolvableDep(t *tasks.Task) string {
 }
 
 // dependenciesResolved checks whether all dependencies of a task are completed.
-func (p *ActorPool) dependenciesResolved(t *tasks.Task) bool {
+func (p *ActorPool) dependenciesResolved(t *brain.Task) bool {
 	if len(t.DependsOn) == 0 {
 		return true
 	}
@@ -600,7 +599,7 @@ func (p *ActorPool) dependenciesResolved(t *tasks.Task) bool {
 			slog.Debug("dependency check: store error", "task_id", t.ID, "dep_id", depID, "error", err)
 			return false
 		}
-		if dep.Status != tasks.TaskCompleted {
+		if dep.Status != brain.TaskCompleted {
 			slog.Debug("dependency not resolved", "task_id", t.ID, "dep_id", depID, "dep_status", dep.Status)
 			return false
 		}
@@ -617,13 +616,13 @@ func (p *ActorPool) ShouldInline() bool {
 // ExecuteInline runs a task synchronously in the caller's goroutine.
 // It applies the same defaults as Submit, creates the task in the store,
 // and delegates to a TaskRunner.
-func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, error) {
+func (p *ActorPool) ExecuteInline(ctx context.Context, t *brain.Task) (string, error) {
 	// Apply defaults (same as Submit)
 	if t.Status == "" {
-		t.Status = tasks.TaskPending
+		t.Status = brain.TaskPending
 	}
 	if t.Priority == "" {
-		t.Priority = tasks.PriorityNormal
+		t.Priority = brain.PriorityNormal
 	}
 	if t.MaxRetries == 0 {
 		t.MaxRetries = defaultMaxRetries
@@ -641,26 +640,24 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 		ParentID:    t.ParentTaskID,
 	}, t.SessionID))
 
-	// Resolve model from the first (only) actor's provider
-	if p.models == nil {
-		_ = p.failTaskDirect(t, fmt.Errorf("no model registry configured"))
-		return "", fmt.Errorf("inline: no model registry configured")
+	if p.runnerFactory == nil {
+		_ = p.failTaskDirect(t, fmt.Errorf("no runner factory configured"))
+		return "", fmt.Errorf("inline: no runner factory configured")
 	}
 
 	actor := p.actors[0]
-	chatModel, err := p.models.Get(ctx, actor.ProviderName)
-	if err != nil {
-		_ = p.failTaskDirect(t, fmt.Errorf("get model: %w", err))
-		return "", fmt.Errorf("inline get model: %w", err)
+
+	var tier brain.ModelTier
+	if p.tierResolver != nil {
+		tier = p.tierResolver.ProviderTier(actor.ProviderName)
 	}
 
-	tier := p.models.ProviderTier(actor.ProviderName)
-
-	runner := tasks.NewTaskRunner(t, tasks.TaskRunnerConfig{
+	executor := p.executorFactory(t, brain.TaskExecutorConfig{
 		Store:           p.store,
 		Bus:             p.bus,
-		ChatModel:       chatModel,
-		ToolRegistry:    p.toolRegistry,
+		RunnerFactory:   p.runnerFactory,
+		ModelName:       actor.ProviderName,
+		ToolLookup:      p.toolLookup,
 		SkillRunner:     p.skillRunner,
 		PreemptionCheck: func() bool { return false },
 		Middlewares:     p.taskMiddlewares,
@@ -670,7 +667,7 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 		Perms:           p.perms,
 	})
 
-	if err := runner.Run(ctx); err != nil {
+	if err := executor.Run(ctx); err != nil {
 		// Task is already marked failed in store by the runner
 		return "", fmt.Errorf("inline run: %w", err)
 	}
@@ -679,23 +676,26 @@ func (p *ActorPool) ExecuteInline(ctx context.Context, t *tasks.Task) (string, e
 	return output, nil
 }
 
-var _ tasks.InlineExecutor = (*ActorPool)(nil)
+var (
+	_ brain.TaskSubmitter  = (*ActorPool)(nil)
+	_ brain.InlineExecutor = (*ActorPool)(nil)
+)
 
 // AvailableActors returns a deduplicated summary of actor tags and capabilities,
 // grouped by provider name.
-func (p *ActorPool) AvailableActors() []tasks.ActorInfo {
+func (p *ActorPool) AvailableActors() []brain.ActorInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	seen := make(map[string]struct{})
-	var infos []tasks.ActorInfo
+	var infos []brain.ActorInfo
 
 	for _, a := range p.actors {
 		if _, ok := seen[a.ProviderName]; ok {
 			continue
 		}
 		seen[a.ProviderName] = struct{}{}
-		infos = append(infos, tasks.ActorInfo{
+		infos = append(infos, brain.ActorInfo{
 			ProviderName: a.ProviderName,
 			Tags:         a.Tags,
 			Capabilities: a.Capabilities,
@@ -705,13 +705,13 @@ func (p *ActorPool) AvailableActors() []tasks.ActorInfo {
 }
 
 // priorityRank maps task priority to a numeric rank (lower = less important).
-func priorityRank(p tasks.TaskPriority) int {
+func priorityRank(p brain.TaskPriority) int {
 	switch p {
-	case tasks.PriorityLow:
+	case brain.PriorityLow:
 		return 0
-	case tasks.PriorityNormal:
+	case brain.PriorityNormal:
 		return 1
-	case tasks.PriorityHigh:
+	case brain.PriorityHigh:
 		return 2
 	default:
 		return 1
