@@ -11,7 +11,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	wsprotocol "github.com/dohr-michael/ozzie/internal/gateway/ws"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 func makeEvent(eventType events.EventType, source events.EventSource, payload map[string]any) events.Event {

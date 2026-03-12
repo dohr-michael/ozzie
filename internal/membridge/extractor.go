@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/brain/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/pkg/llmutil"
 	"github.com/dohr-michael/ozzie/internal/brain/prompt"
 	"github.com/dohr-michael/ozzie/pkg/memory"

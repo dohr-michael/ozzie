@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/cloudwego/eino/schema"
-
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/brain"
 )
 
 // Manager orchestrates the full layered context pipeline:
@@ -43,7 +41,7 @@ type ApplyResult struct {
 //
 // Parameters:
 //   - sessionID: the session to process
-//   - messages: current schema messages (as built from history)
+//   - messages: current domain messages (as built from history)
 //   - history: the full raw session message history
 //
 // Returns the modified message list with layered context injected,
@@ -51,9 +49,9 @@ type ApplyResult struct {
 func (m *Manager) Apply(
 	ctx context.Context,
 	sessionID string,
-	messages []*schema.Message,
-	history []sessions.Message,
-) ([]*schema.Message, *ApplyResult, error) {
+	messages []brain.Message,
+	history []brain.Message,
+) ([]brain.Message, *ApplyResult, error) {
 	// Not enough messages to warrant compression
 	if len(history) <= m.cfg.MaxRecentMessages {
 		return messages, nil, nil
@@ -82,20 +80,22 @@ func (m *Manager) Apply(
 	// Build the layered context message
 	contextMsg := buildContextMessage(result)
 
-	// Convert recent history to schema messages
-	recentMsgs := make([]*schema.Message, 0, len(recent))
+	// Convert recent history to domain messages
+	recentMsgs := make([]brain.Message, 0, len(recent))
 	for _, m := range recent {
-		msg := m.ToSchemaMessage()
-		if msg.Content == "" && msg.Role != schema.Assistant {
+		if m.Content == "" && m.Role != brain.RoleAssistant {
 			continue
 		}
-		recentMsgs = append(recentMsgs, msg)
+		recentMsgs = append(recentMsgs, brain.Message{
+			Role:    m.Role,
+			Content: m.Content,
+		})
 	}
 
 	// Assemble: [context message, ...recent messages]
-	out := make([]*schema.Message, 0, 1+len(recentMsgs))
+	out := make([]brain.Message, 0, 1+len(recentMsgs))
 	if contextMsg != nil {
-		out = append(out, contextMsg)
+		out = append(out, *contextMsg)
 	}
 	out = append(out, recentMsgs...)
 
@@ -111,9 +111,9 @@ func (m *Manager) Apply(
 }
 
 // lastUserMessageContent extracts the content of the last user message.
-func lastUserMessageContent(messages []*schema.Message) string {
+func lastUserMessageContent(messages []brain.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == schema.User {
+		if messages[i].Role == brain.RoleUser {
 			return messages[i].Content
 		}
 	}
@@ -121,7 +121,7 @@ func lastUserMessageContent(messages []*schema.Message) string {
 }
 
 // buildContextMessage formats retrieved selections into a single context message.
-func buildContextMessage(result *RetrievalResult) *schema.Message {
+func buildContextMessage(result *RetrievalResult) *brain.Message {
 	if result == nil || len(result.Selections) == 0 {
 		return nil
 	}
@@ -138,8 +138,8 @@ func buildContextMessage(result *RetrievalResult) *schema.Message {
 		sb.WriteString("\n")
 	}
 
-	return &schema.Message{
-		Role:    schema.User,
+	return &brain.Message{
+		Role:    brain.RoleUser,
 		Content: sb.String(),
 	}
 }

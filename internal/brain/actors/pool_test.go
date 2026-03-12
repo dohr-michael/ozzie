@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/brain/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 )
 

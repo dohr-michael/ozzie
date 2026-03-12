@@ -6,13 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/google/uuid"
-
-	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // PoolSkillExecutor implements tasks.SkillExecutor using the skill registry.
@@ -92,20 +87,10 @@ func (e *PoolSkillExecutor) runWorkflow(ctx context.Context, skill *SkillMD, var
 
 // runSimpleSkill creates an ephemeral agent with the SKILL.md body as instruction.
 func (e *PoolSkillExecutor) runSimpleSkill(ctx context.Context, skill *SkillMD, vars map[string]string) (string, error) {
-	// Resolve model
-	chatModel, err := e.runCfg.ModelRegistry.Default(ctx)
-	if err != nil {
-		return "", fmt.Errorf("resolve model: %w", err)
-	}
-
 	// Resolve allowed tools
-	var tools []tool.InvokableTool
-	for _, name := range skill.AllowedTools {
-		if t := e.runCfg.ToolRegistry.Tool(name); t != nil {
-			tools = append(tools, t)
-		} else {
-			slog.Warn("tool not found for skill", "skill", skill.Name, "tool", name)
-		}
+	tools := e.runCfg.ToolLookup.ToolsByNames(skill.AllowedTools)
+	if len(tools) < len(skill.AllowedTools) {
+		slog.Warn("some tools not found for skill", "skill", skill.Name, "requested", skill.AllowedTools, "resolved", len(tools))
 	}
 
 	// Build instruction from body + vars
@@ -117,8 +102,8 @@ func (e *PoolSkillExecutor) runSimpleSkill(ctx context.Context, skill *SkillMD, 
 		}
 	}
 
-	// Create ephemeral agent
-	runner, err := agent.NewAgent(ctx, chatModel, instruction, tools, nil)
+	// Create ephemeral agent via RunnerFactory (empty model = default)
+	runner, err := e.runCfg.RunnerFactory.CreateRunner(ctx, "", instruction, tools)
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
@@ -127,11 +112,9 @@ func (e *PoolSkillExecutor) runSimpleSkill(ctx context.Context, skill *SkillMD, 
 	if request, ok := vars["request"]; ok && request != "" {
 		userContent = request
 	}
-	messages := []*schema.Message{
-		{Role: schema.User, Content: userContent},
+	messages := []brain.Message{
+		{Role: brain.RoleUser, Content: userContent},
 	}
 
-	checkpointID := uuid.New().String()
-	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
-	return consumeRunnerOutput(iter)
+	return runner.Run(ctx, messages)
 }

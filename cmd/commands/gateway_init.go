@@ -24,7 +24,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/eyes"
 	"github.com/dohr-michael/ozzie/internal/eyes/discord"
-	"github.com/dohr-michael/ozzie/internal/brain/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/heartbeat"
 	"github.com/dohr-michael/ozzie/internal/membridge"
 	layeredctx "github.com/dohr-michael/ozzie/internal/brain/memory/layered"

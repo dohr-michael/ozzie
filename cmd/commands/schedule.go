@@ -12,9 +12,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
-	"github.com/dohr-michael/ozzie/internal/skills"
+	"github.com/dohr-michael/ozzie/internal/brain/skills"
 )
 
 // NewScheduleCommand returns the schedule subcommand.

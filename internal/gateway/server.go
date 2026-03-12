@@ -15,9 +15,9 @@ import (
 	"filippo.io/age"
 
 	"github.com/dohr-michael/ozzie/internal/auth"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/gateway/ws"
-	"github.com/dohr-michael/ozzie/internal/plugins"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
 
@@ -33,7 +33,7 @@ type Server struct {
 }
 
 // NewServer creates a new gateway server.
-func NewServer(bus events.EventBus, store sessions.Store, host string, port int, perms *plugins.ToolPermissions, authenticator auth.Authenticator) *Server {
+func NewServer(bus events.EventBus, store sessions.Store, host string, port int, perms *conscience.ToolPermissions, authenticator auth.Authenticator) *Server {
 	insecure := authenticator == nil
 	hub := ws.NewHub(bus, store, perms, insecure)
 

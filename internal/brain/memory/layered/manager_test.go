@@ -7,9 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudwego/eino/schema"
-
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/brain"
 )
 
 func TestManagerApplyShortHistory(t *testing.T) {
@@ -19,11 +17,11 @@ func TestManagerApplyShortHistory(t *testing.T) {
 	cfg.MaxRecentMessages = 24
 	mgr := NewManager(store, cfg, nil)
 
-	msgs := []*schema.Message{
-		{Role: schema.User, Content: "hello"},
-		{Role: schema.Assistant, Content: "hi there"},
+	msgs := []brain.Message{
+		{Role: brain.RoleUser, Content: "hello"},
+		{Role: brain.RoleAssistant, Content: "hi there"},
 	}
-	history := []sessions.Message{
+	history := []brain.Message{
 		{Role: "user", Content: "hello", Ts: time.Now()},
 		{Role: "assistant", Content: "hi there", Ts: time.Now()},
 	}
@@ -57,23 +55,23 @@ func TestManagerApplyLongHistory(t *testing.T) {
 	mgr := NewManager(store, cfg, nil)
 
 	// Build a long history
-	history := make([]sessions.Message, 20)
+	history := make([]brain.Message, 20)
 	for i := range history {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		history[i] = sessions.Message{
+		history[i] = brain.Message{
 			Role:    role,
 			Content: "message about golang programming patterns and best practices number " + string(rune('A'+i%26)),
 			Ts:      time.Now(),
 		}
 	}
 
-	// Current messages (the schema versions)
-	msgs := make([]*schema.Message, len(history))
+	// Current messages (domain messages from history)
+	msgs := make([]brain.Message, len(history))
 	for i, h := range history {
-		msgs[i] = h.ToSchemaMessage()
+		msgs[i] = brain.Message{Role: h.Role, Content: h.Content}
 	}
 
 	result, ar, err := mgr.Apply(context.Background(), sessionID, msgs, history)
@@ -93,8 +91,8 @@ func TestManagerApplyLongHistory(t *testing.T) {
 	}
 
 	// First message should be the layered context
-	if len(result) > 0 && result[0].Role != schema.User {
-		t.Errorf("first message role = %q, want %q", result[0].Role, schema.User)
+	if len(result) > 0 && result[0].Role != brain.RoleUser {
+		t.Errorf("first message role = %q, want %q", result[0].Role, brain.RoleUser)
 	}
 
 	// Should contain layered context marker
@@ -125,17 +123,17 @@ func TestManagerApplyCreatesIndex(t *testing.T) {
 	cfg.ArchiveChunkSize = 4
 	mgr := NewManager(store, cfg, nil)
 
-	history := make([]sessions.Message, 12)
+	history := make([]brain.Message, 12)
 	for i := range history {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		history[i] = sessions.Message{Role: role, Content: "test content", Ts: time.Now()}
+		history[i] = brain.Message{Role: role, Content: "test content", Ts: time.Now()}
 	}
-	msgs := make([]*schema.Message, len(history))
+	msgs := make([]brain.Message, len(history))
 	for i, h := range history {
-		msgs[i] = h.ToSchemaMessage()
+		msgs[i] = brain.Message{Role: h.Role, Content: h.Content}
 	}
 
 	_, _, err := mgr.Apply(context.Background(), sessionID, msgs, history)

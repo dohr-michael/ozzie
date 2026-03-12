@@ -7,29 +7,29 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/urfave/cli/v3"
 
-	"github.com/dohr-michael/ozzie/internal/actors"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/brain/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/auth"
+	"github.com/dohr-michael/ozzie/internal/brain/conscience"
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/connectors"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/eyes"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
-	layeredctx "github.com/dohr-michael/ozzie/internal/memory/layered"
+	layeredctx "github.com/dohr-michael/ozzie/internal/brain/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/models"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/hands"
 	"github.com/dohr-michael/ozzie/internal/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
-	"github.com/dohr-michael/ozzie/internal/skills"
+	"github.com/dohr-michael/ozzie/internal/brain/skills"
 	"github.com/dohr-michael/ozzie/internal/tasks"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
@@ -73,12 +73,12 @@ type gateway struct {
 	// Models
 	registry    *models.Registry
 	chatModel   model.ToolCallingChatModel
-	defaultTier agent.ModelTier
+	defaultTier brain.ModelTier
 
 	// Tools
-	toolRegistry *plugins.ToolRegistry
-	toolPerms    *plugins.ToolPermissions
-	toolSet      *agent.ToolSet
+	toolRegistry *hands.ToolRegistry
+	toolPerms    *conscience.ToolPermissions
+	toolSet      *brain.ToolSet
 	tmpDir       string
 
 	// Skills
@@ -109,11 +109,11 @@ type gateway struct {
 	persona     string
 	factory     *agent.AgentFactory
 	eventRunner *agent.EventRunner
-	taskMws     []adk.AgentMiddleware
+	taskMws     []any
 	layered     *layeredctx.Manager
 
 	// Connectors
-	connectorManager *connectors.Manager
+	connectorManager *eyes.Manager
 
 	closers []func()
 }
@@ -229,15 +229,3 @@ func (a *extractorLLMAdapter) Summarize(ctx context.Context, prompt string) (str
 	return resp.Content, nil
 }
 
-func resolveLogLevel(s string) slog.Level {
-	switch strings.ToLower(s) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}

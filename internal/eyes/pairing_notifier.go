@@ -1,11 +1,11 @@
-package connectors
+package eyes
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // AdminSender can send messages to an admin channel.

@@ -1,11 +1,11 @@
-package connectors
+package eyes
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/pkg/connector"
 )
 

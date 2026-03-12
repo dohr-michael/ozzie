@@ -3,7 +3,7 @@ package scheduler
 import (
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // EventTrigger describes an event-based trigger for a schedule entry.

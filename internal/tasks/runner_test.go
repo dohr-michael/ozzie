@@ -266,7 +266,7 @@ func TestBuildDependencyContext_MissingDep(t *testing.T) {
 
 // --- buildMemoryContext tests ---
 
-// mockRetriever implements agent.MemoryRetriever for testing.
+// mockRetriever implements brain.MemoryRetriever for testing.
 type mockRetriever struct {
 	results []memory.RetrievedMemory
 	err     error

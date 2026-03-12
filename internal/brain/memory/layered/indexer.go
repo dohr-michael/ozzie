@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/prompt"
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/brain/prompt"
 )
 
 // Summarizer produces a summary of text within a target token budget.
@@ -119,7 +119,7 @@ func NewIndexer(store *Store, summarizer Summarizer, cfg Config) *Indexer {
 }
 
 // BuildOrUpdate builds or incrementally updates the index for a session.
-func (ix *Indexer) BuildOrUpdate(ctx context.Context, sessionID string, archived []sessions.Message) (*Index, error) {
+func (ix *Indexer) BuildOrUpdate(ctx context.Context, sessionID string, archived []brain.Message) (*Index, error) {
 	existing, err := ix.store.LoadIndex(sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load index: %w", err)
@@ -234,14 +234,14 @@ func (ix *Indexer) BuildOrUpdate(ctx context.Context, sessionID string, archived
 
 // chunkMessages splits messages into groups of ArchiveChunkSize,
 // keeping tool_use+tool_result pairs together.
-func (ix *Indexer) chunkMessages(messages []sessions.Message) [][]sessions.Message {
+func (ix *Indexer) chunkMessages(messages []brain.Message) [][]brain.Message {
 	size := ix.cfg.ArchiveChunkSize
 	if size <= 0 {
 		size = 8
 	}
 
-	var chunks [][]sessions.Message
-	var current []sessions.Message
+	var chunks [][]brain.Message
+	var current []brain.Message
 
 	for i := 0; i < len(messages); i++ {
 		current = append(current, messages[i])
@@ -288,7 +288,7 @@ func (ix *Indexer) buildRoot(ctx context.Context, nodes []Node) (Root, error) {
 }
 
 // formatTranscript converts messages to a readable transcript.
-func formatTranscript(messages []sessions.Message) string {
+func formatTranscript(messages []brain.Message) string {
 	var sb strings.Builder
 	for _, m := range messages {
 		sb.WriteString("[")

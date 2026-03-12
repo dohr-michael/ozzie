@@ -6,11 +6,11 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/hands"
 )
 
-// toolSpecToMCPTool converts a plugins.ToolSpec to an mcp.Tool with JSON Schema.
-func toolSpecToMCPTool(spec *plugins.ToolSpec) *mcpsdk.Tool {
+// toolSpecToMCPTool converts a hands.ToolSpec to an mcp.Tool with JSON Schema.
+func toolSpecToMCPTool(spec *hands.ToolSpec) *mcpsdk.Tool {
 	props := make(map[string]any, len(spec.Parameters))
 	var required []string
 

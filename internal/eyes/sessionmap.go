@@ -1,4 +1,4 @@
-package connectors
+package eyes
 
 import (
 	"encoding/json"

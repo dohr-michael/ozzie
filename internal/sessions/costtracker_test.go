@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 func publishLLMEvent(bus *events.Bus, sessionID, phase string, tokensIn, tokensOut int) {

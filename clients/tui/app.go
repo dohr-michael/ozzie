@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/ui/components"
 )
 

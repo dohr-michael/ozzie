@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/brain"
-	"github.com/dohr-michael/ozzie/internal/brain/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // preemptionTimeout is the hard cancel delay after a cooperative preemption request.

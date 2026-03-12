@@ -1,4 +1,4 @@
-package connectors
+package eyes
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/policy"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/pkg/connector"

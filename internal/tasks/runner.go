@@ -10,24 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/components/model"
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/google/uuid"
-
-	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/models"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // ErrPreempted is returned when a task is preempted by a higher-priority request.
 var ErrPreempted = errors.New("task preempted")
-
-// ToolPermissionsSeeder can seed per-session tool permissions.
-type ToolPermissionsSeeder interface {
-	AllowForSession(sessionID, toolName string)
-}
 
 // TaskRunner executes a single task using an ephemeral agent.
 type TaskRunner struct {
@@ -35,13 +23,14 @@ type TaskRunner struct {
 	store Store
 	bus   events.EventBus
 
-	chatModel       model.ToolCallingChatModel
-	toolRegistry    agent.ToolLookup
+	runnerFactory   brain.RunnerFactory
+	modelName       string
+	toolLookup      brain.ToolLookup
 	skillRunner     SkillExecutor
 	preemptionCheck func() bool
-	middlewares     []adk.AgentMiddleware
-	retriever       agent.MemoryRetriever // pre-task memory retrieval (optional)
-	tier            agent.ModelTier       // model tier for prompt adaptation
+	middlewares     []any                 // opaque, passed to RunnerFactory
+	retriever       brain.MemoryRetriever // pre-task memory retrieval (optional)
+	tier            brain.ModelTier       // model tier for prompt adaptation
 	promptPrefix    string                // overlay-specific prompt prefix
 	perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 	clientFacing    bool                  // inject persona into sub-agent instruction
@@ -52,13 +41,14 @@ type TaskRunner struct {
 type TaskRunnerConfig struct {
 	Store           Store
 	Bus             events.EventBus
-	ChatModel       model.ToolCallingChatModel
-	ToolRegistry    agent.ToolLookup
+	RunnerFactory   brain.RunnerFactory
+	ModelName       string                // provider/model name for CreateRunner
+	ToolLookup      brain.ToolLookup
 	SkillRunner     SkillExecutor
 	PreemptionCheck func() bool
-	Middlewares     []adk.AgentMiddleware // middlewares for sub-agents (e.g. filesystem, reduction)
-	Retriever       agent.MemoryRetriever // pre-task memory retrieval (optional)
-	Tier            agent.ModelTier       // model tier for prompt adaptation
+	Middlewares     []any                 // opaque middlewares for sub-agents (e.g. filesystem, reduction)
+	Retriever       brain.MemoryRetriever // pre-task memory retrieval (optional)
+	Tier            brain.ModelTier       // model tier for prompt adaptation
 	PromptPrefix    string                // overlay-specific prompt prefix (optional)
 	Perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 	ClientFacing    bool                  // inject persona into sub-agent instruction
@@ -67,23 +57,16 @@ type TaskRunnerConfig struct {
 
 // NewTaskRunner creates a runner for a specific task.
 func NewTaskRunner(task *Task, cfg TaskRunnerConfig) *TaskRunner {
-	// Prepend tool recovery middleware so sub-agents can self-correct on tool errors
-	recoveryMw := adk.AgentMiddleware{
-		WrapToolCall: agent.NewToolRecoveryMiddleware(agent.ToolRecoveryConfig{}),
-	}
-	mws := make([]adk.AgentMiddleware, 0, 1+len(cfg.Middlewares))
-	mws = append(mws, recoveryMw)
-	mws = append(mws, cfg.Middlewares...)
-
 	return &TaskRunner{
 		task:            task,
 		store:           cfg.Store,
 		bus:             cfg.Bus,
-		chatModel:       cfg.ChatModel,
-		toolRegistry:    cfg.ToolRegistry,
+		runnerFactory:   cfg.RunnerFactory,
+		modelName:       cfg.ModelName,
+		toolLookup:      cfg.ToolLookup,
 		skillRunner:     cfg.SkillRunner,
 		preemptionCheck: cfg.PreemptionCheck,
-		middlewares:     mws,
+		middlewares:     cfg.Middlewares,
 		retriever:       cfg.Retriever,
 		tier:            cfg.Tier,
 		promptPrefix:    cfg.PromptPrefix,
@@ -169,9 +152,9 @@ func (r *TaskRunner) preemptTask(task *Task) error {
 }
 
 func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt time.Time) error {
-	var tools []tool.InvokableTool
+	var tools []brain.Tool
 	if len(task.Config.Tools) > 0 {
-		tools = r.toolRegistry.ToolsByNames(task.Config.Tools)
+		tools = r.toolLookup.ToolsByNames(task.Config.Tools)
 	}
 
 	depContext := buildDependencyContext(r.store, task.DependsOn)
@@ -196,23 +179,32 @@ func (r *TaskRunner) runSingleStep(ctx context.Context, task *Task, startedAt ti
 		"instruction_len", len(instruction),
 	)
 
-	runner, err := agent.NewAgentBuffered(ctx, r.chatModel, instruction, tools, r.middlewares, agent.AgentOptions{MaxIterations: taskMaxIterations})
-	if err != nil {
-		return r.failTask(task, startedAt, fmt.Errorf("create agent: %w", err))
-	}
-
-	messages := []*schema.Message{
-		{Role: schema.User, Content: task.Description},
-	}
-
-	output, err := r.consumeRunnerOutput(ctx, runner, messages)
+	runner, err := r.runnerFactory.CreateRunner(ctx, r.modelName, instruction, tools,
+		brain.WithMaxIterations(taskMaxIterations),
+		brain.WithMiddlewares(r.middlewares),
+		brain.WithPreemptionCheck(r.isPreempted),
+	)
 	if err != nil {
 		// Model unavailable: don't fail task, let actor pool handle retry
-		var unavail *models.ErrModelUnavailable
+		var unavail *brain.ErrModelUnavailable
 		if errors.As(err, &unavail) {
 			return err
 		}
-		if errors.Is(err, ErrPreempted) {
+		return r.failTask(task, startedAt, fmt.Errorf("create agent: %w", err))
+	}
+
+	messages := []brain.Message{
+		{Role: brain.RoleUser, Content: task.Description},
+	}
+
+	output, err := runner.Run(ctx, messages)
+	if err != nil {
+		// Model unavailable: don't fail task, let actor pool handle retry
+		var unavail *brain.ErrModelUnavailable
+		if errors.As(err, &unavail) {
+			return err
+		}
+		if errors.Is(err, brain.ErrRunnerPreempted) {
 			return r.preemptTask(task)
 		}
 		return r.failTask(task, startedAt, err)
@@ -229,19 +221,6 @@ func (r *TaskRunner) runSkillStep(ctx context.Context, task *Task, startedAt tim
 		return r.failTask(task, startedAt, fmt.Errorf("skill %s: %w", task.Config.Skill, err))
 	}
 	return r.completeTask(task, startedAt, output)
-}
-
-func (r *TaskRunner) consumeRunnerOutput(ctx context.Context, runner *adk.Runner, messages []*schema.Message) (string, error) {
-	checkpointID := uuid.New().String()
-	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
-
-	content, err := agent.ConsumeIterator(iter, agent.IterCallbacks{
-		ShouldPreempt: r.isPreempted,
-	})
-	if errors.Is(err, agent.ErrIterPreempted) {
-		return content, ErrPreempted
-	}
-	return content, err
 }
 
 func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string) error {
@@ -342,7 +321,7 @@ func (r *TaskRunner) buildMemoryContext(ctx context.Context) string {
 
 	limit := 5
 	maxLen := maxMemoryContextLen
-	if r.tier == agent.TierSmall {
+	if r.tier == brain.TierSmall {
 		limit = 2
 		maxLen = 800
 	}
@@ -435,4 +414,26 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// NewTaskExecutorFactory returns a brain.TaskExecutorFactory that creates TaskRunner instances.
+func NewTaskExecutorFactory() brain.TaskExecutorFactory {
+	return func(task *brain.Task, cfg brain.TaskExecutorConfig) brain.TaskExecutor {
+		return NewTaskRunner(task, TaskRunnerConfig{
+			Store:           cfg.Store,
+			Bus:             cfg.Bus,
+			RunnerFactory:   cfg.RunnerFactory,
+			ModelName:       cfg.ModelName,
+			ToolLookup:      cfg.ToolLookup,
+			SkillRunner:     cfg.SkillRunner,
+			PreemptionCheck: cfg.PreemptionCheck,
+			Middlewares:     cfg.Middlewares,
+			Retriever:       cfg.Retriever,
+			Tier:            cfg.Tier,
+			PromptPrefix:    cfg.PromptPrefix,
+			Perms:           cfg.Perms,
+			ClientFacing:    cfg.ClientFacing,
+			Persona:         cfg.Persona,
+		})
+	}
 }

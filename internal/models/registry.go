@@ -9,7 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 
-	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/brain"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 )
@@ -162,19 +162,19 @@ func (r *Registry) ContextWindow(name string) int {
 }
 
 // ProviderTier returns the resolved ModelTier for the named provider.
-func (r *Registry) ProviderTier(name string) agent.ModelTier {
+func (r *Registry) ProviderTier(name string) brain.ModelTier {
 	r.mu.RLock()
 	entry, ok := r.providers[name]
 	r.mu.RUnlock()
 
 	if !ok {
-		return agent.TierLarge
+		return brain.TierLarge
 	}
-	return agent.ResolveTier(entry.Config.Tier, resolveContextWindow(entry.Config))
+	return brain.ResolveTier(entry.Config.Tier, resolveContextWindow(entry.Config))
 }
 
 // DefaultTier returns the ModelTier for the default provider.
-func (r *Registry) DefaultTier() agent.ModelTier {
+func (r *Registry) DefaultTier() brain.ModelTier {
 	return r.ProviderTier(r.defaultName)
 }
 

@@ -1,7 +1,7 @@
 package scheduler
 
 import (
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // MatchEvent returns true if the event matches the given trigger.

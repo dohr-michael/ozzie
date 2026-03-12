@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/core/events"
+	"github.com/dohr-michael/ozzie/internal/hands"
 )
 
 func TestToolSpecToMCPTool(t *testing.T) {
-	spec := &plugins.ToolSpec{
+	spec := &hands.ToolSpec{
 		Name:        "test_tool",
 		Description: "A test tool",
-		Parameters: map[string]plugins.ParamSpec{
+		Parameters: map[string]hands.ParamSpec{
 			"name": {
 				Type:        "string",
 				Description: "The name",
@@ -93,10 +93,10 @@ func TestToolSpecToMCPTool(t *testing.T) {
 }
 
 func TestToolSpecToMCPTool_NoParams(t *testing.T) {
-	spec := &plugins.ToolSpec{
+	spec := &hands.ToolSpec{
 		Name:        "simple",
 		Description: "A simple tool",
-		Parameters:  map[string]plugins.ParamSpec{},
+		Parameters:  map[string]hands.ParamSpec{},
 	}
 
 	mcpTool := toolSpecToMCPTool(spec)
@@ -124,10 +124,10 @@ func TestNewMCPServer_AllTools(t *testing.T) {
 	bus := events.NewBus(16)
 	defer bus.Close()
 
-	registry := plugins.NewToolRegistry(bus)
+	registry := hands.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", hands.NewExecuteTool(), hands.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,10 +141,10 @@ func TestNewMCPServer_WithFilter(t *testing.T) {
 	bus := events.NewBus(16)
 	defer bus.Close()
 
-	registry := plugins.NewToolRegistry(bus)
+	registry := hands.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", hands.NewExecuteTool(), hands.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,10 +159,10 @@ func TestMatchesFilter(t *testing.T) {
 	bus := events.NewBus(16)
 	defer bus.Close()
 
-	registry := plugins.NewToolRegistry(bus)
+	registry := hands.NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	if err := registry.RegisterNative("run_command", plugins.NewExecuteTool(), plugins.ExecuteManifest()); err != nil {
+	if err := registry.RegisterNative("run_command", hands.NewExecuteTool(), hands.ExecuteManifest()); err != nil {
 		t.Fatal(err)
 	}
 

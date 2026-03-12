@@ -8,9 +8,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	ozziemcp "github.com/dohr-michael/ozzie/internal/mcp"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/hands"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -53,7 +53,7 @@ func runMCPServe(_ context.Context, cmd *cli.Command) error {
 	defer bus.Close()
 
 	// Load tools without dangerous wrappers — MCP clients handle their own confirmations
-	toolRegistry, err := plugins.SetupToolRegistry(ctx, cfg, bus)
+	toolRegistry, err := hands.SetupToolRegistry(ctx, cfg, bus)
 	if err != nil {
 		return err
 	}

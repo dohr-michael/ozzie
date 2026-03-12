@@ -4,7 +4,7 @@ import (
 	"time"
 
 	wsclient "github.com/dohr-michael/ozzie/clients/ws"
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // StreamStartMsg signals the beginning of a streaming response.

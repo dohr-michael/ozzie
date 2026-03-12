@@ -59,7 +59,7 @@ func (hr *HybridRetriever) Wait() {
 }
 
 // Retrieve finds the most relevant memories using hybrid scoring.
-// It satisfies the agent.MemoryRetriever interface.
+// It satisfies the brain.MemoryRetriever interface.
 func (hr *HybridRetriever) Retrieve(ctx context.Context, query string, tags []string, limit int) ([]RetrievedMemory, error) {
 	if limit <= 0 {
 		limit = 5

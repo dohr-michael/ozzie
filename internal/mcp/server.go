@@ -6,13 +6,13 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/hands"
 )
 
 // NewMCPServer creates an MCP server exposing tools from the registry.
 // If filter is non-empty, only tools matching the filter (by tool name or
 // plugin name) are exposed.
-func NewMCPServer(registry *plugins.ToolRegistry, filter string) *mcpsdk.Server {
+func NewMCPServer(registry *hands.ToolRegistry, filter string) *mcpsdk.Server {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "ozzie",
 		Version: "0.1.0",
@@ -57,7 +57,7 @@ func NewMCPServer(registry *plugins.ToolRegistry, filter string) *mcpsdk.Server 
 
 // matchesFilter checks if a tool name matches the filter.
 // The filter can be a tool name or a plugin name (exposing all tools of that plugin).
-func matchesFilter(registry *plugins.ToolRegistry, toolName, filter string) bool {
+func matchesFilter(registry *hands.ToolRegistry, toolName, filter string) bool {
 	if toolName == filter {
 		return true
 	}

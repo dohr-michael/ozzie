@@ -8,17 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/sessions"
+	"github.com/dohr-michael/ozzie/internal/brain"
 )
 
-func makeMessages(n int) []sessions.Message {
-	msgs := make([]sessions.Message, n)
+func makeMessages(n int) []brain.Message {
+	msgs := make([]brain.Message, n)
 	for i := range msgs {
 		role := "user"
 		if i%2 == 1 {
 			role = "assistant"
 		}
-		msgs[i] = sessions.Message{
+		msgs[i] = brain.Message{
 			Role:    role,
 			Content: "message content number " + string(rune('A'+i%26)),
 			Ts:      time.Now(),

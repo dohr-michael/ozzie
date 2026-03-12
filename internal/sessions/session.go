@@ -4,9 +4,8 @@ package sessions
 import (
 	"time"
 
-	"github.com/cloudwego/eino/schema"
-
-	"github.com/dohr-michael/ozzie/internal/events"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // SessionStatus represents the lifecycle state of a session.
@@ -21,11 +20,9 @@ const (
 // These are displayed in TUI history but filtered out before sending to the LLM.
 const RoleToolLog = "tool_log"
 
-// TokenUsage tracks cumulative token consumption for a session.
-type TokenUsage struct {
-	Input  int `json:"input"`
-	Output int `json:"output"`
-}
+// TokenUsage tracks cumulative token consumption.
+// Canonical definition lives in brain.TokenUsage.
+type TokenUsage = brain.TokenUsage
 
 // Session holds metadata about a conversation session.
 type Session struct {
@@ -52,23 +49,6 @@ type Message struct {
 	Role    string    `json:"role"`
 	Content string    `json:"content"`
 	Ts      time.Time `json:"ts"`
-}
-
-// ToSchemaMessage converts a session Message to an Eino schema.Message.
-func (m Message) ToSchemaMessage() *schema.Message {
-	return &schema.Message{
-		Role:    schema.RoleType(m.Role),
-		Content: m.Content,
-	}
-}
-
-// NewMessageFromSchema converts an Eino schema.Message to a session Message.
-func NewMessageFromSchema(msg *schema.Message) Message {
-	return Message{
-		Role:    string(msg.Role),
-		Content: msg.Content,
-		Ts:      time.Now(),
-	}
 }
 
 // Store defines the persistence interface for sessions.

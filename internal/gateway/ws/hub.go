@@ -10,8 +10,8 @@ import (
 	"filippo.io/age"
 	"github.com/coder/websocket"
 
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/brain/conscience"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 )
@@ -39,7 +39,7 @@ type Hub struct {
 	bus            events.EventBus
 	store          sessions.Store
 	tasks          TaskHandler
-	perms          *plugins.ToolPermissions
+	perms          *conscience.ToolPermissions
 	unsubscribe    func()
 	recipient      *age.X25519Recipient // nil = encryption disabled
 	passwordTokens sync.Map             // token → bool
@@ -47,7 +47,7 @@ type Hub struct {
 }
 
 // NewHub creates a new WebSocket hub connected to an event bus.
-func NewHub(bus events.EventBus, store sessions.Store, perms *plugins.ToolPermissions, insecure bool) *Hub {
+func NewHub(bus events.EventBus, store sessions.Store, perms *conscience.ToolPermissions, insecure bool) *Hub {
 	h := &Hub{
 		clients:  make(map[*Client]struct{}),
 		bus:      bus,

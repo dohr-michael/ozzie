@@ -8,21 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
-	"github.com/google/uuid"
-
-	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/events"
-	"github.com/dohr-michael/ozzie/internal/models"
-	"github.com/dohr-michael/ozzie/internal/plugins"
+	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // RunnerConfig holds dependencies for running skills.
 type RunnerConfig struct {
-	ModelRegistry *models.Registry
-	ToolRegistry  *plugins.ToolRegistry
+	RunnerFactory brain.RunnerFactory
+	ToolLookup    brain.ToolLookup
 	EventBus      events.EventBus
 	Verifier      *Verifier
 }
@@ -172,38 +165,25 @@ func (wr *WorkflowRunner) runStep(ctx context.Context, stepID string, vars map[s
 
 	start := time.Now()
 
-	// Resolve model
-	chatModel, err := wr.cfg.ModelRegistry.Get(ctx, modelName)
-	if err != nil {
-		// Fallback to default model
-		chatModel, err = wr.cfg.ModelRegistry.Default(ctx)
-		if err != nil {
-			wr.emitStepCompleted(sessionID, stepID, step.Title, "", err, start)
-			return "", fmt.Errorf("resolve model for step %q: %w", stepID, err)
-		}
-	}
-
 	// Resolve tools for this step
 	stepTools := wr.resolveTools(step.Tools)
 
 	// Build instruction with injected previous results
 	instruction := wr.buildStepInstruction(step, vars, prevResults)
 
-	// Create ephemeral agent using agent.NewAgent
-	runner, err := agent.NewAgent(ctx, chatModel, instruction, stepTools, nil)
+	// Create ephemeral agent via RunnerFactory
+	runner, err := wr.cfg.RunnerFactory.CreateRunner(ctx, modelName, instruction, stepTools)
 	if err != nil {
 		wr.emitStepCompleted(sessionID, stepID, step.Title, "", err, start)
 		return "", fmt.Errorf("create agent for step %q: %w", stepID, err)
 	}
 
 	// Run the agent
-	messages := []*schema.Message{
-		{Role: schema.User, Content: "Execute this step."},
+	messages := []brain.Message{
+		{Role: brain.RoleUser, Content: "Execute this step."},
 	}
 
-	checkpointID := uuid.New().String()
-	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
-	output, err := consumeRunnerOutput(iter)
+	output, err := runner.Run(ctx, messages)
 
 	// Verify-and-retry loop
 	if err == nil && step.Acceptance.HasCriteria() && wr.cfg.Verifier != nil {
@@ -303,14 +283,6 @@ func (wr *WorkflowRunner) retryStep(ctx context.Context, step *Step, previousOut
 		modelName = wr.model
 	}
 
-	chatModel, err := wr.cfg.ModelRegistry.Get(ctx, modelName)
-	if err != nil {
-		chatModel, err = wr.cfg.ModelRegistry.Default(ctx)
-		if err != nil {
-			return "", fmt.Errorf("resolve model for retry: %w", err)
-		}
-	}
-
 	stepTools := wr.resolveTools(step.Tools)
 
 	// Build augmented instruction
@@ -318,34 +290,27 @@ func (wr *WorkflowRunner) retryStep(ctx context.Context, step *Step, previousOut
 	instruction += fmt.Sprintf("\n\n## Previous Attempt Output\n\n%s", previousOutput)
 	instruction += fmt.Sprintf("\n\n## Verification Feedback\n\nThe previous output did not pass verification. Issues:\n%s\n\nPlease fix these issues and produce an improved output.", feedback)
 
-	runner, err := agent.NewAgent(ctx, chatModel, instruction, stepTools, nil)
+	runner, err := wr.cfg.RunnerFactory.CreateRunner(ctx, modelName, instruction, stepTools)
 	if err != nil {
 		return "", fmt.Errorf("create retry agent: %w", err)
 	}
 
-	messages := []*schema.Message{
-		{Role: schema.User, Content: "Re-execute this step, addressing the verification feedback."},
+	messages := []brain.Message{
+		{Role: brain.RoleUser, Content: "Re-execute this step, addressing the verification feedback."},
 	}
 
-	checkpointID := uuid.New().String()
-	iter := runner.Run(ctx, messages, adk.WithCheckPointID(checkpointID))
-	return consumeRunnerOutput(iter)
+	return runner.Run(ctx, messages)
 }
 
-func (wr *WorkflowRunner) resolveTools(toolNames []string) []tool.InvokableTool {
+func (wr *WorkflowRunner) resolveTools(toolNames []string) []brain.Tool {
 	if len(toolNames) == 0 {
 		return nil
 	}
-
-	var result []tool.InvokableTool
-	for _, name := range toolNames {
-		if t := wr.cfg.ToolRegistry.Tool(name); t != nil {
-			result = append(result, t)
-		} else {
-			slog.Warn("tool not found for step", "tool", name)
-		}
+	tools := wr.cfg.ToolLookup.ToolsByNames(toolNames)
+	if len(tools) < len(toolNames) {
+		slog.Warn("some tools not found for step", "requested", toolNames, "resolved", len(tools))
 	}
-	return result
+	return tools
 }
 
 func (wr *WorkflowRunner) emitStepCompleted(sessionID, stepID, stepTitle, output string, err error, start time.Time) {
@@ -360,9 +325,4 @@ func (wr *WorkflowRunner) emitStepCompleted(sessionID, stepID, stepTitle, output
 		payload.Error = err.Error()
 	}
 	wr.cfg.EventBus.Publish(events.NewTypedEventWithSession(events.SourceSkill, payload, sessionID))
-}
-
-// consumeRunnerOutput drains an ADK AsyncIterator and returns the concatenated text output.
-func consumeRunnerOutput(iter *adk.AsyncIterator[*adk.AgentEvent]) (string, error) {
-	return agent.ConsumeIterator(iter, agent.IterCallbacks{})
 }
