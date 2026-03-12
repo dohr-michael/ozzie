@@ -24,7 +24,7 @@ import (
 	ozzieGateway "github.com/dohr-michael/ozzie/internal/gateway"
 	layeredctx "github.com/dohr-michael/ozzie/internal/core/layered"
 	"github.com/dohr-michael/ozzie/internal/infra/models"
-	"github.com/dohr-michael/ozzie/internal/hands"
+	"github.com/dohr-michael/ozzie/internal/infra/hands"
 	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/infra/scheduler"
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"

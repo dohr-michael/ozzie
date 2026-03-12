@@ -6,7 +6,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/dohr-michael/ozzie/internal/hands"
+	"github.com/dohr-michael/ozzie/internal/infra/hands"
 )
 
 // toolSpecToMCPTool converts a hands.ToolSpec to an mcp.Tool with JSON Schema.

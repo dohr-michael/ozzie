@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/hands"
+	"github.com/dohr-michael/ozzie/internal/infra/hands"
 )
 
 func TestToolSpecToMCPTool(t *testing.T) {

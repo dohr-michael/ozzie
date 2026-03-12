@@ -10,7 +10,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	ozziemcp "github.com/dohr-michael/ozzie/internal/mcp"
-	"github.com/dohr-michael/ozzie/internal/hands"
+	"github.com/dohr-michael/ozzie/internal/infra/hands"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
