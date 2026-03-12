@@ -9,7 +9,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/config"
 	"github.com/dohr-michael/ozzie/internal/secrets"
 )

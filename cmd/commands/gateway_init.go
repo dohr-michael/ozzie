@@ -16,7 +16,7 @@ import (
 	einoFs "github.com/cloudwego/eino/adk/middlewares/filesystem"
 	einoReduction "github.com/cloudwego/eino/adk/middlewares/reduction"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/brain/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/brain/conscience"

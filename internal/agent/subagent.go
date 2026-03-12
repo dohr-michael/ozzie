@@ -3,7 +3,7 @@ package agent
 import (
 	"github.com/cloudwego/eino/adk"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 )
 
 // NewSubAgentMiddleware returns an AgentMiddleware that injects SubAgentInstructions

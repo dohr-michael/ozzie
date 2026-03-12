@@ -1,6 +1,6 @@
 package tasks
 
-import "github.com/dohr-michael/ozzie/internal/brain"
+import "github.com/dohr-michael/ozzie/internal/core/brain"
 
 // TaskSubmitter is the interface for submitting and managing tasks.
 // Canonical definition lives in brain.TaskSubmitter.

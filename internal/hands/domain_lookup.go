@@ -2,7 +2,7 @@ package hands
 
 import (
 	"github.com/dohr-michael/ozzie/internal/agent"
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 )
 
 // domainToolLookupAdapter wraps a ToolRegistry as a brain.ToolLookup.

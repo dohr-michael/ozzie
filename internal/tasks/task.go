@@ -1,7 +1,7 @@
 // Package tasks provides persistent task management for async agent execution.
 package tasks
 
-import "github.com/dohr-michael/ozzie/internal/brain"
+import "github.com/dohr-michael/ozzie/internal/core/brain"
 
 // Type aliases — canonical definitions live in brain/ (domain layer).
 

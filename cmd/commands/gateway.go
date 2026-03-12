@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/urfave/cli/v3"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/brain/actors"
 	"github.com/dohr-michael/ozzie/internal/agent"
 	"github.com/dohr-michael/ozzie/internal/auth"

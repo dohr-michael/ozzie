@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/prompt"
 )
 

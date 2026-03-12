@@ -1,6 +1,6 @@
 package tasks
 
-import "github.com/dohr-michael/ozzie/internal/brain"
+import "github.com/dohr-michael/ozzie/internal/core/brain"
 
 // SkillExecutor runs a skill by name. Decouples tasks from the skills package.
 // Canonical definition lives in brain.SkillExecutor.

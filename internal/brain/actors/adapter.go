@@ -1,6 +1,6 @@
 package actors
 
-import "github.com/dohr-michael/ozzie/internal/brain"
+import "github.com/dohr-michael/ozzie/internal/core/brain"
 
 // PoolAdapter wraps ActorPool to implement brain.CapacityPool.
 type PoolAdapter struct {

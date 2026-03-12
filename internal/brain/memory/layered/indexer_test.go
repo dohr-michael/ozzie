@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 )
 
 func makeMessages(n int) []brain.Message {

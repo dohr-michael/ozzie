@@ -15,7 +15,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
-	"github.com/dohr-michael/ozzie/internal/brain"
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/events"
 	layeredctx "github.com/dohr-michael/ozzie/internal/brain/memory/layered"
 	"github.com/dohr-michael/ozzie/internal/sessions"
