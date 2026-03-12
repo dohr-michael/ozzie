@@ -12,7 +12,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/membridge"
+	"github.com/dohr-michael/ozzie/internal/infra/membridge"
 	"github.com/dohr-michael/ozzie/internal/infra/models"
 	"github.com/dohr-michael/ozzie/pkg/memory"
 )
