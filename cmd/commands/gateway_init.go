@@ -18,7 +18,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/actors"
-	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/infra/agent"
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
 	"github.com/dohr-michael/ozzie/internal/core/introspection"
 	"github.com/dohr-michael/ozzie/internal/config"

@@ -1,7 +1,7 @@
 package hands
 
 import (
-	"github.com/dohr-michael/ozzie/internal/agent"
+	"github.com/dohr-michael/ozzie/internal/infra/agent"
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 )
 
