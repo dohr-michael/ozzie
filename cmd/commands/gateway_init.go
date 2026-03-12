@@ -32,7 +32,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/hands"
 	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/core/prompt"
-	"github.com/dohr-michael/ozzie/internal/scheduler"
+	"github.com/dohr-michael/ozzie/internal/infra/scheduler"
 	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 	"github.com/dohr-michael/ozzie/internal/infra/sessions"
 	"github.com/dohr-michael/ozzie/internal/core/skills"

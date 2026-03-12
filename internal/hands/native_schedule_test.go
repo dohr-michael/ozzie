@@ -8,7 +8,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/actors"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/scheduler"
+	"github.com/dohr-michael/ozzie/internal/infra/scheduler"
 	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
 
