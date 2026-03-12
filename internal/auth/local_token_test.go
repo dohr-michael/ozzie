@@ -8,7 +8,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 func TestNewLocalAuth(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/embedding/openai"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // EmbeddingFingerprint returns a unique string identifying the embedding config.

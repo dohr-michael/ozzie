@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // loadConfigWithKeyRing loads the config with optional age-key decryption.

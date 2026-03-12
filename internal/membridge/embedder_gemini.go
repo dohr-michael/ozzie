@@ -8,7 +8,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // geminiEmbedder wraps the Google genai SDK to implement Eino's embedding.Embedder.

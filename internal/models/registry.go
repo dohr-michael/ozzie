@@ -11,7 +11,7 @@ import (
 
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // defaultContextWindows maps known model prefixes to their context window sizes.

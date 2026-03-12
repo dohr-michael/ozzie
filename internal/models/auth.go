@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // AuthKind distinguishes between API key and Bearer token auth.

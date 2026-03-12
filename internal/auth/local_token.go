@@ -11,7 +11,7 @@ import (
 
 	"filippo.io/age"
 
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // LocalAuth implements Authenticator using an age-encrypted filesystem token.

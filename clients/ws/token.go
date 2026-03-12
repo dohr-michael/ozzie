@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // DiscoverLocalToken reads and decrypts the local token from $OZZIE_PATH/.local_token.

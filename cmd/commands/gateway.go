@@ -27,7 +27,7 @@ import (
 	"github.com/dohr-michael/ozzie/internal/hands"
 	"github.com/dohr-michael/ozzie/internal/core/policy"
 	"github.com/dohr-michael/ozzie/internal/scheduler"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 	"github.com/dohr-michael/ozzie/internal/sessions"
 	"github.com/dohr-michael/ozzie/internal/core/skills"
 	"github.com/dohr-michael/ozzie/internal/tasks"

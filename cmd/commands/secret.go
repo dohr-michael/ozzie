@@ -12,7 +12,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/dohr-michael/ozzie/internal/config"
-	"github.com/dohr-michael/ozzie/internal/secrets"
+	"github.com/dohr-michael/ozzie/internal/infra/secrets"
 )
 
 // NewSecretCommand returns the secret management subcommand.
