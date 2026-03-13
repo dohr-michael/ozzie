@@ -159,20 +159,22 @@ func (pr *ProgressReactor) resolveReactioner(connName string) (connector.Reactio
 // toolReaction maps a tool name to its semantic ReactionType.
 func toolReaction(toolName string) connector.ReactionType {
 	switch toolName {
-	case "web_search", "web_fetch":
+	case "web", "web_search", "web_fetch":
 		return connector.ReactionWeb
 	case "run_command":
 		return connector.ReactionCommand
 	case "str_replace_editor":
 		return connector.ReactionEdit
-	case "submit_task", "plan_task":
+	case "submit_task":
 		return connector.ReactionTask
-	case "store_memory", "query_memories", "forget_memory":
+	case "store_memory", "forget_memory":
 		return connector.ReactionMemory
 	case "schedule_task", "trigger_schedule":
 		return connector.ReactionSchedule
-	case "activate_tools", "activate_skill":
+	case "activate":
 		return connector.ReactionActivate
+	case "query_tasks", "cancel_task":
+		return connector.ReactionTask
 	default:
 		return connector.ReactionTool
 	}

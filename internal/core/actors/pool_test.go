@@ -1,16 +1,131 @@
 package actors
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/events"
-	"github.com/dohr-michael/ozzie/internal/infra/tasks"
 )
+
+// memStore is a minimal in-memory brain.TaskStore for tests (no infra dependency).
+type memStore struct {
+	mu          sync.Mutex
+	tasks       map[string]*brain.Task
+	checkpoints map[string][]brain.Checkpoint
+	outputs     map[string]string
+}
+
+func newMemStore() *memStore {
+	return &memStore{
+		tasks:       make(map[string]*brain.Task),
+		checkpoints: make(map[string][]brain.Checkpoint),
+		outputs:     make(map[string]string),
+	}
+}
+
+func (s *memStore) Create(t *brain.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t.ID == "" {
+		t.ID = fmt.Sprintf("task_%d", len(s.tasks)+1)
+	}
+	if t.Status == "" {
+		t.Status = brain.TaskPending
+	}
+	if t.Priority == "" {
+		t.Priority = brain.PriorityNormal
+	}
+	t.CreatedAt = time.Now()
+	t.UpdatedAt = t.CreatedAt
+	cp := *t
+	s.tasks[t.ID] = &cp
+	return nil
+}
+
+func (s *memStore) Get(id string) (*brain.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tasks[id]
+	if !ok {
+		return nil, fmt.Errorf("task not found: %s", id)
+	}
+	cp := *t
+	return &cp, nil
+}
+
+func (s *memStore) List(filter brain.ListFilter) ([]*brain.Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []*brain.Task
+	for _, t := range s.tasks {
+		if filter.Status != "" && t.Status != filter.Status {
+			continue
+		}
+		if filter.SessionID != "" && t.SessionID != filter.SessionID {
+			continue
+		}
+		if filter.ParentID != "" && t.ParentTaskID != filter.ParentID {
+			continue
+		}
+		cp := *t
+		result = append(result, &cp)
+	}
+	return result, nil
+}
+
+func (s *memStore) Update(t *brain.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.tasks[t.ID]; !ok {
+		return fmt.Errorf("task not found: %s", t.ID)
+	}
+	t.UpdatedAt = time.Now()
+	cp := *t
+	s.tasks[t.ID] = &cp
+	return nil
+}
+
+func (s *memStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tasks, id)
+	return nil
+}
+
+func (s *memStore) AppendCheckpoint(taskID string, cp brain.Checkpoint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checkpoints[taskID] = append(s.checkpoints[taskID], cp)
+	return nil
+}
+
+func (s *memStore) LoadCheckpoints(taskID string) ([]brain.Checkpoint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.checkpoints[taskID], nil
+}
+
+func (s *memStore) WriteOutput(taskID string, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outputs[taskID] = content
+	return nil
+}
+
+func (s *memStore) ReadOutput(taskID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outputs[taskID], nil
+}
+
+var _ brain.TaskStore = (*memStore)(nil)
 
 func newTestPool(t *testing.T, providers map[string]ProviderSpec) *ActorPool {
 	t.Helper()
-	store := tasks.NewFileStore(t.TempDir())
+	store := newMemStore()
 	bus := events.NewBus(64)
 	t.Cleanup(bus.Close)
 
@@ -40,7 +155,7 @@ func TestActorPoolSubmit(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-submit",
 		Description: "A test task",
 	}
@@ -51,7 +166,7 @@ func TestActorPoolSubmit(t *testing.T) {
 	if task.ID == "" {
 		t.Fatal("expected task ID to be set")
 	}
-	if task.Status != tasks.TaskPending {
+	if task.Status != brain.TaskPending {
 		t.Errorf("status: got %s, want pending", task.Status)
 	}
 
@@ -70,7 +185,7 @@ func TestActorPoolCancel(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-cancel",
 		Description: "Will be cancelled",
 	}
@@ -86,7 +201,7 @@ func TestActorPoolCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Status != tasks.TaskCancelled {
+	if got.Status != brain.TaskCancelled {
 		t.Errorf("status: got %s, want cancelled", got.Status)
 	}
 }
@@ -174,7 +289,7 @@ func TestActorMatchesCapabilities(t *testing.T) {
 
 func TestFindIdleActorWithCapabilities(t *testing.T) {
 	pool := newTestPool(t, map[string]ProviderSpec{
-		"coder": {MaxConcurrent: 1, Tags: []string{"coder"}, Capabilities: []string{"coding", "tool_use"}},
+		"coder":  {MaxConcurrent: 1, Tags: []string{"coder"}, Capabilities: []string{"coding", "tool_use"}},
 		"writer": {MaxConcurrent: 1, Tags: []string{"writer"}, Capabilities: []string{"fast", "writing"}},
 	})
 
@@ -281,7 +396,7 @@ func TestSubmitDefaultMaxRetries(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-default-retries",
 		Description: "Should get default MaxRetries",
 	}
@@ -298,7 +413,7 @@ func TestSubmitExplicitMaxRetries(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-explicit-retries",
 		Description: "Has explicit MaxRetries",
 		MaxRetries:  5,
@@ -316,7 +431,7 @@ func TestRequeueForRetry(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-requeue",
 		Description: "Will be requeued",
 		MaxRetries:  3,
@@ -326,14 +441,14 @@ func TestRequeueForRetry(t *testing.T) {
 	}
 
 	// Simulate running
-	task.Status = tasks.TaskRunning
+	task.Status = brain.TaskRunning
 	_ = pool.store.Update(task)
 
 	// Requeue
 	pool.requeueForRetry(task)
 
 	got, _ := pool.store.Get(task.ID)
-	if got.Status != tasks.TaskPending {
+	if got.Status != brain.TaskPending {
 		t.Errorf("status: got %s, want pending", got.Status)
 	}
 	if got.RetryCount != 1 {
@@ -346,7 +461,7 @@ func TestRequeueForRetry_ExceedsMax(t *testing.T) {
 		"claude": {MaxConcurrent: 1},
 	})
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "test-max-retries",
 		Description: "Will exceed retries",
 		MaxRetries:  1,
@@ -359,14 +474,14 @@ func TestRequeueForRetry_ExceedsMax(t *testing.T) {
 	pool.requeueForRetry(task)
 
 	got, _ := pool.store.Get(task.ID)
-	if got.Status != tasks.TaskFailed {
+	if got.Status != brain.TaskFailed {
 		t.Errorf("status: got %s, want failed", got.Status)
 	}
 }
 
 func TestProviderCooldown(t *testing.T) {
 	pool := newTestPool(t, map[string]ProviderSpec{
-		"broken": {MaxConcurrent: 1},
+		"broken":  {MaxConcurrent: 1},
 		"healthy": {MaxConcurrent: 1},
 	})
 
@@ -418,10 +533,10 @@ func TestProviderCooldownExpired(t *testing.T) {
 }
 
 func TestPriorityRank(t *testing.T) {
-	if priorityRank(tasks.PriorityLow) >= priorityRank(tasks.PriorityNormal) {
+	if priorityRank(brain.PriorityLow) >= priorityRank(brain.PriorityNormal) {
 		t.Error("low should rank below normal")
 	}
-	if priorityRank(tasks.PriorityNormal) >= priorityRank(tasks.PriorityHigh) {
+	if priorityRank(brain.PriorityNormal) >= priorityRank(brain.PriorityHigh) {
 		t.Error("normal should rank below high")
 	}
 }
@@ -434,20 +549,20 @@ func TestDependencyResolution(t *testing.T) {
 	})
 
 	// Create parent task (completed)
-	parent := &tasks.Task{
+	parent := &brain.Task{
 		Title:       "parent-task",
 		Description: "The parent",
 	}
 	if err := pool.Submit(parent); err != nil {
 		t.Fatalf("Submit parent: %v", err)
 	}
-	parent.Status = tasks.TaskCompleted
+	parent.Status = brain.TaskCompleted
 	if err := pool.store.Update(parent); err != nil {
 		t.Fatalf("Update parent: %v", err)
 	}
 
 	// Create child task with dependency on parent
-	child := &tasks.Task{
+	child := &brain.Task{
 		Title:       "child-task",
 		Description: "Depends on parent",
 		DependsOn:   []string{parent.ID},
@@ -472,19 +587,19 @@ func TestDependencyResolution_NotCompleted(t *testing.T) {
 	})
 
 	// Create parent task (still running)
-	parent := &tasks.Task{
+	parent := &brain.Task{
 		Title:       "parent-task",
 		Description: "The parent",
 	}
 	if err := pool.Submit(parent); err != nil {
 		t.Fatalf("Submit parent: %v", err)
 	}
-	parent.Status = tasks.TaskRunning
+	parent.Status = brain.TaskRunning
 	if err := pool.store.Update(parent); err != nil {
 		t.Fatalf("Update parent: %v", err)
 	}
 
-	child := &tasks.Task{
+	child := &brain.Task{
 		Title:       "child-task",
 		Description: "Depends on running parent",
 		DependsOn:   []string{parent.ID},
@@ -508,19 +623,19 @@ func TestDependencyResolution_Failed(t *testing.T) {
 	})
 
 	// Create parent task (failed)
-	parent := &tasks.Task{
+	parent := &brain.Task{
 		Title:       "parent-task",
 		Description: "The parent",
 	}
 	if err := pool.Submit(parent); err != nil {
 		t.Fatalf("Submit parent: %v", err)
 	}
-	parent.Status = tasks.TaskFailed
+	parent.Status = brain.TaskFailed
 	if err := pool.store.Update(parent); err != nil {
 		t.Fatalf("Update parent: %v", err)
 	}
 
-	child := &tasks.Task{
+	child := &brain.Task{
 		Title:       "child-task",
 		Description: "Depends on failed parent",
 		DependsOn:   []string{parent.ID},
@@ -544,20 +659,20 @@ func TestSchedulePicksUpResolvedDeps(t *testing.T) {
 	})
 
 	// Create and complete parent task
-	parent := &tasks.Task{
+	parent := &brain.Task{
 		Title:       "parent-task",
 		Description: "The parent",
 	}
 	if err := pool.Submit(parent); err != nil {
 		t.Fatalf("Submit parent: %v", err)
 	}
-	parent.Status = tasks.TaskCompleted
+	parent.Status = brain.TaskCompleted
 	if err := pool.store.Update(parent); err != nil {
 		t.Fatalf("Update parent: %v", err)
 	}
 
 	// Create child with dependency
-	child := &tasks.Task{
+	child := &brain.Task{
 		Title:       "child-task",
 		Description: "Depends on parent",
 		DependsOn:   []string{parent.ID},
@@ -588,20 +703,20 @@ func TestScheduleCancelsUnresolvableDeps(t *testing.T) {
 	pool.ctx = t.Context()
 
 	// Create parent task that has failed
-	parent := &tasks.Task{
+	parent := &brain.Task{
 		Title:       "parent-task",
 		Description: "This task failed",
 	}
 	if err := pool.Submit(parent); err != nil {
 		t.Fatalf("Submit parent: %v", err)
 	}
-	parent.Status = tasks.TaskFailed
+	parent.Status = brain.TaskFailed
 	if err := pool.store.Update(parent); err != nil {
 		t.Fatalf("Update parent: %v", err)
 	}
 
 	// Create child with dependency on failed parent
-	child := &tasks.Task{
+	child := &brain.Task{
 		Title:       "child-task",
 		Description: "Depends on failed parent",
 		DependsOn:   []string{parent.ID},
@@ -617,7 +732,7 @@ func TestScheduleCancelsUnresolvableDeps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get child: %v", err)
 	}
-	if got.Status != tasks.TaskCancelled {
+	if got.Status != brain.TaskCancelled {
 		t.Errorf("child status: got %s, want cancelled", got.Status)
 	}
 }
@@ -678,7 +793,7 @@ func TestExecuteInline_NoModelRegistry(t *testing.T) {
 	})
 	// pool.models is nil (no registry configured)
 
-	task := &tasks.Task{
+	task := &brain.Task{
 		Title:       "inline-no-registry",
 		Description: "Should fail but still create in store",
 	}
@@ -692,8 +807,7 @@ func TestExecuteInline_NoModelRegistry(t *testing.T) {
 	if storeErr != nil {
 		t.Fatalf("task not in store: %v", storeErr)
 	}
-	if got.Status != tasks.TaskFailed {
+	if got.Status != brain.TaskFailed {
 		t.Errorf("status: got %s, want failed", got.Status)
 	}
 }
-

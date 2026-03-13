@@ -30,7 +30,7 @@ func (h *WSTaskHandler) Submit(sessionID, title, description string, tools []str
 
 	// Default tools if none specified
 	if len(tools) == 0 {
-		tools = []string{"run_command", "git", "query_memories"}
+		tools = []string{"run_command", "git"}
 	}
 
 	t := &tasks.Task{
@@ -49,33 +49,21 @@ func (h *WSTaskHandler) Submit(sessionID, title, description string, tools []str
 	return t.ID, nil
 }
 
-// Check returns the status of a task.
-func (h *WSTaskHandler) Check(taskID string) (any, error) {
-	t, err := h.pool.Store().Get(taskID)
-	if err != nil {
-		return nil, err
+// QueryTasks returns a single task detail (when taskID is set) or a list of task summaries.
+func (h *WSTaskHandler) QueryTasks(taskID, sessionID string) (any, error) {
+	if taskID != "" {
+		t, err := h.pool.Store().Get(taskID)
+		if err != nil {
+			return nil, err
+		}
+		return taskSummary{
+			ID:       t.ID,
+			Title:    t.Title,
+			Status:   t.Status,
+			Progress: t.Progress,
+		}, nil
 	}
 
-	result := taskSummary{
-		ID:       t.ID,
-		Title:    t.Title,
-		Status:   t.Status,
-		Progress: t.Progress,
-	}
-
-	return result, nil
-}
-
-// Cancel cancels a task.
-func (h *WSTaskHandler) Cancel(taskID string, reason string) error {
-	if reason == "" {
-		reason = "cancelled via WS"
-	}
-	return h.pool.Cancel(taskID, reason)
-}
-
-// List returns all tasks for a session.
-func (h *WSTaskHandler) List(sessionID string) (any, error) {
 	filter := tasks.ListFilter{}
 	if sessionID != "" {
 		filter.SessionID = sessionID
@@ -95,6 +83,13 @@ func (h *WSTaskHandler) List(sessionID string) (any, error) {
 			Progress: t.Progress,
 		}
 	}
-
 	return summaries, nil
+}
+
+// Cancel cancels a task.
+func (h *WSTaskHandler) Cancel(taskID string, reason string) error {
+	if reason == "" {
+		reason = "cancelled via WS"
+	}
+	return h.pool.Cancel(taskID, reason)
 }

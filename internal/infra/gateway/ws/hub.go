@@ -27,9 +27,8 @@ type Client struct {
 // TaskHandler provides task operations for WS methods.
 type TaskHandler interface {
 	Submit(sessionID string, title, description string, tools []string, priority string) (string, error)
-	Check(taskID string) (any, error)
+	QueryTasks(taskID, sessionID string) (any, error)
 	Cancel(taskID string, reason string) error
-	List(sessionID string) (any, error)
 }
 
 // Hub manages WebSocket clients and bridges them to the event bus.
@@ -424,14 +423,11 @@ func (c *Client) handleRequest(ctx context.Context, frame Frame) {
 	case MethodSubmitTask:
 		c.handleSubmitTask(ctx, frame)
 
-	case MethodCheckTask:
-		c.handleCheckTask(ctx, frame)
+	case MethodQueryTasks, MethodCheckTask, MethodListTasks:
+		c.handleQueryTasks(ctx, frame)
 
 	case MethodCancelTask:
 		c.handleCancelTask(ctx, frame)
-
-	case MethodListTasks:
-		c.handleListTasks(ctx, frame)
 
 	case MethodAcceptAllTools:
 		c.hub.ensureSession(c)
@@ -498,7 +494,7 @@ func (c *Client) handleSubmitTask(ctx context.Context, frame Frame) {
 	c.sendOK(ctx, frame.ID, map[string]string{"task_id": taskID, "status": "submitted"})
 }
 
-func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
+func (c *Client) handleQueryTasks(ctx context.Context, frame Frame) {
 	th := c.hub.taskHandler()
 	if th == nil {
 		c.sendError(ctx, frame.ID, "task system not available")
@@ -506,14 +502,27 @@ func (c *Client) handleCheckTask(ctx context.Context, frame Frame) {
 	}
 
 	var params struct {
-		TaskID string `json:"task_id"`
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
 	}
-	if err := json.Unmarshal(frame.Params, &params); err != nil {
-		c.sendError(ctx, frame.ID, "invalid params")
-		return
+	if frame.Params != nil {
+		if err := json.Unmarshal(frame.Params, &params); err != nil {
+			c.sendError(ctx, frame.ID, "invalid params")
+			return
+		}
 	}
 
-	result, err := th.Check(params.TaskID)
+	// Backward compat: legacy check_task always means single-task lookup
+	if Method(frame.Method) == MethodCheckTask && params.TaskID == "" {
+		c.sendError(ctx, frame.ID, "task_id required for check_task")
+		return
+	}
+	// Backward compat: legacy list_tasks uses client session
+	if Method(frame.Method) == MethodListTasks && params.SessionID == "" {
+		params.SessionID = c.sessionID
+	}
+
+	result, err := th.QueryTasks(params.TaskID, params.SessionID)
 	if err != nil {
 		c.sendError(ctx, frame.ID, err.Error())
 		return
@@ -544,22 +553,6 @@ func (c *Client) handleCancelTask(ctx context.Context, frame Frame) {
 	}
 
 	c.sendOK(ctx, frame.ID, map[string]string{"task_id": params.TaskID, "status": "cancelled"})
-}
-
-func (c *Client) handleListTasks(ctx context.Context, frame Frame) {
-	th := c.hub.taskHandler()
-	if th == nil {
-		c.sendError(ctx, frame.ID, "task system not available")
-		return
-	}
-
-	result, err := th.List(c.sessionID)
-	if err != nil {
-		c.sendError(ctx, frame.ID, err.Error())
-		return
-	}
-
-	c.sendOK(ctx, frame.ID, result)
 }
 
 // writePump writes queued messages to the WS connection.

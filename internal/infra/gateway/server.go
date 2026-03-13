@@ -155,7 +155,7 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := r.URL.Query().Get("session_id")
-	result, err := s.taskHandler.List(sessionID)
+	result, err := s.taskHandler.QueryTasks("", sessionID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

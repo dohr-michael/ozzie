@@ -193,19 +193,19 @@ func TestToolReaction(t *testing.T) {
 		tool     string
 		reaction connector.ReactionType
 	}{
+		{"web", connector.ReactionWeb},
 		{"web_search", connector.ReactionWeb},
 		{"web_fetch", connector.ReactionWeb},
 		{"run_command", connector.ReactionCommand},
 		{"str_replace_editor", connector.ReactionEdit},
 		{"submit_task", connector.ReactionTask},
-		{"plan_task", connector.ReactionTask},
+		{"query_tasks", connector.ReactionTask},
+		{"cancel_task", connector.ReactionTask},
 		{"store_memory", connector.ReactionMemory},
-		{"query_memories", connector.ReactionMemory},
 		{"forget_memory", connector.ReactionMemory},
 		{"schedule_task", connector.ReactionSchedule},
 		{"trigger_schedule", connector.ReactionSchedule},
-		{"activate_tools", connector.ReactionActivate},
-		{"activate_skill", connector.ReactionActivate},
+		{"activate", connector.ReactionActivate},
 		{"some_unknown_tool", connector.ReactionTool},
 	}
 	for _, tt := range tests {

@@ -19,9 +19,12 @@ const (
 	MethodOpenSession    Method = "open_session"
 	MethodPromptResponse Method = "prompt_response"
 	MethodSubmitTask     Method = "submit_task"
-	MethodCheckTask      Method = "check_task"
+	MethodQueryTasks     Method = "query_tasks"
 	MethodCancelTask     Method = "cancel_task"
-	MethodListTasks      Method = "list_tasks"
+
+	// Deprecated: kept for backward compatibility with older clients.
+	MethodCheckTask Method = "check_task"
+	MethodListTasks Method = "list_tasks"
 	MethodAcceptAllTools Method = "accept_all_tools"
 	MethodLoadMessages   Method = "load_messages"
 )
