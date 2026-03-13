@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -190,6 +191,13 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		return "", fmt.Errorf("submit_task: title is required")
 	}
 
+	// Sanitize actor_tags: strip unknown tags to prevent hallucinated tags from
+	// blocking task scheduling indefinitely.
+	input.ActorTags = t.sanitizeActorTags(input.ActorTags)
+	for i := range input.Steps {
+		input.Steps[i].ActorTags = t.sanitizeActorTags(input.Steps[i].ActorTags)
+	}
+
 	// Multi-step plan mode
 	if len(input.Steps) > 0 {
 		return t.runPlan(ctx, input)
@@ -200,6 +208,33 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	}
 
 	return t.runSingle(ctx, input)
+}
+
+// sanitizeActorTags removes tags that don't match any configured actor,
+// preventing hallucinated tags from blocking task scheduling.
+func (t *SubmitTaskTool) sanitizeActorTags(tags []string) []string {
+	if len(tags) == 0 {
+		return tags
+	}
+
+	actors := t.pool.AvailableActors()
+	validTags := make(map[string]struct{})
+	for _, a := range actors {
+		for _, tag := range a.Tags {
+			validTags[tag] = struct{}{}
+		}
+	}
+
+	var result []string
+	for _, tag := range tags {
+		if _, ok := validTags[tag]; ok {
+			result = append(result, tag)
+		} else {
+			slog.Warn("stripped unknown actor_tag from submit_task",
+				"tag", tag, "available_tags", sortedKeys(validTags))
+		}
+	}
+	return result
 }
 
 // runSingle submits a single task.
@@ -334,15 +369,19 @@ func (t *SubmitTaskTool) runPlan(ctx context.Context, input submitTaskInput) (st
 
 	sessionID := events.SessionIDFromContext(ctx)
 
+	// Merge session-level and input-level tool constraints (same logic as runSingle)
+	sessionConstraints := events.ToolConstraintsFromContext(ctx)
+	taskConstraints := events.MergeToolConstraints(sessionConstraints, input.ToolConstraints)
+
 	// Inline execution for single-actor pools
 	if inliner, ok := t.pool.(tasks.InlineExecutor); ok && inliner.ShouldInline() {
-		return t.runPlanInline(ctx, inliner, input, sessionID)
+		return t.runPlanInline(ctx, inliner, input, sessionID, taskConstraints)
 	}
 
-	return t.runPlanAsync(input, sessionID)
+	return t.runPlanAsync(input, sessionID, taskConstraints)
 }
 
-func (t *SubmitTaskTool) runPlanInline(ctx context.Context, inliner tasks.InlineExecutor, input submitTaskInput, sessionID string) (string, error) {
+func (t *SubmitTaskTool) runPlanInline(ctx context.Context, inliner tasks.InlineExecutor, input submitTaskInput, sessionID string, taskConstraints map[string]*events.ToolConstraint) (string, error) {
 	taskIDs := make([]string, len(input.Steps))
 	results := make([]inlinePlanEntry, len(input.Steps))
 	overallStatus := "completed"
@@ -370,6 +409,7 @@ func (t *SubmitTaskTool) runPlanInline(ctx context.Context, inliner tasks.Inline
 				Env:                  input.Env,
 				RequiredTags:         step.ActorTags,
 				RequiredCapabilities: step.RequiredCapabilities,
+				ToolConstraints:      taskConstraints,
 			},
 		}
 
@@ -413,7 +453,7 @@ func (t *SubmitTaskTool) runPlanInline(ctx context.Context, inliner tasks.Inline
 	return string(result), nil
 }
 
-func (t *SubmitTaskTool) runPlanAsync(input submitTaskInput, sessionID string) (string, error) {
+func (t *SubmitTaskTool) runPlanAsync(input submitTaskInput, sessionID string, taskConstraints map[string]*events.ToolConstraint) (string, error) {
 	taskIDs := make([]string, len(input.Steps))
 	entries := make([]planTaskEntry, len(input.Steps))
 
@@ -440,6 +480,7 @@ func (t *SubmitTaskTool) runPlanAsync(input submitTaskInput, sessionID string) (
 				Env:                  input.Env,
 				RequiredTags:         step.ActorTags,
 				RequiredCapabilities: step.RequiredCapabilities,
+				ToolConstraints:      taskConstraints,
 			},
 		}
 

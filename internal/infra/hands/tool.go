@@ -134,7 +134,7 @@ func enrichActorParamDescriptions(spec *ToolSpec, actors []tasks.ActorInfo) {
 			tags := sortedKeys(tagSet)
 			desc.WriteString("Available tags: [" + strings.Join(tags, ", ") + "]. ")
 		} else {
-			desc.WriteString("No tags currently configured. ")
+			desc.WriteString("No tags currently configured — do NOT use this parameter. ")
 		}
 		desc.WriteString("Available actors: " + strings.Join(actorLines, "; ") + ".")
 		p.Description = desc.String()

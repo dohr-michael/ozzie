@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dohr-michael/ozzie/internal/core/brain"
@@ -35,6 +36,9 @@ type TaskRunner struct {
 	perms           ToolPermissionsSeeder // for seeding pre-approved tools (optional)
 	clientFacing    bool                  // inject persona into sub-agent instruction
 	persona         string                // persona text (from LoadPersona)
+
+	tokenMu    sync.Mutex
+	tokenUsage brain.TokenUsage
 }
 
 // TaskRunnerConfig holds dependencies for creating a TaskRunner.
@@ -121,6 +125,10 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 		ProviderName: task.ProviderName,
 	}, task.SessionID))
 
+	// Track token usage from LLM call events
+	unsub := r.trackTokens()
+	defer unsub()
+
 	// Skill shortcut: execute directly without agent reasoning
 	if task.Config.Skill != "" && r.skillRunner != nil {
 		return r.runSkillStep(ctx, task, startedAt)
@@ -132,6 +140,32 @@ func (r *TaskRunner) Run(ctx context.Context) error {
 // isPreempted checks whether a preemption has been requested.
 func (r *TaskRunner) isPreempted() bool {
 	return r.preemptionCheck != nil && r.preemptionCheck()
+}
+
+// trackTokens subscribes to LLM call events and accumulates token usage.
+// Returns an unsubscribe function that must be deferred.
+func (r *TaskRunner) trackTokens() func() {
+	return r.bus.Subscribe(func(e events.Event) {
+		// Match by session ID — task agents run in their own session context.
+		if e.SessionID == "" || e.SessionID != r.task.SessionID {
+			return
+		}
+		payload, ok := events.GetLLMCallPayload(e)
+		if !ok || payload.Phase != "response" {
+			return
+		}
+		r.tokenMu.Lock()
+		r.tokenUsage.Input += payload.TokensInput
+		r.tokenUsage.Output += payload.TokensOutput
+		r.tokenMu.Unlock()
+	}, events.EventLLMCall)
+}
+
+// getTokenUsage returns a snapshot of accumulated token usage.
+func (r *TaskRunner) getTokenUsage() brain.TokenUsage {
+	r.tokenMu.Lock()
+	defer r.tokenMu.Unlock()
+	return r.tokenUsage
 }
 
 // preemptTask re-queues a preempted task as pending.
@@ -224,12 +258,19 @@ func (r *TaskRunner) runSkillStep(ctx context.Context, task *Task, startedAt tim
 }
 
 func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string) error {
+	// Validate: if output is empty AND no tokens were consumed, the task did nothing.
+	usage := r.getTokenUsage()
+	if output == "" && usage.Output == 0 {
+		return r.failTask(task, startedAt, fmt.Errorf("task produced no output"))
+	}
+
 	now := time.Now()
 	task.Status = TaskCompleted
 	task.CompletedAt = &now
 	task.Progress.Percentage = 100
 	task.Result = &TaskResult{
 		OutputPath: "output.md",
+		TokenUsage: usage,
 	}
 	if err := r.store.Update(task); err != nil {
 		return fmt.Errorf("update task completed: %w", err)
@@ -246,6 +287,8 @@ func (r *TaskRunner) completeTask(task *Task, startedAt time.Time, output string
 		ProviderName:  task.ProviderName,
 		OutputSummary: truncate(output, 200),
 		Duration:      now.Sub(startedAt),
+		TokensInput:   usage.Input,
+		TokensOutput:  usage.Output,
 	}, task.SessionID))
 
 	return nil
@@ -256,7 +299,8 @@ func (r *TaskRunner) failTask(task *Task, startedAt time.Time, taskErr error) er
 	task.Status = TaskFailed
 	task.CompletedAt = &now
 	task.Result = &TaskResult{
-		Error: taskErr.Error(),
+		Error:      taskErr.Error(),
+		TokenUsage: r.getTokenUsage(),
 	}
 	willRetry := task.RetryCount < task.MaxRetries
 

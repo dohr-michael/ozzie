@@ -453,10 +453,13 @@ func (p *ActorPool) preemptLowest(providerName string) *Actor {
 	}
 }
 
+// taskExecutionTimeout is the hard limit for a single task execution.
+const taskExecutionTimeout = 5 * time.Minute
+
 // startTask launches a goroutine to execute a task on an actor.
 // Caller must hold p.mu.
 func (p *ActorPool) startTask(t *brain.Task, actor *Actor) {
-	taskCtx, taskCancel := context.WithCancel(p.ctx)
+	taskCtx, taskCancel := context.WithTimeout(p.ctx, taskExecutionTimeout)
 	preemptCh := make(chan struct{})
 
 	rt := &runningTask{

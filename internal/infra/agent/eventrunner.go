@@ -40,6 +40,7 @@ type EventRunner struct {
 	pool            brain.CapacityPool // actor pool for capacity management (optional)
 	defaultProvider string             // default provider name for AcquireInteractive
 	processTimeout  time.Duration
+	maxIterations   int
 
 	mu           sync.Mutex
 	running      map[string]bool          // per-session lock
@@ -63,6 +64,7 @@ type EventRunnerConfig struct {
 	Tier            brain.ModelTier     // model tier for adaptive compression
 	Layered         *layeredctx.Manager // layered context manager (optional)
 	ProcessTimeout  time.Duration       // max time for a single processMessage call (default 5m)
+	MaxIterations   int                 // max ReAct iterations for main agent (default 25)
 }
 
 // NewEventRunner creates a new event-driven runner.
@@ -80,6 +82,11 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		processTimeout = 5 * time.Minute
 	}
 
+	maxIter := cfg.MaxIterations
+	if maxIter <= 0 {
+		maxIter = 25
+	}
+
 	er := &EventRunner{
 		factory:         cfg.Factory,
 		toolSet:         cfg.ToolSet,
@@ -91,6 +98,7 @@ func NewEventRunner(cfg EventRunnerConfig) *EventRunner {
 		pool:            cfg.Pool,
 		defaultProvider: cfg.DefaultProvider,
 		processTimeout:  processTimeout,
+		maxIterations:   maxIter,
 		running:         make(map[string]bool),
 		streamSeqIdx:    make(map[string]*atomic.Int32),
 		ctx:             ctx,
@@ -251,7 +259,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 
 		// First attempt with inactive tools: run buffered (non-streaming) to detect activation
 		if attempt == 0 && er.toolSet.HasInactiveTools(sessionID) {
-			runner, err := er.factory.CreateRunnerBuffered(ctx, tools)
+			runner, err := er.factory.CreateRunnerBuffered(ctx, tools, AgentOptions{MaxIterations: er.maxIterations})
 			if err != nil {
 				slog.Error("create runner (buffered)", "error", err, "session_id", sessionID)
 				er.emitError(sessionID, "failed to create agent runner")
@@ -281,6 +289,16 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 							"session_id", sessionID)
 						continue
 					}
+					// Unknown tool hallucinated by LLM — inject feedback and let it self-correct
+					available := er.toolSet.ActiveToolNames(sessionID)
+					errMsg := fmt.Sprintf("Tool %q does not exist. Available tools: %v. Use the correct tool name.", toolName, available)
+					messages = append(messages, &schema.Message{
+						Role:    schema.User,
+						Content: errMsg,
+					})
+					slog.Warn("LLM called unknown tool, retrying with feedback",
+						"tool", toolName, "session_id", sessionID)
+					continue
 				}
 				er.emitError(sessionID, runErr.Error())
 				return
@@ -303,7 +321,7 @@ func (er *EventRunner) processMessage(sessionID string, content string) {
 		}
 
 		// All tools active OR retry: stream normally
-		runner, err := er.factory.CreateRunner(ctx, tools)
+		runner, err := er.factory.CreateRunner(ctx, tools, AgentOptions{MaxIterations: er.maxIterations})
 		if err != nil {
 			slog.Error("create runner", "error", err, "session_id", sessionID)
 			er.emitError(sessionID, "failed to create agent runner")

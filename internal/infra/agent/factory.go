@@ -41,8 +41,8 @@ func (f *AgentFactory) buildMiddlewares() []adk.AgentMiddleware {
 }
 
 // CreateRunner creates a new streaming ADK Runner configured with the given tools.
-func (f *AgentFactory) CreateRunner(ctx context.Context, tools []tool.InvokableTool) (*adk.Runner, error) {
-	return NewAgent(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares())
+func (f *AgentFactory) CreateRunner(ctx context.Context, tools []tool.InvokableTool, opts ...AgentOptions) (*adk.Runner, error) {
+	return NewAgent(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares(), opts...)
 }
 
 // Persona returns the persona string used for agent creation.
@@ -51,6 +51,6 @@ func (f *AgentFactory) Persona() string { return f.persona }
 // CreateRunnerBuffered creates a new non-streaming ADK Runner.
 // Used for the buffered first attempt in dynamic tool selection to avoid
 // HTTP/2 stream errors when the response isn't consumed as a stream.
-func (f *AgentFactory) CreateRunnerBuffered(ctx context.Context, tools []tool.InvokableTool) (*adk.Runner, error) {
-	return NewAgentBuffered(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares())
+func (f *AgentFactory) CreateRunnerBuffered(ctx context.Context, tools []tool.InvokableTool, opts ...AgentOptions) (*adk.Runner, error) {
+	return NewAgentBuffered(ctx, f.chatModel, f.persona, tools, f.buildMiddlewares(), opts...)
 }

@@ -65,7 +65,7 @@ You have two categories of tools:
 - A single tool call (external or internal) is NOT a task — just call it directly.
 - When the user explicitly asks to submit, delegate, or create a background task, call submit_task immediately — do NOT explain the plan first.
 - After submitting, confirm briefly and stay available. Always set work_dir.
-- After submitting tasks, use query_tasks(task_id) to verify completion. Do NOT assume success.
+- After submitting tasks, call query_tasks(task_id) once to verify submission. For short tasks (< 30s), you may check once more. Do NOT poll in a loop — if the task is still running or pending, tell the user the task ID and let them check later.
 
 ### Memory
 - Relevant memories are automatically injected in context. Use store_memory to save reusable patterns (type=procedure for workflows, preference for user choices, fact for decisions).
