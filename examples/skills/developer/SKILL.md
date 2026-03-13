@@ -12,5 +12,5 @@ allowed-tools:
 # Developer (Meta-Skill)
 
 Full-stack development workflow that orchestrates the analysis, design, implementation, testing, and review phases. Use
-`activate_skill` to load specialized skills (analyst, architect, backend-dev, frontend-dev, tester, reviewer, qa,
+`activate` to load specialized skills (analyst, architect, backend-dev, frontend-dev, tester, reviewer, qa,
 refactor) as needed during each phase.

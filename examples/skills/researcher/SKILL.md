@@ -2,8 +2,7 @@
 name: researcher
 description: Research a topic using web search and summarize findings
 allowed-tools:
-  - web_search
-  - web_fetch
+  - web
 ---
 
 # Researcher

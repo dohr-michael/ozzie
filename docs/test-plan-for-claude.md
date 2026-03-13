@@ -33,6 +33,11 @@
    - [T18 — Language: French response adherence](#t18--language-french-response-adherence)
    - [T19 — Autonomy: RPG world-building assistant](#t19--autonomy-rpg-world-building-assistant)
    - [T20 — Autonomy: Pain-point automation — git changelog](#t20--autonomy-pain-point-automation--git-changelog)
+   - [T21 — Unified tools: `web` (fetch + search)](#t21--unified-tools-web-fetch--search)
+   - [T22 — Unified tools: `query_tasks` (detail + list)](#t22--unified-tools-query_tasks-detail--list)
+   - [T23 — Unified tools: `activate` (tools + skills)](#t23--unified-tools-activate-tools--skills)
+   - [T24 — Unified tools: `submit_task` multi-step plan](#t24--unified-tools-submit_task-multi-step-plan)
+   - [T25 — Memory: Implicit retrieval with relevance threshold](#t25--memory-implicit-retrieval-with-relevance-threshold)
 4. [Report template](#4-report-template)
 5. [Adding new test cases](#5-adding-new-test-cases)
 
@@ -221,7 +226,7 @@ $OZZIE ask -y "Lance une tâche en arrière-plan qui exécute 'rm -rf /tmp/test-
 Then check task status:
 
 ```bash
-$OZZIE ask -y "Vérifie le status de la dernière tâche soumise avec check_task"
+$OZZIE ask -y "Vérifie le status de la dernière tâche soumise avec query_tasks"
 ```
 
 **Expected**:
@@ -252,7 +257,7 @@ $OZZIE ask -y "Soumets une tâche en arrière-plan avec submit_task. La tâche d
 Wait for task completion, then:
 
 ```bash
-$OZZIE ask -y "Vérifie le status de la tâche 'Test constraints' avec check_task"
+$OZZIE ask -y "Vérifie le status de la tâche 'Test constraints' avec query_tasks"
 ```
 
 **Expected**:
@@ -324,7 +329,7 @@ cat "$WORK_DIR/t07-simple-task/haiku.txt"
 Also check task status:
 
 ```bash
-$OZZIE ask -y "Liste toutes les tâches avec list_tasks et donne-moi leur status"
+$OZZIE ask -y "Liste toutes les tâches avec query_tasks et donne-moi leur status"
 ```
 
 **Expected**:
@@ -374,12 +379,12 @@ cd "$WORK_DIR/t08-coding/" && go build . 2>&1
 ### T09 — Autonomy: Skill activation & workflow
 
 **Category**: Autonomy
-**Goal**: Verify skill activation via `activate_skill` and skill-driven interaction.
+**Goal**: Verify skill activation via `activate` and skill-driven interaction.
 
 **Steps**:
 
 ```bash
-$OZZIE ask -y "Active le skill 'coder' et ensuite crée un fichier $WORK_DIR/t09-skill/main.go contenant un programme Go qui affiche 'Hello from Ozzie skill!', le programme doit compiler et s'exectuer"
+$OZZIE ask -y "Utilise activate pour charger le skill 'coder', puis crée un fichier $WORK_DIR/t09-skill/main.go contenant un programme Go qui affiche 'Hello from Ozzie skill!'. Le programme doit compiler et s'exécuter."
 ```
 
 Verify:
@@ -481,12 +486,12 @@ $OZZIE ask -y "Quelle est notre convention de déploiement ?"
 
 **Expected**:
 - Agent calls `store_memory` with the content
-- Agent calls `query_memories` when asked and retrieves the convention
+- When asked, relevant memories are injected automatically (implicit retrieval)
 - Response mentions semver tags and CI/CD
 
 **Verdict criteria**:
 - [x] Memory stored (store_memory called)
-- [x] Memory retrieved (query_memories called)
+- [x] Memory retrieved (via implicit injection or explicit `activate("query_memories")`)
 - [x] Content accurate in recall
 
 **Artifacts**: Check `$OZZIE_PATH/memory/` for stored entries.
@@ -515,7 +520,7 @@ $OZZIE ask -y "Je me souviens plus de notre convention de déploiement. Tu peux 
 **Verdict criteria**:
 - [x] Cross-session retrieval works
 - [x] Content matches stored memory
-- [x] query_memories was called (not fabricated from training data)
+- [x] Retrieved via implicit injection (check middleware logs for "memory" entries)
 
 ---
 
@@ -744,6 +749,161 @@ cat "$WORK_DIR/t20-changelog/CHANGELOG.md"
 
 ---
 
+### T21 — Unified tools: `web` (fetch + search)
+
+**Category**: Autonomy / Unified tools
+**Goal**: Verify the unified `web` tool handles both URL fetching and search queries.
+
+**Steps**:
+
+```bash
+# Test 1: URL fetch mode
+$OZZIE ask -y "Utilise le tool web pour récupérer le contenu de https://httpbin.org/get et dis-moi quel est mon user-agent."
+
+# Test 2: Search mode
+$OZZIE ask -y "Utilise le tool web pour chercher 'Go 1.25 release notes' et donne-moi un résumé des nouveautés."
+```
+
+**Expected**:
+- Test 1: Agent calls `web` with `url` parameter, gets response, extracts user-agent
+- Test 2: Agent calls `web` with `query` parameter, gets search results
+- Agent does NOT use `web_fetch` or `web_search` (old names)
+
+**Verdict criteria**:
+- [x] URL fetch works via `web(url: ...)`
+- [x] Search works via `web(query: ...)`
+- [x] Single tool used (not separate fetch/search)
+- [x] Results are coherent
+
+---
+
+### T22 — Unified tools: `query_tasks` (detail + list)
+
+**Category**: Autonomy / Unified tools
+**Goal**: Verify `query_tasks` handles both single-task detail and task listing.
+
+**Steps**:
+
+```bash
+# Step 1: Create a task
+$OZZIE ask -y "Soumets une tâche en arrière-plan avec submit_task : titre 'Query test task', description 'Sleep 5 seconds then echo done', tools: [run_command]. Working dir: $WORK_DIR."
+
+# Step 2: List all tasks
+$OZZIE ask -y "Utilise query_tasks sans task_id pour lister toutes les tâches."
+
+# Step 3: Check specific task
+$OZZIE ask -y "Utilise query_tasks avec le task_id de la tâche 'Query test task' pour voir son détail."
+```
+
+**Expected**:
+- Step 2: Returns a list of tasks with ID, title, status
+- Step 3: Returns detailed info for the specific task
+- Agent does NOT use `check_task` or `list_tasks` (old names)
+
+**Verdict criteria**:
+- [x] List mode works (no task_id)
+- [x] Detail mode works (with task_id)
+- [x] Single tool used (not separate check/list)
+
+---
+
+### T23 — Unified tools: `activate` (tools + skills)
+
+**Category**: Autonomy / Unified tools
+**Goal**: Verify `activate` handles both tool and skill activation in a single call.
+
+**Steps**:
+
+```bash
+# Activate a skill
+$OZZIE ask -y "Utilise activate pour charger le skill 'coder'. Montre-moi ce que tu as obtenu."
+
+# Activate a plugin tool
+$OZZIE ask -y "Utilise activate pour activer l'outil 'query_memories'. Puis interroge la mémoire sur nos conventions."
+```
+
+**Expected**:
+- Skill activation: returns type "skill" with body + allowed_tools
+- Tool activation: returns type "tool" with tool available
+- Agent does NOT use `activate_tools` or `activate_skill` (old names)
+
+**Verdict criteria**:
+- [x] Skill activation via `activate(names: ["coder"])` works
+- [x] Tool activation via `activate(names: ["query_memories"])` works
+- [x] Response distinguishes type "tool" vs "skill"
+- [x] Single tool used (not separate activate_tools/activate_skill)
+
+---
+
+### T24 — Unified tools: `submit_task` multi-step plan
+
+**Category**: Autonomy / Unified tools
+**Goal**: Verify `submit_task` with `steps[]` creates a multi-step plan with dependencies.
+**Output folder**: `$WORK_DIR/t24-plan/`
+
+**Steps**:
+
+```bash
+$OZZIE ask -y "Soumets une tâche multi-étapes avec submit_task. Le plan comporte 3 steps :
+1) 'Setup' : créer le dossier $WORK_DIR/t24-plan/ et un fichier config.json avec {\"version\": \"1.0\"}, tools: [run_command, write_file]
+2) 'Build' : lire config.json et créer un fichier build.txt contenant 'Built version X' (X = la version lue), depends_on: [0], tools: [read_file, write_file]
+3) 'Verify' : lire build.txt et vérifier qu'il contient 'Built version 1.0', depends_on: [1], tools: [read_file]
+Working dir: $WORK_DIR/t24-plan/"
+```
+
+Wait ~60s, then verify:
+
+```bash
+cat "$WORK_DIR/t24-plan/config.json"
+cat "$WORK_DIR/t24-plan/build.txt"
+$OZZIE ask -y "Vérifie le status de la dernière tâche multi-steps avec query_tasks"
+```
+
+**Expected**:
+- 3 sub-tasks created with proper dependencies
+- Steps execute in order (Setup → Build → Verify)
+- Final output confirms all steps passed
+- Agent does NOT use `plan_task` (old name)
+
+**Verdict criteria**:
+- [x] Multi-step plan submitted via `submit_task(steps: [...])`
+- [x] Dependencies respected (sequential execution)
+- [x] All 3 steps completed
+- [x] Files created correctly
+
+---
+
+### T25 — Memory: Implicit retrieval with relevance threshold
+
+**Category**: Memory / Unified tools
+**Goal**: Verify that relevant memories are injected automatically without explicit `query_memories`.
+
+**Prerequisite**: T12 or T14 must have been executed first (memories stored).
+
+**Steps**:
+
+```bash
+# New session — ask a question that should trigger implicit memory retrieval
+$OZZIE ask "Comment on déploie en prod chez nous ?"
+```
+
+**Expected**:
+- Agent answers using the deploy convention from T12 (semver tags, CI/CD)
+- NO explicit `query_memories` tool call visible in the response
+- Memory was injected by the middleware (check logs for "memory" or "relevance")
+- Irrelevant memories (cookies, color, staging server) are NOT surfaced
+
+**Verdict criteria**:
+- [x] Correct answer without explicit query_memories call
+- [x] Relevant memory injected automatically
+- [x] Low-relevance memories filtered out (threshold = 0.3)
+- [x] Check gateway logs for implicit retrieval evidence
+
+**Note**: This test validates the relevance threshold introduced in `middleware_context.go`.
+The agent should NOT need to call any memory tool — the middleware handles it.
+
+---
+
 ## 4. Report template
 
 Reports go in: `tests/reports/{config_type}_{YYYY-MM-DDTHH:MM:SS}.md`
@@ -867,12 +1027,15 @@ Recommended execution order (dependencies):
 3. **T02** (multi-turn — needed for session mechanics)
 4. **T03, T04, T05, T06** (security — run before autonomous tests)
 5. **T07** (simple task — validates task system)
-6. **T08, T09** (complex tasks)
-7. **T10, T11** (schedules — may take time)
-8. **T12, T13, T14** (memory — sequential dependency)
-9. **T17** (error recovery)
-10. **T19, T20** (persona/automation — fun tests)
-11. **T15** (long conversation — takes many turns)
-12. **T16** (token audit — run last, aggregates all sessions)
+6. **T21, T22, T23** (unified tool validation — web, query_tasks, activate)
+7. **T08, T09** (complex tasks)
+8. **T24** (multi-step plan — validates submit_task with steps[])
+9. **T10, T11** (schedules — may take time)
+10. **T12, T13, T14** (memory — sequential dependency)
+11. **T25** (implicit retrieval — depends on memories from T12/T14)
+12. **T17** (error recovery)
+13. **T19, T20** (persona/automation — fun tests)
+14. **T15** (long conversation — takes many turns)
+15. **T16** (token audit — run last, aggregates all sessions)
 
-Total estimated duration: **15-25 minutes** (depends on model speed and schedule wait times).
+Total estimated duration: **20-30 minutes** (depends on model speed and schedule wait times).
