@@ -5,7 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+
+	"github.com/dohr-michael/ozzie/internal/core/events"
 )
+
+// withSession injects a session ID into the context for testing.
+func withSession(ctx context.Context, id string) context.Context {
+	return events.ContextWithSessionID(ctx, id)
+}
 
 // --- mock implementations ---
 
@@ -45,20 +52,20 @@ func (m *mockWorkflowExecutor) RunWorkflow(_ context.Context, _ string, _ map[st
 	return m.result, m.err
 }
 
-// --- tests ---
+// --- activate tool tests ---
 
-func TestActivateSkillTool_Info(t *testing.T) {
-	tool := NewActivateSkillTool(&mockSkillCatalog{}, &mockActivator{}, &ToolRegistry{})
+func TestActivateTool_Info(t *testing.T) {
+	tool := NewActivateTool(newMockActivator(nil), &ToolRegistry{}, &mockSkillCatalog{})
 	info, err := tool.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if info.Name != "activate_skill" {
-		t.Errorf("expected name %q, got %q", "activate_skill", info.Name)
+	if info.Name != ToolActivate {
+		t.Errorf("expected name %q, got %q", ToolActivate, info.Name)
 	}
 }
 
-func TestActivateSkillTool_Run(t *testing.T) {
+func TestActivateTool_ActivateSkill(t *testing.T) {
 	catalog := &mockSkillCatalog{
 		skills: map[string]mockSkillEntry{
 			"analyst": {
@@ -67,48 +74,96 @@ func TestActivateSkillTool_Run(t *testing.T) {
 			},
 		},
 	}
-	activator := &mockActivator{known: map[string]bool{"read_file": true}}
+	activator := newMockActivator([]string{"read_file"})
 
-	tool := NewActivateSkillTool(catalog, activator, &ToolRegistry{})
+	tool := NewActivateTool(activator, &ToolRegistry{}, catalog)
 
-	args, _ := json.Marshal(activateSkillInput{Name: "analyst"})
-	result, err := tool.InvokableRun(context.Background(), string(args))
+	args, _ := json.Marshal(activateInput{Names: []string{"analyst"}})
+	result, err := tool.InvokableRun(
+		withSession(context.Background(), "sess_test"),
+		string(args),
+	)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
 
-	var out activateSkillOutput
+	var out activateOutput
 	if err := json.Unmarshal([]byte(result), &out); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}
-	if out.Body != "# Analyst\n\nYou are a business analyst." {
-		t.Errorf("unexpected body: %q", out.Body)
+	if len(out.Activated) != 1 {
+		t.Fatalf("expected 1 activated, got %d", len(out.Activated))
 	}
-	if out.HasWorkflow {
-		t.Error("expected no workflow")
+	if out.Activated[0].Type != "skill" {
+		t.Errorf("expected type 'skill', got %q", out.Activated[0].Type)
+	}
+	if out.Activated[0].Body != "# Analyst\n\nYou are a business analyst." {
+		t.Errorf("unexpected body: %q", out.Activated[0].Body)
 	}
 }
 
-func TestActivateSkillTool_NotFound(t *testing.T) {
-	catalog := &mockSkillCatalog{skills: map[string]mockSkillEntry{}}
-	tool := NewActivateSkillTool(catalog, &mockActivator{}, &ToolRegistry{})
+func TestActivateTool_ActivateTool(t *testing.T) {
+	activator := newMockActivator([]string{"docker_build"})
+	reg := &ToolRegistry{}
 
-	args, _ := json.Marshal(activateSkillInput{Name: "nonexistent"})
-	_, err := tool.InvokableRun(context.Background(), string(args))
+	tool := NewActivateTool(activator, reg, &mockSkillCatalog{})
+
+	args, _ := json.Marshal(activateInput{Names: []string{"docker_build"}})
+	result, err := tool.InvokableRun(
+		withSession(context.Background(), "sess_test"),
+		string(args),
+	)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	var out activateOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(out.Activated) != 1 {
+		t.Fatalf("expected 1 activated, got %d", len(out.Activated))
+	}
+	if out.Activated[0].Type != "tool" {
+		t.Errorf("expected type 'tool', got %q", out.Activated[0].Type)
+	}
+}
+
+func TestActivateTool_Unknown(t *testing.T) {
+	tool := NewActivateTool(newMockActivator(nil), &ToolRegistry{}, &mockSkillCatalog{})
+
+	args, _ := json.Marshal(activateInput{Names: []string{"nonexistent"}})
+	result, err := tool.InvokableRun(
+		withSession(context.Background(), "sess_test"),
+		string(args),
+	)
+	if err != nil {
+		t.Fatalf("InvokableRun: %v", err)
+	}
+
+	var out activateOutput
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(out.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(out.Errors))
+	}
+}
+
+func TestActivateTool_EmptyNames(t *testing.T) {
+	tool := NewActivateTool(newMockActivator(nil), &ToolRegistry{}, &mockSkillCatalog{})
+
+	args, _ := json.Marshal(activateInput{Names: []string{}})
+	_, err := tool.InvokableRun(
+		withSession(context.Background(), "sess_test"),
+		string(args),
+	)
 	if err == nil {
-		t.Fatal("expected error for nonexistent skill")
+		t.Fatal("expected error for empty names")
 	}
 }
 
-func TestActivateSkillTool_EmptyName(t *testing.T) {
-	tool := NewActivateSkillTool(&mockSkillCatalog{}, &mockActivator{}, &ToolRegistry{})
-
-	args, _ := json.Marshal(activateSkillInput{Name: ""})
-	_, err := tool.InvokableRun(context.Background(), string(args))
-	if err == nil {
-		t.Fatal("expected error for empty name")
-	}
-}
+// --- run_workflow tests ---
 
 func TestRunWorkflowTool_Info(t *testing.T) {
 	tool := NewRunWorkflowTool(&mockWorkflowExecutor{})

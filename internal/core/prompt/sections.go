@@ -57,7 +57,7 @@ func ToolSection(activeNames []string, allDescs map[string]string, compact bool)
 	sort.Strings(inactive)
 
 	if len(inactive) > 0 {
-		sb.WriteString("\n## Additional Tools (call activate_tools to enable)\n\n")
+		sb.WriteString("\n## Additional Tools (call activate to enable)\n\n")
 		sb.WriteString(strings.Join(inactive, ", "))
 		sb.WriteString("\n")
 	}
@@ -114,7 +114,7 @@ func SkillSection(skills map[string]string, compact bool) string {
 
 	var sb strings.Builder
 	sb.WriteString("## Available Skills\n\n")
-	sb.WriteString("Use `activate_skill(name)` to load a skill's full instructions when relevant.\n")
+	sb.WriteString("Use `activate(name)` to load a skill's full instructions when relevant.\n")
 	sb.WriteString("Skills with a workflow can be executed via `run_workflow(skill_name, vars)`.\n\n")
 	for _, name := range names[:maxSkills] {
 		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", name, skills[name]))
@@ -131,7 +131,7 @@ func ActorSection(actors []ActorInfo) string {
 
 	var sb strings.Builder
 	sb.WriteString("## Available Actors\n\n")
-	sb.WriteString("You can delegate tasks to these specialized actors using submit_task or plan_task.\n")
+	sb.WriteString("You can delegate tasks to these specialized actors using submit_task (with actor_tags).\n")
 	sb.WriteString("Use actor_tags to target a specific actor type.\n\n")
 	for _, a := range actors {
 		sb.WriteString(fmt.Sprintf("- **%s** — tags: %v, capabilities: %v\n",

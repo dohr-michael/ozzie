@@ -4,14 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
-
-	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
 // SkillCatalog provides read-only access to skills for the native tools.
@@ -26,141 +22,6 @@ type SkillCatalog interface {
 type WorkflowExecutor interface {
 	RunWorkflow(ctx context.Context, skillName string, vars map[string]string) (string, error)
 }
-
-// --- activate_skill tool ---
-
-// ActivateSkillTool loads a skill's instructions and activates its allowed tools.
-type ActivateSkillTool struct {
-	catalog   SkillCatalog
-	activator ToolActivator
-	registry  *ToolRegistry
-}
-
-// NewActivateSkillTool creates a new activate_skill tool.
-func NewActivateSkillTool(catalog SkillCatalog, activator ToolActivator, registry *ToolRegistry) *ActivateSkillTool {
-	return &ActivateSkillTool{
-		catalog:   catalog,
-		activator: activator,
-		registry:  registry,
-	}
-}
-
-// ActivateSkillManifest returns the plugin manifest for the activate_skill tool.
-func ActivateSkillManifest() *PluginManifest {
-	return &PluginManifest{
-		Name:        "activate_skill",
-		Description: "Load a skill's full instructions and activate its tools",
-		Level:       "tool",
-		Provider:    "native",
-		Dangerous:   false,
-		Tools: []ToolSpec{
-			{
-				Name:        "activate_skill",
-				Description: "Load a skill's full instructions for progressive disclosure. Returns the skill's SKILL.md body, activates its allowed tools, and lists available resources (scripts, references, assets). For skills with a workflow, use run_workflow to execute the structured DAG.",
-				Parameters: map[string]ParamSpec{
-					"name": {
-						Type:        "string",
-						Description: "The name of the skill to activate",
-						Required:    true,
-					},
-				},
-			},
-		},
-	}
-}
-
-type activateSkillInput struct {
-	Name string `json:"name"`
-}
-
-type activateSkillOutput struct {
-	Body          string   `json:"body"`
-	ActivatedTools []string `json:"activated_tools,omitempty"`
-	Resources     []string `json:"resources,omitempty"`
-	HasWorkflow   bool     `json:"has_workflow"`
-}
-
-// Info returns the tool info for Eino registration.
-func (t *ActivateSkillTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return toolSpecToToolInfo(&ActivateSkillManifest().Tools[0]), nil
-}
-
-// InvokableRun loads the skill body and activates its tools.
-func (t *ActivateSkillTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
-	sessionID := events.SessionIDFromContext(ctx)
-
-	var input activateSkillInput
-	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("activate_skill: parse input: %w", err)
-	}
-
-	if input.Name == "" {
-		return "", fmt.Errorf("activate_skill: name is required")
-	}
-
-	body, allowedTools, hasWorkflow, dir, err := t.catalog.SkillBody(input.Name)
-	if err != nil {
-		return "", fmt.Errorf("activate_skill: %w", err)
-	}
-
-	var out activateSkillOutput
-	out.Body = body
-	out.HasWorkflow = hasWorkflow
-
-	// Activate allowed tools
-	if sessionID != "" && len(allowedTools) > 0 {
-		for _, toolName := range allowedTools {
-			if t.activator.IsKnown(toolName) {
-				if t.activator.Activate(sessionID, toolName) {
-					out.ActivatedTools = append(out.ActivatedTools, toolName)
-				}
-			}
-		}
-	}
-
-	// Auto-activate run_workflow if the skill has a workflow DAG
-	if sessionID != "" && hasWorkflow {
-		if t.activator.IsKnown("run_workflow") {
-			if t.activator.Activate(sessionID, "run_workflow") {
-				out.ActivatedTools = append(out.ActivatedTools, "run_workflow")
-			}
-		}
-	}
-
-	// List resources in scripts/, references/, assets/
-	out.Resources = listResources(dir)
-
-	result, err := json.Marshal(out)
-	if err != nil {
-		return "", fmt.Errorf("activate_skill: marshal result: %w", err)
-	}
-	return string(result), nil
-}
-
-// listResources scans optional subdirectories for resources.
-func listResources(dir string) []string {
-	if dir == "" {
-		return nil
-	}
-
-	var resources []string
-	for _, subDir := range []string{"scripts", "references", "assets"} {
-		fullPath := filepath.Join(dir, subDir)
-		entries, err := os.ReadDir(fullPath)
-		if err != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			resources = append(resources, filepath.Join(subDir, entry.Name()))
-		}
-	}
-	return resources
-}
-
-var _ tool.InvokableTool = (*ActivateSkillTool)(nil)
 
 // --- run_workflow tool ---
 

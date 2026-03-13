@@ -22,7 +22,7 @@ func TestSubAgentInstructions_ContainsKeySections(t *testing.T) {
 }
 
 func TestSubAgentInstructions_ContainsToolNames(t *testing.T) {
-	tools := []string{"ls", "read_file", "write_file", "edit_file", "run_command", "query_memories"}
+	tools := []string{"ls", "read_file", "write_file", "edit_file", "run_command"}
 	for _, tool := range tools {
 		if !strings.Contains(prompt.SubAgentInstructions, tool) {
 			t.Errorf("SubAgentInstructions missing tool %q", tool)
@@ -36,8 +36,8 @@ func TestSubAgentInstructions_ContainsActionDirective(t *testing.T) {
 	}
 }
 
-func TestAgentInstructions_ContainsMemoryProtocol(t *testing.T) {
-	keywords := []string{"Memory Protocol", "query_memories", "store_memory"}
+func TestAgentInstructions_ContainsMemorySection(t *testing.T) {
+	keywords := []string{"### Memory", "store_memory", "auto"}
 	for _, kw := range keywords {
 		if !strings.Contains(prompt.AgentInstructions, kw) {
 			t.Errorf("AgentInstructions missing keyword %q", kw)

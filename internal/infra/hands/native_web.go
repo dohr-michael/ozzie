@@ -233,6 +233,104 @@ func WebFetchManifest() *PluginManifest {
 }
 
 // ---------------------------------------------------------------------------
+// web (unified web_fetch + web_search)
+// ---------------------------------------------------------------------------
+
+// WebTool is a unified web tool: fetch a URL or search the web.
+type WebTool struct {
+	search tool.InvokableTool // may be nil if search is disabled
+	fetch  *WebFetchTool      // may be nil if fetch is disabled
+}
+
+// NewWebTool creates a unified web tool from optional search and fetch tools.
+func NewWebTool(search tool.InvokableTool, fetch *WebFetchTool) *WebTool {
+	return &WebTool{search: search, fetch: fetch}
+}
+
+// WebManifest returns the plugin manifest for the unified web tool.
+func WebManifest() *PluginManifest {
+	return &PluginManifest{
+		Name:        ToolWeb,
+		Description: "Fetch a URL or search the web",
+		Level:       "tool",
+		Provider:    "native",
+		Dangerous:   true,
+		Capabilities: PluginCapabilities{
+			HTTP: true,
+		},
+		Tools: []ToolSpec{
+			{
+				Name:        ToolWeb,
+				Description: "Fetch a URL or search the web. Provide exactly one of url or query. With url: fetches the page and returns text content. With query: searches the web and returns results.",
+				Parameters: map[string]ParamSpec{
+					"url": {
+						Type:        "string",
+						Description: "URL to fetch (mutually exclusive with query)",
+					},
+					"query": {
+						Type:        "string",
+						Description: "Search query (mutually exclusive with url)",
+					},
+					"prompt": {
+						Type:        "string",
+						Description: "Optional prompt describing what information to look for (fetch mode only)",
+					},
+				},
+				Dangerous: true,
+			},
+		},
+	}
+}
+
+type webInput struct {
+	URL    string `json:"url"`
+	Query  string `json:"query"`
+	Prompt string `json:"prompt,omitempty"`
+}
+
+// Info returns the tool info for Eino registration.
+func (t *WebTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return toolSpecToToolInfo(&WebManifest().Tools[0]), nil
+}
+
+// InvokableRun dispatches to fetch or search based on input.
+func (t *WebTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	var input webInput
+	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
+		return "", fmt.Errorf("web: parse input: %w", err)
+	}
+
+	hasURL := input.URL != ""
+	hasQuery := input.Query != ""
+
+	if hasURL && hasQuery {
+		return "", fmt.Errorf("web: provide exactly one of url or query, not both")
+	}
+	if !hasURL && !hasQuery {
+		return "", fmt.Errorf("web: provide either url or query")
+	}
+
+	if hasURL {
+		if t.fetch == nil {
+			return "", fmt.Errorf("web: fetch is not enabled")
+		}
+		// Delegate to web_fetch
+		fetchArgs, _ := json.Marshal(webFetchInput{URL: input.URL, Prompt: input.Prompt})
+		return t.fetch.InvokableRun(ctx, string(fetchArgs), opts...)
+	}
+
+	// Search mode
+	if t.search == nil {
+		return "", fmt.Errorf("web: search is not enabled")
+	}
+	// Delegate to web_search — pass the query in the expected format
+	searchArgs, _ := json.Marshal(map[string]string{"query": input.Query})
+	return t.search.InvokableRun(ctx, string(searchArgs), opts...)
+}
+
+var _ tool.InvokableTool = (*WebTool)(nil)
+
+// ---------------------------------------------------------------------------
 // Provider-specific constructors (lazy imports via eino-ext)
 // ---------------------------------------------------------------------------
 

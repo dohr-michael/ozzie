@@ -567,24 +567,24 @@ func (m *mockActivator) Activate(sessionID, name string) bool {
 	return true
 }
 
-func TestActivateToolsTool_Info(t *testing.T) {
+func TestActivateTool_Registry_Info(t *testing.T) {
 	activator := newMockActivator(nil)
 	bus := events.NewBus(16)
 	defer bus.Close()
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	at := NewActivateToolsTool(activator, registry)
+	at := NewActivateTool(activator, registry, nil)
 	info, err := at.Info(context.Background())
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if info.Name != "activate_tools" {
-		t.Errorf("Name = %q, want %q", info.Name, "activate_tools")
+	if info.Name != ToolActivate {
+		t.Errorf("Name = %q, want %q", info.Name, ToolActivate)
 	}
 }
 
-func TestActivateToolsTool_ActivateKnown(t *testing.T) {
+func TestActivateTool_Registry_ActivateKnown(t *testing.T) {
 	activator := newMockActivator([]string{"run_command", "git"})
 	bus := events.NewBus(16)
 	defer bus.Close()
@@ -596,7 +596,7 @@ func TestActivateToolsTool_ActivateKnown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	at := NewActivateToolsTool(activator, registry)
+	at := NewActivateTool(activator, registry, nil)
 	ctx := events.ContextWithSessionID(context.Background(), "sess1")
 
 	result, err := at.InvokableRun(ctx, `{"names": ["run_command"]}`)
@@ -611,47 +611,47 @@ func TestActivateToolsTool_ActivateKnown(t *testing.T) {
 	}
 }
 
-func TestActivateToolsTool_ActivateUnknown(t *testing.T) {
+func TestActivateTool_Registry_ActivateUnknown(t *testing.T) {
 	activator := newMockActivator([]string{"search"})
 	bus := events.NewBus(16)
 	defer bus.Close()
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	at := NewActivateToolsTool(activator, registry)
+	at := NewActivateTool(activator, registry, nil)
 	ctx := events.ContextWithSessionID(context.Background(), "sess1")
 
 	result, err := at.InvokableRun(ctx, `{"names": ["nonexistent"]}`)
 	if err != nil {
 		t.Fatalf("InvokableRun: %v", err)
 	}
-	if !strings.Contains(result, "unknown tool") {
-		t.Errorf("result %q does not contain error for unknown tool", result)
+	if !strings.Contains(result, "unknown tool or skill") {
+		t.Errorf("result %q does not contain error for unknown tool/skill", result)
 	}
 }
 
-func TestActivateToolsTool_NoSessionID(t *testing.T) {
+func TestActivateTool_Registry_NoSessionID(t *testing.T) {
 	activator := newMockActivator([]string{"search"})
 	bus := events.NewBus(16)
 	defer bus.Close()
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	at := NewActivateToolsTool(activator, registry)
+	at := NewActivateTool(activator, registry, nil)
 	_, err := at.InvokableRun(context.Background(), `{"names": ["search"]}`)
 	if err == nil {
 		t.Error("expected error for missing session ID")
 	}
 }
 
-func TestActivateToolsTool_EmptyNames(t *testing.T) {
+func TestActivateTool_Registry_EmptyNames(t *testing.T) {
 	activator := newMockActivator([]string{"search"})
 	bus := events.NewBus(16)
 	defer bus.Close()
 	registry := NewToolRegistry(bus)
 	defer registry.Close(context.Background())
 
-	at := NewActivateToolsTool(activator, registry)
+	at := NewActivateTool(activator, registry, nil)
 	ctx := events.ContextWithSessionID(context.Background(), "sess1")
 
 	_, err := at.InvokableRun(ctx, `{"names": []}`)

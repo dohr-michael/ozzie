@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -39,24 +40,23 @@ func NewSubmitTaskTool(pool tasks.TaskSubmitter, registry *ToolRegistry, perms *
 func SubmitTaskManifest() *PluginManifest {
 	return &PluginManifest{
 		Name:        "submit_task",
-		Description: "Submit an async task for background execution",
+		Description: "Submit an async task or multi-step plan for background execution",
 		Level:       "tool",
 		Provider:    "native",
 		Dangerous:   false,
 		Tools: []ToolSpec{
 			{
 				Name:        "submit_task",
-				Description: "Submit a task for asynchronous background execution by a sub-agent. Returns the task ID immediately. Use check_task to monitor progress. Prefer this over plan_task for single tasks or simple sequential work.",
+				Description: "Submit a task for asynchronous background execution by a sub-agent. Returns the task ID immediately. Use query_tasks to monitor progress. For multi-step plans with dependencies, provide steps[] instead of title/description.",
 				Parameters: map[string]ParamSpec{
 					"title": {
 						Type:        "string",
-						Description: "Short title for the task",
+						Description: "Short title for the task (required for single task, optional plan title for steps)",
 						Required:    true,
 					},
 					"description": {
 						Type:        "string",
-						Description: "Detailed description of what the task should accomplish",
-						Required:    true,
+						Description: "Detailed description of what the task should accomplish (required for single task, ignored when steps is provided)",
 					},
 					"tools": {
 						Type:        "array",
@@ -95,6 +95,45 @@ func SubmitTaskManifest() *PluginManifest {
 						Type:        "object",
 						Description: "Per-tool argument constraints. Map of tool name to constraint object with fields: allowed_commands, allowed_patterns, blocked_patterns, allowed_paths, allowed_domains.",
 					},
+					"steps": {
+						Type:        "array",
+						Description: "Multi-step plan: ordered list of steps with dependencies. Steps with no depends_on run in parallel. When provided, this creates multiple sub-tasks instead of a single task.",
+						Items: &ParamSpec{
+							Type: "object",
+							Properties: map[string]ParamSpec{
+								"title": {
+									Type:        "string",
+									Description: "Short title for this step",
+									Required:    true,
+								},
+								"description": {
+									Type:        "string",
+									Description: "Detailed description of what this step should accomplish",
+									Required:    true,
+								},
+								"tools": {
+									Type:        "array",
+									Description: "Tool names this step is allowed to use",
+									Items:       &ParamSpec{Type: "string"},
+								},
+								"depends_on": {
+									Type:        "array",
+									Description: "Indices (0-based) of steps that must complete before this step can start.",
+									Items:       &ParamSpec{Type: "integer"},
+								},
+								"actor_tags": {
+									Type:        "array",
+									Description: "Tags to match actors for this step.",
+									Items:       &ParamSpec{Type: "string"},
+								},
+								"required_capabilities": {
+									Type:        "array",
+									Description: "Required model capabilities for this step.",
+									Items:       &ParamSpec{Type: "string"},
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -113,6 +152,17 @@ type submitTaskInput struct {
 	ActorTags            []string                          `json:"actor_tags,omitempty"`
 	RequiredCapabilities []string                          `json:"required_capabilities,omitempty"`
 	ToolConstraints      map[string]*events.ToolConstraint `json:"tool_constraints,omitempty"`
+	Steps                []planStep                        `json:"steps,omitempty"`
+}
+
+// planStep represents a single step in a multi-step plan.
+type planStep struct {
+	Title                string   `json:"title"`
+	Description          string   `json:"description"`
+	Tools                []string `json:"tools,omitempty"`
+	DependsOn            []int    `json:"depends_on,omitempty"`
+	ActorTags            []string `json:"actor_tags,omitempty"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
@@ -121,11 +171,16 @@ type submitTaskInput struct {
 func (t *SubmitTaskTool) Info(_ context.Context) (*schema.ToolInfo, error) {
 	manifest := SubmitTaskManifest()
 	spec := &manifest.Tools[0]
-	enrichActorParamDescriptions(spec, t.pool.AvailableActors())
+	actors := t.pool.AvailableActors()
+	enrichActorParamDescriptions(spec, actors)
+	// Also enrich step-level actor params
+	if stepsParam, ok := spec.Parameters["steps"]; ok && stepsParam.Items != nil {
+		enrichActorParamDescriptions(&ToolSpec{Parameters: stepsParam.Items.Properties}, actors)
+	}
 	return toolSpecToToolInfo(spec), nil
 }
 
-// InvokableRun submits a task and returns the task ID.
+// InvokableRun submits a task (or multi-step plan) and returns the task ID(s).
 func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	var input submitTaskInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
@@ -134,10 +189,21 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	if input.Title == "" {
 		return "", fmt.Errorf("submit_task: title is required")
 	}
+
+	// Multi-step plan mode
+	if len(input.Steps) > 0 {
+		return t.runPlan(ctx, input)
+	}
+
 	if input.Description == "" {
 		return "", fmt.Errorf("submit_task: description is required")
 	}
 
+	return t.runSingle(ctx, input)
+}
+
+// runSingle submits a single task.
+func (t *SubmitTaskTool) runSingle(ctx context.Context, input submitTaskInput) (string, error) {
 	priority := tasks.PriorityNormal
 	if input.Priority != "" {
 		priority = tasks.TaskPriority(input.Priority)
@@ -146,31 +212,26 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	sessionID := events.SessionIDFromContext(ctx)
 
 	tools := input.Tools
-	// Default tools: if none specified and not a skill task, provide base action tools
 	if len(tools) == 0 && input.Skill == "" {
 		tools = DefaultTaskTools
 	}
 
-	// Pre-approve dangerous tools before submitting
 	if t.registry != nil && t.perms != nil && t.bus != nil {
 		if err := t.preApproveDangerousTools(ctx, sessionID, tools); err != nil {
 			return "", fmt.Errorf("submit_task: %w", err)
 		}
 	}
 
-	// Inherit parent session's WorkDir if not explicitly set
 	workDir := input.WorkDir
 	if workDir == "" {
 		workDir = events.WorkDirFromContext(ctx)
 	}
 
-	// Resolve relative work_dir to absolute so sub-agents find the directory
 	workDir, err := resolveAbsWorkDir(workDir, "submit_task")
 	if err != nil {
 		return "", err
 	}
 
-	// Merge tool constraints: session constraints + task-specific (intersection)
 	sessionConstraints := events.ToolConstraintsFromContext(ctx)
 	taskConstraints := events.MergeToolConstraints(sessionConstraints, input.ToolConstraints)
 
@@ -192,8 +253,6 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 		},
 	}
 
-	// Inline execution: when the pool has a single actor, async submission
-	// would deadlock. Execute synchronously instead.
 	if inliner, ok := t.pool.(tasks.InlineExecutor); ok && inliner.ShouldInline() {
 		output, err := inliner.ExecuteInline(ctx, task)
 		if err != nil {
@@ -226,6 +285,189 @@ func (t *SubmitTaskTool) InvokableRun(ctx context.Context, argumentsInJSON strin
 	return string(result), nil
 }
 
+// inlinePlanResult is the JSON shape returned by inline plan execution.
+type inlinePlanResult struct {
+	PlanID string            `json:"plan_id"`
+	Title  string            `json:"title"`
+	Status string            `json:"status"`
+	Tasks  []inlinePlanEntry `json:"tasks"`
+}
+
+type inlinePlanEntry struct {
+	Step   int    `json:"step"`
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+	Status string `json:"status"`
+	Output string `json:"output,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+// planTaskResult is the JSON shape for async plan submissions.
+type planTaskResult struct {
+	PlanID string          `json:"plan_id"`
+	Title  string          `json:"title"`
+	Tasks  []planTaskEntry `json:"tasks"`
+}
+
+type planTaskEntry struct {
+	Step   int    `json:"step"`
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+// runPlan creates a multi-step plan with dependent sub-tasks.
+func (t *SubmitTaskTool) runPlan(ctx context.Context, input submitTaskInput) (string, error) {
+	// Validate steps
+	for i, step := range input.Steps {
+		for _, dep := range step.DependsOn {
+			if dep < 0 || dep >= i {
+				return "", fmt.Errorf("submit_task: step %d has invalid depends_on index %d (must be 0..%d)", i, dep, i-1)
+			}
+		}
+	}
+
+	resolved, err := resolveAbsWorkDir(input.WorkDir, "submit_task")
+	if err != nil {
+		return "", err
+	}
+	input.WorkDir = resolved
+
+	sessionID := events.SessionIDFromContext(ctx)
+
+	// Inline execution for single-actor pools
+	if inliner, ok := t.pool.(tasks.InlineExecutor); ok && inliner.ShouldInline() {
+		return t.runPlanInline(ctx, inliner, input, sessionID)
+	}
+
+	return t.runPlanAsync(input, sessionID)
+}
+
+func (t *SubmitTaskTool) runPlanInline(ctx context.Context, inliner tasks.InlineExecutor, input submitTaskInput, sessionID string) (string, error) {
+	taskIDs := make([]string, len(input.Steps))
+	results := make([]inlinePlanEntry, len(input.Steps))
+	overallStatus := "completed"
+
+	for i, step := range input.Steps {
+		var deps []string
+		for _, dep := range step.DependsOn {
+			deps = append(deps, taskIDs[dep])
+		}
+
+		tools := step.Tools
+		if len(tools) == 0 {
+			tools = DefaultTaskTools
+		}
+
+		task := &tasks.Task{
+			SessionID:   sessionID,
+			Title:       step.Title,
+			Description: step.Description,
+			DependsOn:   deps,
+			Tags:        step.ActorTags,
+			Config: tasks.TaskConfig{
+				Tools:                tools,
+				WorkDir:              input.WorkDir,
+				Env:                  input.Env,
+				RequiredTags:         step.ActorTags,
+				RequiredCapabilities: step.RequiredCapabilities,
+			},
+		}
+
+		output, err := inliner.ExecuteInline(ctx, task)
+		taskIDs[i] = task.ID
+
+		entry := inlinePlanEntry{
+			Step:   i,
+			TaskID: task.ID,
+			Title:  step.Title,
+		}
+
+		if err != nil {
+			entry.Status = "failed"
+			entry.Error = err.Error()
+			overallStatus = "failed"
+			results[i] = entry
+			results = results[:i+1]
+			break
+		}
+
+		if len(output) > 2000 {
+			output = output[:2000] + "..."
+		}
+		entry.Status = "completed"
+		entry.Output = output
+		results[i] = entry
+	}
+
+	planID := "plan_" + strings.TrimPrefix(taskIDs[0], "task_")
+
+	result, err := json.Marshal(inlinePlanResult{
+		PlanID: planID,
+		Title:  input.Title,
+		Status: overallStatus,
+		Tasks:  results,
+	})
+	if err != nil {
+		return "", fmt.Errorf("submit_task: marshal plan result: %w", err)
+	}
+	return string(result), nil
+}
+
+func (t *SubmitTaskTool) runPlanAsync(input submitTaskInput, sessionID string) (string, error) {
+	taskIDs := make([]string, len(input.Steps))
+	entries := make([]planTaskEntry, len(input.Steps))
+
+	for i, step := range input.Steps {
+		var deps []string
+		for _, dep := range step.DependsOn {
+			deps = append(deps, taskIDs[dep])
+		}
+
+		tools := step.Tools
+		if len(tools) == 0 {
+			tools = DefaultTaskTools
+		}
+
+		task := &tasks.Task{
+			SessionID:   sessionID,
+			Title:       step.Title,
+			Description: step.Description,
+			DependsOn:   deps,
+			Tags:        step.ActorTags,
+			Config: tasks.TaskConfig{
+				Tools:                tools,
+				WorkDir:              input.WorkDir,
+				Env:                  input.Env,
+				RequiredTags:         step.ActorTags,
+				RequiredCapabilities: step.RequiredCapabilities,
+			},
+		}
+
+		if err := t.pool.Submit(task); err != nil {
+			return "", fmt.Errorf("submit_task: submit step %d: %w", i, err)
+		}
+
+		taskIDs[i] = task.ID
+		entries[i] = planTaskEntry{
+			Step:   i,
+			TaskID: task.ID,
+			Title:  step.Title,
+		}
+	}
+
+	planID := "plan_" + strings.TrimPrefix(taskIDs[0], "task_")
+
+	result, err := json.Marshal(planTaskResult{
+		PlanID: planID,
+		Title:  input.Title,
+		Tasks:  entries,
+	})
+	if err != nil {
+		return "", fmt.Errorf("submit_task: marshal plan: %w", err)
+	}
+	return string(result), nil
+}
+
 // preApproveDangerousTools checks if any tools in the list are dangerous and
 // not yet approved. If so, prompts the user for batch approval before submit.
 func (t *SubmitTaskTool) preApproveDangerousTools(ctx context.Context, sessionID string, toolNames []string) error {
@@ -251,36 +493,44 @@ func (t *SubmitTaskTool) preApproveDangerousTools(ctx context.Context, sessionID
 var _ tool.InvokableTool = (*SubmitTaskTool)(nil)
 
 // =============================================================================
-// check_task
+// query_tasks (unified check_task + list_tasks)
 // =============================================================================
 
-// CheckTaskTool retrieves the status and progress of a task.
-type CheckTaskTool struct {
+// QueryTasksTool retrieves task status (by ID) or lists tasks (by filter).
+type QueryTasksTool struct {
 	store tasks.Store
 }
 
-// NewCheckTaskTool creates a new check_task tool.
-func NewCheckTaskTool(store tasks.Store) *CheckTaskTool {
-	return &CheckTaskTool{store: store}
+// NewQueryTasksTool creates a new query_tasks tool.
+func NewQueryTasksTool(store tasks.Store) *QueryTasksTool {
+	return &QueryTasksTool{store: store}
 }
 
-// CheckTaskManifest returns the plugin manifest for the check_task tool.
-func CheckTaskManifest() *PluginManifest {
+// QueryTasksManifest returns the plugin manifest for the query_tasks tool.
+func QueryTasksManifest() *PluginManifest {
 	return &PluginManifest{
-		Name:        "check_task",
-		Description: "Check the status and progress of a submitted task",
+		Name:        ToolQueryTasks,
+		Description: "Query tasks: check a single task by ID or list tasks with filters",
 		Level:       "tool",
 		Provider:    "native",
 		Dangerous:   false,
 		Tools: []ToolSpec{
 			{
-				Name:        "check_task",
-				Description: "Check the status, progress, and output of an async task by its ID.",
+				Name:        ToolQueryTasks,
+				Description: "Query tasks. If task_id is provided, returns detailed status for that task. Otherwise lists tasks with optional filters (max 20, sorted by date).",
 				Parameters: map[string]ParamSpec{
 					"task_id": {
 						Type:        "string",
-						Description: "The task ID to check",
-						Required:    true,
+						Description: "Single task ID to get detailed status (optional)",
+					},
+					"status": {
+						Type:        "string",
+						Description: "Filter by status: pending, running, completed, failed, cancelled",
+						Enum:        []string{"pending", "running", "completed", "failed", "cancelled"},
+					},
+					"session_id": {
+						Type:        "string",
+						Description: "Filter by session ID",
 					},
 				},
 			},
@@ -288,11 +538,14 @@ func CheckTaskManifest() *PluginManifest {
 	}
 }
 
-type checkTaskInput struct {
-	TaskID string `json:"task_id"`
+type queryTasksInput struct {
+	TaskID    string `json:"task_id"`
+	Status    string `json:"status"`
+	SessionID string `json:"session_id"`
 }
 
-type checkTaskOutput struct {
+// queryTaskDetailOutput is the output for single-task detail mode.
+type queryTaskDetailOutput struct {
 	ID           string             `json:"id"`
 	Title        string             `json:"title"`
 	Status       tasks.TaskStatus   `json:"status"`
@@ -303,55 +556,98 @@ type checkTaskOutput struct {
 	Error        string             `json:"error,omitempty"`
 }
 
-// Info returns the tool info for Eino registration.
-func (t *CheckTaskTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return toolSpecToToolInfo(&CheckTaskManifest().Tools[0]), nil
+// queryTaskListEntry is an entry in the task list output.
+type queryTaskListEntry struct {
+	ID        string             `json:"id"`
+	Title     string             `json:"title"`
+	Status    tasks.TaskStatus   `json:"status"`
+	Progress  tasks.TaskProgress `json:"progress"`
+	DependsOn []string           `json:"depends_on,omitempty"`
+	CreatedAt string             `json:"created_at"`
 }
 
-// InvokableRun checks a task's status and returns it.
-func (t *CheckTaskTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
-	var input checkTaskInput
+// Info returns the tool info for Eino registration.
+func (t *QueryTasksTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return toolSpecToToolInfo(&QueryTasksManifest().Tools[0]), nil
+}
+
+// InvokableRun queries tasks: single task detail or filtered list.
+func (t *QueryTasksTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	var input queryTasksInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("check_task: parse input: %w", err)
-	}
-	if input.TaskID == "" {
-		return "", fmt.Errorf("check_task: task_id is required")
+		return "", fmt.Errorf("query_tasks: parse input: %w", err)
 	}
 
-	task, err := t.store.Get(input.TaskID)
-	if err != nil {
-		return "", fmt.Errorf("check_task: %w", err)
-	}
-
-	out := checkTaskOutput{
-		ID:           task.ID,
-		Title:        task.Title,
-		Status:       task.Status,
-		Progress:     task.Progress,
-		ActorID:      task.ActorID,
-		ProviderName: task.ProviderName,
-	}
-
-	if task.Status == tasks.TaskCompleted {
-		output, _ := t.store.ReadOutput(task.ID)
-		if len(output) > 500 {
-			output = output[:500] + "..."
+	// Single task detail mode
+	if input.TaskID != "" {
+		task, err := t.store.Get(input.TaskID)
+		if err != nil {
+			return "", fmt.Errorf("query_tasks: %w", err)
 		}
-		out.Output = output
+
+		out := queryTaskDetailOutput{
+			ID:           task.ID,
+			Title:        task.Title,
+			Status:       task.Status,
+			Progress:     task.Progress,
+			ActorID:      task.ActorID,
+			ProviderName: task.ProviderName,
+		}
+
+		if task.Status == tasks.TaskCompleted {
+			output, _ := t.store.ReadOutput(task.ID)
+			if len(output) > 500 {
+				output = output[:500] + "..."
+			}
+			out.Output = output
+		}
+
+		if task.Result != nil && task.Result.Error != "" {
+			out.Error = task.Result.Error
+		}
+
+		result, err := json.Marshal(out)
+		if err != nil {
+			return "", fmt.Errorf("query_tasks: marshal: %w", err)
+		}
+		return string(result), nil
 	}
 
-	if task.Result != nil && task.Result.Error != "" {
-		out.Error = task.Result.Error
+	// List mode
+	filter := tasks.ListFilter{
+		Status:    tasks.TaskStatus(input.Status),
+		SessionID: input.SessionID,
 	}
 
-	result, err := json.Marshal(out)
+	all, err := t.store.List(filter)
 	if err != nil {
-		return "", fmt.Errorf("check_task: marshal: %w", err)
+		return "", fmt.Errorf("query_tasks: %w", err)
+	}
+
+	if len(all) > 20 {
+		all = all[:20]
+	}
+
+	entries := make([]queryTaskListEntry, len(all))
+	for i, task := range all {
+		entries[i] = queryTaskListEntry{
+			ID:        task.ID,
+			Title:     task.Title,
+			Status:    task.Status,
+			Progress:  task.Progress,
+			DependsOn: task.DependsOn,
+			CreatedAt: task.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		}
+	}
+
+	result, err := json.Marshal(entries)
+	if err != nil {
+		return "", fmt.Errorf("query_tasks: marshal: %w", err)
 	}
 	return string(result), nil
 }
 
-var _ tool.InvokableTool = (*CheckTaskTool)(nil)
+var _ tool.InvokableTool = (*QueryTasksTool)(nil)
 
 // =============================================================================
 // cancel_task

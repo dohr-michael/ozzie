@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
@@ -11,43 +13,49 @@ import (
 	"github.com/dohr-michael/ozzie/internal/core/events"
 )
 
-// ToolActivator is the interface that activate_tools uses to activate tools.
+// ToolActivator is the interface that activate uses to activate tools.
 // Implemented by brain.ToolSet (duck typing).
 type ToolActivator interface {
 	Activate(sessionID, toolName string) bool
 	IsKnown(toolName string) bool
 }
 
-// ActivateToolsTool allows the agent to activate additional tools at runtime.
-type ActivateToolsTool struct {
+// =============================================================================
+// activate (unified tool + skill activation)
+// =============================================================================
+
+// ActivateTool allows the agent to activate tools or skills at runtime.
+type ActivateTool struct {
 	activator ToolActivator
 	registry  *ToolRegistry
+	catalog   SkillCatalog // optional — nil if no skills
 }
 
-// NewActivateToolsTool creates a new activate_tools tool.
-func NewActivateToolsTool(activator ToolActivator, registry *ToolRegistry) *ActivateToolsTool {
-	return &ActivateToolsTool{
+// NewActivateTool creates a new activate tool.
+func NewActivateTool(activator ToolActivator, registry *ToolRegistry, catalog SkillCatalog) *ActivateTool {
+	return &ActivateTool{
 		activator: activator,
 		registry:  registry,
+		catalog:   catalog,
 	}
 }
 
-// ActivateToolsManifest returns the plugin manifest for the activate_tools tool.
-func ActivateToolsManifest() *PluginManifest {
+// ActivateManifest returns the plugin manifest for the activate tool.
+func ActivateManifest() *PluginManifest {
 	return &PluginManifest{
-		Name:        "activate_tools",
-		Description: "Activate additional tools for the current session",
+		Name:        ToolActivate,
+		Description: "Activate tools or skills for the current session",
 		Level:       "tool",
 		Provider:    "native",
 		Dangerous:   false,
 		Tools: []ToolSpec{
 			{
-				Name:        "activate_tools",
-				Description: "Activate additional tools to make them available for use. Call this when you need a tool that is listed under 'Available Tools' but not yet active. The newly activated tools will be available on your next message.",
+				Name:        ToolActivate,
+				Description: "Activate additional tools or skills to make them available. For tools: activates them for use on the next message. For skills: loads the skill's instructions and activates its allowed tools. Skills with a workflow will also activate run_workflow.",
 				Parameters: map[string]ParamSpec{
 					"names": {
 						Type:        "array",
-						Description: "List of tool names to activate (e.g. [\"search\", \"git\"])",
+						Description: "List of tool or skill names to activate (e.g. [\"docker_build\", \"deploy\"])",
 						Required:    true,
 					},
 				},
@@ -56,66 +64,131 @@ func ActivateToolsManifest() *PluginManifest {
 	}
 }
 
-type activateToolsInput struct {
+type activateInput struct {
 	Names []string `json:"names"`
 }
 
-type activateToolsOutput struct {
-	Activated []activatedToolInfo `json:"activated"`
-	Errors    []string            `json:"errors,omitempty"`
+type activateOutput struct {
+	Activated []activatedEntry `json:"activated"`
+	Errors    []string         `json:"errors,omitempty"`
 }
 
-type activatedToolInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+type activatedEntry struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"` // "tool" or "skill"
+	Description string   `json:"description,omitempty"`
+	Body        string   `json:"body,omitempty"`         // skill body (instructions)
+	Tools       []string `json:"tools,omitempty"`         // activated tools (skill)
+	Resources   []string `json:"resources,omitempty"`     // skill resources
+	HasWorkflow bool     `json:"has_workflow,omitempty"`
 }
 
 // Info returns the tool info for Eino registration.
-func (t *ActivateToolsTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return toolSpecToToolInfo(&ActivateToolsManifest().Tools[0]), nil
+func (t *ActivateTool) Info(_ context.Context) (*schema.ToolInfo, error) {
+	return toolSpecToToolInfo(&ActivateManifest().Tools[0]), nil
 }
 
-// InvokableRun activates the requested tools and returns their descriptions.
-func (t *ActivateToolsTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+// InvokableRun activates tools or skills by name.
+func (t *ActivateTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	sessionID := events.SessionIDFromContext(ctx)
 	if sessionID == "" {
-		return "", fmt.Errorf("activate_tools: no session in context")
+		return "", fmt.Errorf("activate: no session in context")
 	}
 
-	var input activateToolsInput
+	var input activateInput
 	if err := json.Unmarshal([]byte(argumentsInJSON), &input); err != nil {
-		return "", fmt.Errorf("activate_tools: parse input: %w", err)
+		return "", fmt.Errorf("activate: parse input: %w", err)
 	}
 
 	if len(input.Names) == 0 {
-		return "", fmt.Errorf("activate_tools: names list is empty")
+		return "", fmt.Errorf("activate: names list is empty")
 	}
 
-	var out activateToolsOutput
+	var out activateOutput
 	for _, name := range input.Names {
-		if !t.activator.IsKnown(name) {
-			out.Errors = append(out.Errors, fmt.Sprintf("unknown tool: %q", name))
+		// Try tool first
+		if t.activator.IsKnown(name) {
+			if ok := t.activator.Activate(sessionID, name); !ok {
+				out.Errors = append(out.Errors, fmt.Sprintf("failed to activate tool: %q", name))
+				continue
+			}
+			desc := ""
+			if spec := t.registry.ToolSpec(name); spec != nil {
+				desc = spec.Description
+			}
+			out.Activated = append(out.Activated, activatedEntry{
+				Name:        name,
+				Type:        "tool",
+				Description: desc,
+			})
 			continue
 		}
-		if ok := t.activator.Activate(sessionID, name); !ok {
-			out.Errors = append(out.Errors, fmt.Sprintf("failed to activate: %q", name))
-			continue
+
+		// Try skill
+		if t.catalog != nil {
+			body, allowedTools, hasWorkflow, dir, err := t.catalog.SkillBody(name)
+			if err == nil {
+				entry := activatedEntry{
+					Name:        name,
+					Type:        "skill",
+					Body:        body,
+					HasWorkflow: hasWorkflow,
+					Resources:   listResources(dir),
+				}
+
+				// Activate allowed tools
+				for _, toolName := range allowedTools {
+					if t.activator.IsKnown(toolName) {
+						if t.activator.Activate(sessionID, toolName) {
+							entry.Tools = append(entry.Tools, toolName)
+						}
+					}
+				}
+
+				// Auto-activate run_workflow if skill has a workflow
+				if hasWorkflow && t.activator.IsKnown("run_workflow") {
+					if t.activator.Activate(sessionID, "run_workflow") {
+						entry.Tools = append(entry.Tools, "run_workflow")
+					}
+				}
+
+				out.Activated = append(out.Activated, entry)
+				continue
+			}
 		}
-		desc := ""
-		if spec := t.registry.ToolSpec(name); spec != nil {
-			desc = spec.Description
-		}
-		out.Activated = append(out.Activated, activatedToolInfo{
-			Name:        name,
-			Description: desc,
-		})
+
+		out.Errors = append(out.Errors, fmt.Sprintf("unknown tool or skill: %q", name))
 	}
 
 	result, err := json.Marshal(out)
 	if err != nil {
-		return "", fmt.Errorf("activate_tools: marshal result: %w", err)
+		return "", fmt.Errorf("activate: marshal result: %w", err)
 	}
 	return string(result), nil
 }
 
-var _ tool.InvokableTool = (*ActivateToolsTool)(nil)
+var _ tool.InvokableTool = (*ActivateTool)(nil)
+
+// listResources scans optional subdirectories for resources.
+func listResources(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+
+	var resources []string
+	for _, subDir := range []string{"scripts", "references", "assets"} {
+		fullPath := filepath.Join(dir, subDir)
+		entries, err := os.ReadDir(fullPath)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			resources = append(resources, filepath.Join(subDir, entry.Name()))
+		}
+	}
+	return resources
+}
+

@@ -109,15 +109,22 @@ func NewContextMiddleware(cfg ContextMiddlewareConfig) adk.AgentMiddleware {
 				}
 
 				if memories, err := cfg.Retriever.Retrieve(ctx, query, tags, memLimit); err == nil && len(memories) > 0 {
-					infos := make([]prompt.MemoryInfo, len(memories))
-					for i, m := range memories {
-						infos[i] = prompt.MemoryInfo{
+					// Filter by relevance threshold
+					const relevanceThreshold = 0.3
+					var infos []prompt.MemoryInfo
+					for _, m := range memories {
+						if m.Score < relevanceThreshold {
+							continue
+						}
+						infos = append(infos, prompt.MemoryInfo{
 							Type:    string(m.Entry.Type),
 							Title:   m.Entry.Title,
 							Content: m.Content,
-						}
+						})
 					}
-					dynComposer.AddSection("Memories", prompt.MemorySection(infos, memContentMax))
+					if len(infos) > 0 {
+						dynComposer.AddSection("Memories", prompt.MemorySection(infos, memContentMax))
+					}
 				}
 			}
 		}

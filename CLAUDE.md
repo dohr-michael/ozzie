@@ -64,9 +64,10 @@ Working E2E: `ozzie gateway` → `ozzie ask "hello"` → streamed LLM response w
 
 ## Key concepts
 
-- **ToolSet** — Two-tier tool system: core tools always active, plugin/MCP tools activated on demand via `activate_tools`. Eino ADK freezes tools per-run → `AgentFactory` creates a fresh runner per turn; `EventRunner` retries after activation.
+- **ToolSet** — Two-tier tool system: ~18 core tools always active, plugin/MCP tools activated on demand via `activate`. Eino ADK freezes tools per-run → `AgentFactory` creates a fresh runner per turn; `EventRunner` retries after activation. Unified tools: `activate` (tools + skills), `query_tasks` (check + list), `submit_task` (single + multi-step plan via `steps[]`), `web` (fetch + search).
 - **Dangerous tool approval** — `DangerousToolWrapper` prompts user with 3 options (allow once / always for session / deny). Approvals persisted in `Session.ApprovedTools`, restored on reconnect. Pre-approval via `submit_task` and schedules.
 - **MCP servers** — External MCP servers configured in `config.mcp.servers`. Tools are `dangerous: true` by default. `trusted_tools` bypasses confirmation for specific tools. `allowed_tools` / `denied_tools` for whitelisting/blacklisting.
+- **Implicit memory retrieval** — Relevant memories are automatically injected in context via `middleware_context.go` with a relevance threshold (score >= 0.3). `query_memories` is demoted to plugin tier. `store_memory` and `forget_memory` remain core.
 - **Model drivers** — 5 drivers: `anthropic`, `openai`, `gemini`, `mistral`, `ollama`. Lazy-init via `Registry`. Auth resolution: config → env var → driver default. Gemini uses `google.golang.org/genai` SDK.
 - **Entity IDs** — Human-readable IDs via `pkg/names`: `sess_cosmic_asimov`, `task_stellar_deckard`. The name **is** the ID (no separate hex UUID). `names.GenerateID(prefix, exists)` guarantees uniqueness with `_XXXX` counter suffix. `names.DisplayName(id)` extracts the readable part. SF-themed: ~50 adjectives × ~200 nouns (~10k base combinations).
 - **Memory** — SQLite (modernc.org/sqlite, pure Go) with FTS5 full-text search + brute-force cosine similarity. Markdown files synced as read-only mirror. Multi-level decay (core/important/normal/ephemeral). LLM-based consolidation. Library in `pkg/memory/` (importable), wiring in `internal/infra/membridge/`.

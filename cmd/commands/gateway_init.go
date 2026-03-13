@@ -517,24 +517,14 @@ func (g *gateway) registerTools() {
 		slog.Warn("failed to register submit_task tool", "error", err)
 	}
 
-	checkTool := hands.NewCheckTaskTool(g.taskStore)
-	if err := g.toolRegistry.RegisterNative("check_task", checkTool, hands.CheckTaskManifest()); err != nil {
-		slog.Warn("failed to register check_task tool", "error", err)
+	queryTasksTool := hands.NewQueryTasksTool(g.taskStore)
+	if err := g.toolRegistry.RegisterNative(hands.ToolQueryTasks, queryTasksTool, hands.QueryTasksManifest()); err != nil {
+		slog.Warn("failed to register query_tasks tool", "error", err)
 	}
 
 	cancelTool := hands.NewCancelTaskTool(g.pool)
 	if err := g.toolRegistry.RegisterNative("cancel_task", cancelTool, hands.CancelTaskManifest()); err != nil {
 		slog.Warn("failed to register cancel_task tool", "error", err)
-	}
-
-	planTool := hands.NewPlanTaskTool(g.pool)
-	if err := g.toolRegistry.RegisterNative("plan_task", planTool, hands.PlanTaskManifest()); err != nil {
-		slog.Warn("failed to register plan_task tool", "error", err)
-	}
-
-	listTasksTool := hands.NewListTasksTool(g.taskStore)
-	if err := g.toolRegistry.RegisterNative("list_tasks", listTasksTool, hands.ListTasksManifest()); err != nil {
-		slog.Warn("failed to register list_tasks tool", "error", err)
 	}
 
 	// Register schedule tools
@@ -564,26 +554,34 @@ func (g *gateway) registerTools() {
 		slog.Warn("failed to register approve_pairing tool", "error", err)
 	}
 
-	// ToolSet: all native tools are always active (core).
-	// Only MCP tools require on-demand activation via activate_tools.
-	// Gemini Flash doesn't handle the activate-then-use pattern reliably.
-	coreTools := g.toolRegistry.NativeToolNames()
+	// ToolSet: most native tools are always active (core).
+	// Plugin-only native tools require on-demand activation via activate.
+	pluginOnly := map[string]bool{
+		"unschedule_task":  true,
+		"list_schedules":   true,
+		"trigger_schedule": true,
+		"update_session":   true,
+		"approve_pairing":  true,
+		"web_fetch":        true,
+		"web_search":       true,
+		"query_memories":   true,
+	}
+	all := g.toolRegistry.NativeToolNames()
+	var coreTools []string
+	for _, n := range all {
+		if !pluginOnly[n] {
+			coreTools = append(coreTools, n)
+		}
+	}
 	g.toolSet = brain.NewToolSet(coreTools, g.toolRegistry.ToolNames())
 
-	// Register activate_tools meta-tool (needs toolSet + toolRegistry).
+	// Register unified activate tool (needs toolSet + toolRegistry + skillRegistry).
 	// Registered AFTER NewToolSet, so we must explicitly add it to core.
-	activateTool := hands.NewActivateToolsTool(g.toolSet, g.toolRegistry)
-	if err := g.toolRegistry.RegisterNative("activate_tools", activateTool, hands.ActivateToolsManifest()); err != nil {
-		slog.Warn("failed to register activate_tools tool", "error", err)
+	activateTool := hands.NewActivateTool(g.toolSet, g.toolRegistry, g.skillRegistry)
+	if err := g.toolRegistry.RegisterNative(hands.ToolActivate, activateTool, hands.ActivateManifest()); err != nil {
+		slog.Warn("failed to register activate tool", "error", err)
 	}
-	g.toolSet.RegisterCore("activate_tools")
-
-	// Register activate_skill (core tool — always active, progressive disclosure)
-	activateSkillTool := hands.NewActivateSkillTool(g.skillRegistry, g.toolSet, g.toolRegistry)
-	if err := g.toolRegistry.RegisterNative("activate_skill", activateSkillTool, hands.ActivateSkillManifest()); err != nil {
-		slog.Warn("failed to register activate_skill tool", "error", err)
-	}
-	g.toolSet.RegisterCore("activate_skill")
+	g.toolSet.RegisterCore(hands.ToolActivate)
 
 	// Register run_workflow (on-demand — activated via activate_skill or explicitly)
 	runWorkflowTool := hands.NewRunWorkflowTool(g.skillExecutor)

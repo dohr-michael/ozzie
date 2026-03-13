@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/cloudwego/eino/components/tool"
+
 	"github.com/dohr-michael/ozzie/internal/infra/agent"
 	"github.com/dohr-michael/ozzie/internal/core/brain"
 	"github.com/dohr-michael/ozzie/internal/core/conscience"
@@ -59,23 +61,37 @@ func resolvedNativeManifest(m *PluginManifest) *PluginManifest {
 	return m
 }
 
-// RegisterWebTools registers web_search and web_fetch native tools.
+// RegisterWebTools registers the unified web tool and legacy web_search/web_fetch.
 func RegisterWebTools(ctx context.Context, cfg *config.Config, registry *ToolRegistry) {
+	var searchInner tool.InvokableTool
+	var fetchTool *WebFetchTool
+
 	if cfg.Web.Search.IsSearchEnabled() {
-		searchTool, err := NewWebSearchTool(ctx, cfg.Web.Search)
+		st, err := NewWebSearchTool(ctx, cfg.Web.Search)
 		if err != nil {
 			slog.Warn("failed to create web_search tool", "error", err)
 		} else {
-			if err := registry.RegisterNative("web_search", searchTool, resolvedNativeManifest(WebSearchManifest())); err != nil {
+			searchInner = st
+			// Register legacy web_search (plugin tier)
+			if err := registry.RegisterNative("web_search", st, resolvedNativeManifest(WebSearchManifest())); err != nil {
 				slog.Warn("failed to register web_search tool", "error", err)
 			}
 		}
 	}
 
 	if cfg.Web.Fetch.IsFetchEnabled() {
-		fetchTool := NewWebFetchTool(cfg.Web.Fetch)
+		fetchTool = NewWebFetchTool(cfg.Web.Fetch)
+		// Register legacy web_fetch (plugin tier)
 		if err := registry.RegisterNative("web_fetch", fetchTool, resolvedNativeManifest(WebFetchManifest())); err != nil {
 			slog.Warn("failed to register web_fetch tool", "error", err)
+		}
+	}
+
+	// Register unified web tool if at least one backend is available
+	if searchInner != nil || fetchTool != nil {
+		webTool := NewWebTool(searchInner, fetchTool)
+		if err := registry.RegisterNative(ToolWeb, webTool, resolvedNativeManifest(WebManifest())); err != nil {
+			slog.Warn("failed to register web tool", "error", err)
 		}
 	}
 }

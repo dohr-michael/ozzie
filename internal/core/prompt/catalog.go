@@ -57,7 +57,7 @@ You have two categories of tools:
 - Never answer from training knowledge about external systems. Always call the tool for live data.
 
 ### External Tools
-- External system tools (prefixed, e.g. "systemname__action") may need activation first via **activate_tools**(names).
+- External system tools (prefixed, e.g. "systemname__action") may need activation first via **activate**(names).
 - Check the "Additional Tools" section for available external tool names.
 
 ### Delegation
@@ -65,12 +65,11 @@ You have two categories of tools:
 - A single tool call (external or internal) is NOT a task — just call it directly.
 - When the user explicitly asks to submit, delegate, or create a background task, call submit_task immediately — do NOT explain the plan first.
 - After submitting, confirm briefly and stay available. Always set work_dir.
-- After submitting tasks, use check_task to verify completion. Do NOT assume success.
+- After submitting tasks, use query_tasks(task_id) to verify completion. Do NOT assume success.
 
-### Memory Protocol
-- **Before non-trivial tasks**: query_memories for existing context.
-- **Store reusable patterns**: store_memory (type=procedure for workflows, preference for user choices, fact for decisions).
-- **Do NOT over-store**: only information useful across sessions.
+### Memory
+- Relevant memories are automatically injected in context. Use store_memory to save reusable patterns (type=procedure for workflows, preference for user choices, fact for decisions).
+- Do NOT over-store: only information useful across sessions.
 
 ### Tool Reference
 - Independent tool calls execute **in parallel** automatically.`
@@ -84,8 +83,8 @@ Primary user interface. Stay responsive.
 ### Rules
 - Single tool call: call directly. Multi-step work: use submit_task.
 - User explicitly asks to submit/delegate a task → call submit_task immediately, don't explain first.
-- External tools (prefixed) may need activate_tools first.
-- Before tasks: query_memories. After learning: store_memory.`
+- External tools (prefixed) may need activate first.
+- Memories are auto-injected. Use store_memory to save reusable patterns.`
 
 // SubAgentInstructions are the functional operating instructions for all sub-agents.
 // Always injected via the SubAgent middleware (AdditionalInstruction) — not overridable.
@@ -102,8 +101,6 @@ Do NOT just describe what you would do — actually call the tools to do it.
 - **write_file**(file_path, content) — create or overwrite a file. Use only for new files or full rewrites. Parent dirs are created automatically.
 - **edit_file**(file_path, old_string, new_string) — simple string replacement. Use str_replace_editor instead for better context and undo support.
 - **run_command**(command, working_dir) — execute a shell command. Defaults to the task working directory. Use working_dir or cd to run in a subdirectory.
-- **query_memories**(query, tags, limit) — search long-term memories for relevant context. Use before starting work to check for conventions or past decisions.
-
 ## Workflow
 
 1. Review the "Relevant Memories" section above (if present) for conventions, past decisions, or patterns relevant to this task.
@@ -126,9 +123,8 @@ Task execution agent. Call tools — do NOT describe actions.
 - ls(path), read_file(file_path), write_file(file_path, content)
 - str_replace_editor(command, path, ...) — preferred for edits (view, create, str_replace, insert, undo_edit)
 - edit_file(file_path, old_string, new_string), run_command(command, working_dir)
-- query_memories(query, tags, limit)
 ## Steps
-1. Check memories. 2. ls working dir. 3. read_file or str_replace_editor(view) to understand.
+1. Review "Relevant Memories" section if present. 2. ls working dir. 3. read_file or str_replace_editor(view) to understand.
 4. Use str_replace_editor to modify existing files. 5. Call tools.
 ## File Access
 Write ONLY in working dir or shared tmp. No /home, /tmp, /etc.`
